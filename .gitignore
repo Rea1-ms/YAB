@@ -9,6 +9,7 @@ config/
 error.log
 output.log
 setup.toml
+core/ocr/baas_ocr_client/bin/
 
 # webapp
 webapp/node_modules/
