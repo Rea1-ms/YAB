@@ -1,10 +1,7 @@
 import json
 import os
-import re
 from core.config.generated_user_config import Config
 from core.config.generated_static_config import StaticConfig
-from gui.util.customized_ui import BoundComponent
-from gui.util.translator import baasTranslator as bt
 from dataclasses import asdict
 
 
@@ -27,8 +24,6 @@ class ConfigSet:
             raise FileNotFoundError(f'config/{config_dir}/config.json not found')
         self.server_mode = 'CN'
         self._init_config()
-        self.inject_comp_list = []
-        self.inject_config_list = []
         self.window = None
         self.main_thread = None
         self.signals = {}
@@ -55,8 +50,7 @@ class ConfigSet:
 
     def get(self, key, default=None):
         self._init_config()
-        value = getattr(self.config, key, default)
-        return bt.tr('ConfigTranslation', value)
+        return getattr(self.config, key, default)
 
     def has(self, key):
         self._init_config()
@@ -64,10 +58,8 @@ class ConfigSet:
 
     def set(self, key, value):
         self._init_config()
-        value = bt.undo(value)
         setattr(self.config, key, value)
         self.save()
-        self.dynamic_update(key)
 
     def update(self, key, value):
         self.set(key, value)
@@ -76,11 +68,6 @@ class ConfigSet:
         data = asdict(self.config)
         with open(os.path.join(self.config_dir, "config.json"), 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-
-    def dynamic_update(self, key):
-        if key not in self.inject_config_list: return
-        for comp in self.inject_comp_list:
-            comp.config_updated(key)
 
     def __getitem__(self, item: str):
         return self.get(item)
@@ -105,19 +92,6 @@ class ConfigSet:
 
     def get_main_thread(self):
         return self.main_thread
-
-    def inject(self, component, string_rule, attribute="setText"):
-        """
-        Inject a component with a string rule
-        :param component: Component to inject
-        :param string_rule: String rule
-        :param attribute: Attribute to inject (default is setText)
-        :return: BoundComponent, which can be ignored
-        """
-        bounded = BoundComponent(component, string_rule, self, attribute)
-        self.inject_config_list.extend(re.findall(r'{(.*?)}', string_rule))
-        self.inject_comp_list.append(bounded)
-        return bounded
 
     def update_create_quantity_entry(self):
         dft = self.static_config.create_item_order[self.server_mode]["basic"]
