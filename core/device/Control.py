@@ -4,6 +4,7 @@ from core.device.control.nemu import NemuControl
 from core.device.control.adb import AdbControl
 from core.device.control.uiautomator2 import U2Control
 from core.device.control.scrcpy import ScrcpyControl
+from core.device.control.maatouch import MaaTouchControl
 
 
 class Control:
@@ -31,6 +32,8 @@ class Control:
                 self.control_instance = U2Control(self.connection)
             elif self.method == "scrcpy":
                 self.control_instance = ScrcpyControl(self.connection)
+            elif self.method == "maatouch":
+                self.control_instance = MaaTouchControl(self.connection)
         else:
             if sys.platform == "win32":
                 from core.device.control.pyautogui import PyautoguiControl

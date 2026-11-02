@@ -3,6 +3,7 @@ import sys
 from core.device.screenshot.scrcpy import ScrcpyScreenshot
 from core.device.screenshot.nemu import NemuScreenshot
 from core.device.screenshot.adb import AdbScreenshot
+from core.device.screenshot.adb_nc import AdbNcScreenshot
 from core.device.screenshot.uiautomator2 import U2Screenshot
 import time
 
@@ -35,6 +36,8 @@ class Screenshot:
                 self.screenshot_instance = U2Screenshot(self.connection)
             elif self.method == "scrcpy":
                 self.screenshot_instance = ScrcpyScreenshot(self.connection)
+            elif self.method == "adb_nc":
+                self.screenshot_instance = AdbNcScreenshot(self.connection)
         else:
             if sys.platform == "win32":
                 from core.device.screenshot.pyautogui import PyautoguiScreenshot

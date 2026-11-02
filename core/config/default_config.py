@@ -630,8 +630,8 @@ STATIC_DEFAULT_CONFIG = '''
     },
     "explore_normal_task_region_range": [4, 30],
     "explore_hard_task_region_range": [1, 30],
-    "screenshot_methods" : ["adb", "nemu", "uiautomator2", "scrcpy", "mss", "pyautogui"],
-    "control_methods" : ["adb", "nemu", "uiautomator2", "scrcpy", "pyautogui"],
+    "screenshot_methods" : ["adb", "adb_nc", "nemu", "uiautomator2", "scrcpy", "mss", "pyautogui"],
+    "control_methods" : ["adb", "maatouch", "nemu", "uiautomator2", "scrcpy", "pyautogui"],
     "shop_type_list_names": {
       "CN": [
         "常规道具",
