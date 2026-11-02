@@ -133,6 +133,7 @@ class ConfigTranslation(QObject):
             self.tr('退出 Baas'): '退出 Baas', # Exit Baas
             self.tr('退出 模拟器'): '退出 模拟器', # Exit Emulator
             self.tr('退出 Baas 和 模拟器'): '退出 Baas 和 模拟器', # Exit Baas and Emulator
+            self.tr('关闭游戏'): '关闭游戏', # Close Game
             self.tr('关机'): '关机', # Shutdown
 
             # attributes

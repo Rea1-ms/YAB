@@ -956,6 +956,8 @@ class Baas_thread:
         elif action == '退出 Baas 和 模拟器':  # Exit Baas and Emulator
             self.exit_emulator()
             self.exit_baas()
+        elif action == '关闭游戏':  # Close Game
+            self.close_game()
         elif action == '关机':  # Shutdown
             self.shutdown()
         self.signal_stop()  # avoid rerunning then action in case of error
@@ -979,6 +981,40 @@ class Baas_thread:
     def exit_baas(self):
         if self.exit_signal is not None:
             self.exit_signal.emit(0)
+
+    def close_game(self):
+        self.logger.info("-- BAAS Close Game --")
+        if self.is_android_device:
+            package_name = self.connection.get_package_name()
+            if not package_name:
+                self.logger.error("Package not found, cannot close game.")
+                return False
+            self.connection.close_current_app(package_name)
+            return True
+        return self.close_pc_game()
+
+    def close_pc_game(self):
+        window = self.connection.app_process_window
+        win = window.get_window()
+        if win is None or not window.is_valid_window():
+            self.logger.warning("Game window not found, skip closing game.")
+            return False
+        try:
+            win.close()  # send WM_CLOSE
+            for _ in range(10):
+                if not window.is_valid_window():
+                    return True
+                time.sleep(0.5)
+            import ctypes
+            from ctypes import wintypes
+            pid = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(win._hWnd, ctypes.byref(pid))
+            self.logger.info(f"Game is still running, force kill process, pid : {pid.value}")
+            psutil.Process(pid.value).kill()
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to close game : {e}")
+            return False
 
     def shutdown(self):
         try:
