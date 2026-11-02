@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# runtime artifacts
+config/
+error.log
+output.log
+setup.toml
+
+# webapp
+webapp/node_modules/
+webapp/dist/
+
+# dev tools
+develop_tools/out/
