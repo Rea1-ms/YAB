@@ -14,6 +14,8 @@ dependencies = [
     "adbutils == 2.2.1",
     "uiautomator2 == 2.16.23",
     "opencv-python == 4.8.1.78",
+    "starlette >= 0.37.2, < 1.0",
+    "uvicorn[standard] >= 0.30.6",
     "PyQt-Fluent-Widgets == 1.2.0",
     "pyinstaller",
     "requests",
