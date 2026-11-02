@@ -8,8 +8,8 @@ Wiki中所有与`logger`有关的变量都是指`Logger`类的实例
 **type**: `Logger`
 
 ### `self.logger_signal`
-**type**: `pyqtSignal`
-**description**: 用于发送日志信号, 使UI主界面显示日志(window.py)
+**type**: `callable` 或 PyQt 信号风格的 `.emit(level, message)` 对象
+**description**: 用于发送日志信号, 使 UI 主界面显示日志（WebUI 后端 `server/service.py` 通过 `_Signal` 适配为普通回调）
 **note**: 信号为`None`时日志会打印在终端(main.py)
 
 ## 使用须知

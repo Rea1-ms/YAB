@@ -24,7 +24,7 @@ pip install -r requirements.installer.txt
 # pip install -r requirements.installer.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Pyinstaller build the executable file
-pyinstaller -i gui/assets/logo.ico --name baas -F installer.py --hidden-import=pygit2 --hidden-import=_cffi_backend --collect-submodules=pygit2 --collect-submodules=cffi
+pyinstaller -i assets/logo.ico --name baas -F installer.py --hidden-import=pygit2 --hidden-import=_cffi_backend --collect-submodules=pygit2 --collect-submodules=cffi
 
 # Move the generated file out of the temp generation dir
 mv ./dist/* ./

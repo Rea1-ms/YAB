@@ -25,5 +25,5 @@
 ## 如何跳过更新直接启动BAAS
 在BAAS目录下, 打开cmd, 输入以下命令
 ```shell
-"env/Script/python.exe" window.py
+"env/Script/python.exe" webui.py
 ```

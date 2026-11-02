@@ -6,7 +6,7 @@
 ![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-purple)
 
 
-**BAAS**,一个带GUI的蔚蓝档案（全服支持），为屏幕分辨率为 16:9 (1280x720 最佳) 运行的场景而设计 最终目的是接管一切蔚蓝档案任务 实现完全自动化
+**BAAS**,一个带WebUI的蔚蓝档案（全服支持），为屏幕分辨率为 16:9 (1280x720 最佳) 运行的场景而设计 最终目的是接管一切蔚蓝档案任务 实现完全自动化
 
 GUI预览图：
 
@@ -37,9 +37,9 @@ GUI预览图：
 - **自定义调度(每日固定刷新时间，执行间隔)**
 
 ## 安装 Installation 
-  **请确保安装路径没有中文(QT框架限制)**
+  **请确保安装路径没有中文**
   解压Release或qq交流群中的下载包，双击`BlueArchiveAutoScript.exe`安装环境，请耐心等待。
-  安装完成后，BAAS 的ui界面将自动启动。同时，我们提供了pyinstaller可使用的打包脚本，您可以自
+  安装完成后，BAAS 的 WebUI 将自动启动（默认浏览器访问 http://127.0.0.1:22267）。同时，我们提供了pyinstaller可使用的打包脚本，您可以自
   行打包，具体内容在`deploy/installer`文件夹中。
   [安装相关文档](https://baas.wiki/usage_doc/install/choose_platform.html)
   

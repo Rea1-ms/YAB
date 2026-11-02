@@ -33,8 +33,9 @@
 !README.md
 
 !main.py
+!webui.py
 !requirements.txt
-!window.py
+!server
 !requirements-i18n.txt
 !requirements-linux.txt
 *.pyc

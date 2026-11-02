@@ -1,18 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-# This is a PyInstaller spec file for the window.py script.
-# It is used to create a standalone executable for the Project.
-# However, it is relatively huge to include all the dependencies.
-# So we don't recommend using it in the project.
+# PyInstaller spec for the WebUI entry (webui.py -> python -m server).
+# Build the frontend first: cd webapp && pnpm install && pnpm build
+# Move this spec to the project root before running pyinstaller.
 
-# Anyway, if using the spec script for building the executable,
-# please move it to the root directory of the project.
+import os
+
+datas = []
+if os.path.exists('webapp/dist'):
+    datas += [('webapp/dist', 'webapp/dist')]
+if os.path.exists('src/maatouch_bin'):
+    datas += [('src/maatouch_bin', 'src/maatouch_bin')]
 
 a = Analysis(
-    ['window.py'],
+    ['webui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -27,7 +31,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='window',
+    name='BAAS',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -38,6 +42,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/logo.ico',
 )
 coll = COLLECT(
     exe,
@@ -46,5 +51,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='window',
+    name='BAAS',
 )

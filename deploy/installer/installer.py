@@ -527,20 +527,15 @@ def start_app():
         _path = G.runtime_path
 
     if __system__ == "Linux":
-        if G.runtime_path == "default":
-            __env__["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(
-                BAAS_ROOT_PATH
-                / ".env/lib/python3.9/site-packages/PyQt5/Qt5/plugins/platforms"
-            )
         proc = subprocess.run(
-            [_path, str(BAAS_ROOT_PATH / "window.py")],  # 直接用列表传递命令
+            [_path, str(BAAS_ROOT_PATH / "webui.py")],  # 直接用列表传递命令
             cwd=BAAS_ROOT_PATH,  # 先 cd 到 BAAS_ROOT_PATH
             env=__env__  # 传递修改后的环境变量
         )
         return proc.returncode
     else:
         proc = subprocess.Popen(
-            [_path, str(BAAS_ROOT_PATH / "window.py")],  # 直接用列表传递命令
+            [_path, str(BAAS_ROOT_PATH / "webui.py")],  # 直接用列表传递命令
             cwd=BAAS_ROOT_PATH,  # 先 cd 到 BAAS_ROOT_PATH
             env=__env__,  # 传递修改后的环境变量
         )
@@ -593,7 +588,7 @@ def run_app():
                         str(BAAS_ROOT_PATH / "installer.py"),
                         "--name=BlueArchiveAutoScript",
                         "--onefile",
-                        "--icon=gui/assets/logo.ico",
+                        "--icon=assets/logo.ico",
                         "--noconfirm",
                         "--upx-dir",
                         "./toolkit/upx-4.2.4-win64",

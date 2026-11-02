@@ -29,7 +29,7 @@ BAAS CLI 提供了通过命令行运行 BAAS 核心功能的能力。
   pdm install
   ```
 
-2. 执行 `pdm run window.py` 运行 BAAS GUI，创建配置文件目录并按需调整配置。
+2. 执行 `pdm run webui.py` 运行 BAAS WebUI（浏览器访问 http://127.0.0.1:22267），创建配置文件目录并按需调整配置。
 
 3. 将 `cli.example.py` 复制为 `cli.your_account.py`，修改其中配置文件目录名为 `config` 目录下刚才 BAAS GUI 创建的配置文件目录名。可以通过注释或者取消注释 Python 代码的方式调整 BAAS 需要执行的任务。
 

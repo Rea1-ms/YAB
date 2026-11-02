@@ -8,13 +8,13 @@ except ImportError:
     _notify = None
     _toast = None
 app_id = 'BlueArchiveAutoScript.exe'
-icon_path = '/gui/assets/logo.png'
+icon_path = '/assets/logo.png'
 
 
 def get_root_path():
     root_path = os.path.abspath(os.path.dirname(__file__))
     while True:
-        if "window.py" in os.listdir(root_path):
+        if "main.py" in os.listdir(root_path):
             return root_path
         root_path = os.path.dirname(root_path)
 
