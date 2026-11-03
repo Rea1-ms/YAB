@@ -3,6 +3,7 @@ import json
 import os
 
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
@@ -126,7 +127,13 @@ class SPAStaticFiles(StaticFiles):
     everything is served with no-cache to avoid stale bundles."""
 
     async def get_response(self, path: str, scope):
-        response = await super().get_response(path, scope)
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            # newer starlette raises instead of returning a 404 response
+            if e.status_code != 404 or '.' in path:
+                raise
+            response = await super().get_response('index.html', scope)
         if response.status_code == 404 and '.' not in path:
             response = await super().get_response('index.html', scope)
         response.headers['Cache-Control'] = 'no-cache'
