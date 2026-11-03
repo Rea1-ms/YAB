@@ -1,25 +1,30 @@
 <script lang="ts">
   import { callRpc, configScan, connected, meta, setActiveDir } from './lib/stores';
-  import { navigate, pendingNavDir, PAGES, route } from './lib/router';
+  import { GLOBAL_PAGES, navigate, pendingNavDir, PAGES, route } from './lib/router';
   import { toast } from './lib/toast';
   import ToastHost from './lib/components/ToastHost.svelte';
   import Modal from './lib/components/Modal.svelte';
   import Home from './lib/pages/Home.svelte';
   import Schedule from './lib/pages/Schedule.svelte';
+  import ConfigPage from './lib/pages/Config.svelte';
   import Settings from './lib/pages/Settings.svelte';
   import Advanced from './lib/pages/Advanced.svelte';
+  import UpdatePage from './lib/pages/Update.svelte';
 
   const current = $derived($route);
   const scan = $derived($configScan);
   const dir = $derived(current?.dir ?? '');
   const page = $derived(current?.page ?? 'home');
+  const globalPage = $derived(current?.global ?? null);
   const currentName = $derived(scan.find((c) => c.dir === dir)?.name ?? dir);
 
   // 路由守卫：新建配置待出现后跳转；空 hash 跳第一个配置；目录失效跳回第一个
+  // 全局页（更新与帮助）不参与目录守卫
   $effect(() => {
     const r = current;
     const list = scan;
     const pend = $pendingNavDir;
+    if (r?.global) return;
     if (pend && list.some((c) => c.dir === pend)) {
       pendingNavDir.set(null);
       navigate(pend, 'home');
@@ -34,9 +39,13 @@
     }
   });
 
-  // 切换激活配置：订阅/退订对应 topic
+  // 切换激活配置：订阅/退订对应 topic；进入全局页时退订全部
   $effect(() => {
-    if (current) setActiveDir(current.dir);
+    if (globalPage) {
+      setActiveDir(null);
+      return;
+    }
+    if (current && current.dir) setActiveDir(current.dir);
   });
 
   // —— 新建 / 重命名 / 删除 ——
@@ -124,7 +133,13 @@
 
     <nav class="nav">
       {#each PAGES as p (p.id)}
-        <a href={`#/${encodeURIComponent(dir)}/${p.id}`} class:active={page === p.id}>{p.label}</a>
+        <a href={`#/${encodeURIComponent(dir)}/${p.id}`} class:active={page === p.id && !globalPage}>{p.label}</a>
+      {/each}
+    </nav>
+
+    <nav class="nav global-nav">
+      {#each GLOBAL_PAGES as g (g.id)}
+        <a href={`#/${g.id}`} class:active={globalPage === g.id}>{g.label}</a>
       {/each}
     </nav>
 
@@ -139,7 +154,9 @@
   </aside>
 
   <main class="main">
-    {#if !dir}
+    {#if globalPage === 'update'}
+      <UpdatePage />
+    {:else if !dir}
       <div class="placeholder">{scan.length === 0 ? '等待后端连接…' : '暂无配置'}</div>
     {:else}
       {#key dir}
@@ -147,6 +164,8 @@
           <Home {dir} />
         {:else if page === 'schedule'}
           <Schedule {dir} />
+        {:else if page === 'config'}
+          <ConfigPage {dir} />
         {:else if page === 'settings'}
           <Settings {dir} />
         {:else}
@@ -261,8 +280,12 @@
     background: rgba(122, 162, 247, 0.1);
     border-color: rgba(122, 162, 247, 0.35);
   }
-  .side-status {
+  .global-nav {
     margin-top: auto;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+  .side-status {
     display: flex;
     flex-direction: column;
     gap: 6px;

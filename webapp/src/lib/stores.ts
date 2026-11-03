@@ -7,12 +7,13 @@ import type {
   EventItem,
   LogEntry,
   Meta,
+  PanelsData,
   RuntimeState,
   ServerData,
 } from './types';
 
 const LOG_MAX = 500;
-const DIR_PREFIXES = ['Log', 'State', 'ConfigArg', 'EventConfig'] as const;
+const DIR_PREFIXES = ['Log', 'State', 'ConfigArg', 'EventConfig', 'Panels'] as const;
 
 /** 全局 topic（服务端连接建立时自动订阅推送） */
 export const meta = writable<Meta | null>(null);
@@ -39,12 +40,13 @@ ws.bindPassive('Meta', (msg) => meta.update((prev) => applyData(prev, msg) as Me
 ws.bindPassive('ConfigScan', (msg) => configScan.update((prev) => applyData(prev, msg) as ConfigEntry[]));
 ws.onConnection((up) => connected.set(up));
 
-/** 每个配置目录的四个动态 topic store */
+/** 每个配置目录的五个动态 topic store */
 export interface DirStores {
   log: Writable<LogEntry[]>;
   state: Writable<RuntimeState | null>;
   args: Writable<ConfigArgs | null>;
   events: Writable<EventItem[] | null>;
+  panels: Writable<PanelsData | null>;
 }
 
 const dirStores = new Map<string, DirStores>();
@@ -80,9 +82,10 @@ function subDir(dir: string, s: DirStores): void {
   bind('State', s.state);
   bind('ConfigArg', s.args);
   bind('EventConfig', s.events);
+  bind('Panels', s.panels);
 }
 
-/** 获取某配置的四个 topic store（首次调用时向服务端订阅） */
+/** 获取某配置的动态 topic store（首次调用时向服务端订阅） */
 export function getDirStores(dir: string): DirStores {
   let s = dirStores.get(dir);
   if (!s) {
@@ -91,6 +94,7 @@ export function getDirStores(dir: string): DirStores {
       state: writable<RuntimeState | null>(null),
       args: writable<ConfigArgs | null>(null),
       events: writable<EventItem[] | null>(null),
+      panels: writable<PanelsData | null>(null),
     };
     dirStores.set(dir, s);
   }
@@ -140,6 +144,12 @@ export async function setConfigValue(dir: string, key: string, value: unknown): 
     return false;
   }
   return true;
+}
+
+/** 保存扫荡设置：走 set_sweep RPC，由服务端校验并同步 unfinished 键（失败 toast） */
+export async function setSweep(dir: string, key: string, value: string): Promise<boolean> {
+  const r = await callRpc(`ConfigArg:${dir}`, 'set_sweep', { key, value });
+  return r !== undefined;
 }
 
 /** 切换单个事件启用状态：乐观更新 + set_event RPC（失败回滚） */

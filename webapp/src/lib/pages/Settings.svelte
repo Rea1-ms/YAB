@@ -3,12 +3,13 @@
   import { toast } from '../toast';
   import Switch from '../components/Switch.svelte';
   import TextField from '../components/TextField.svelte';
+  import PanelAccordion from '../components/fields/PanelAccordion.svelte';
   import type { Meta } from '../types';
 
   let { dir }: { dir: string } = $props();
   // dir 由外层 {#key dir} 保证变化时重挂载，初始化读取即最终值
   // svelte-ignore state_referenced_locally
-  const { args: argsStore } = getDirStores(dir);
+  const { args: argsStore, panels: panelsStore } = getDirStores(dir);
 
   type OptKey = 'then_options' | 'screenshot_methods' | 'control_methods' | 'servers' | 'multi_emulator_names';
 
@@ -148,6 +149,9 @@
       connecting = false;
     }
   }
+
+  // 结构化设置面板（page == 'settings'）
+  const settingsPanels = $derived(($panelsStore?.panels ?? []).filter((p) => p.page === 'settings'));
 </script>
 
 <div class="page">
@@ -205,6 +209,17 @@
       </div>
     {/each}
   </div>
+
+  {#if settingsPanels.length > 0}
+    <div class="panel-section">
+      <h2 class="panel-head">任务与功能设置</h2>
+      <div class="panel-list">
+        {#each settingsPanels as p (p.id)}
+          <PanelAccordion {dir} panel={p} args={$argsStore ?? {}} />
+        {/each}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -267,5 +282,22 @@
     align-items: center;
     flex-wrap: wrap;
     margin-top: 6px;
+  }
+  .panel-section {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .panel-head {
+    margin: 0;
+    font-size: 15px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 </style>
