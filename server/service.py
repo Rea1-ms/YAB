@@ -4,8 +4,23 @@ import shutil
 import threading
 import time
 from dataclasses import asdict
+from pathlib import Path
 
 from server.hub import Hub
+
+
+def config_path(name, require_exists=True):
+    if (not isinstance(name, str) or not name or name != name.strip()
+            or name in ('.', '..') or name.endswith('.')
+            or any(c in name for c in '/\\:') or any(ord(c) < 32 for c in name)):
+        raise ValueError('配置目录名称不合法')
+    base = Path('config').resolve()
+    path = (base / name).resolve()
+    if path.parent != base:
+        raise ValueError('配置目录必须位于配置根目录内')
+    if require_exists and (not (path / 'config.json').is_file() or name not in os.listdir(base)):
+        raise ValueError(f'Config not found: {name}')
+    return path
 
 
 class _Signal:
@@ -65,18 +80,26 @@ class BaasService:
         self.threads = {}  # config -> Baas_thread
         self.workers = {}  # config -> threading.Thread
         self.states = {}  # config -> dict(running, button, current, waiting)
+        self._control_lock = threading.RLock()
+        self._stop_events = {}
 
     # ---------- state helpers ----------
 
     def get_state(self, config):
-        state = self.states.setdefault(
-            config, {'running': False, 'button': '启动', 'current': '', 'waiting': []})
-        return state
+        config_path(config, require_exists=False)
+        with self._control_lock:
+            return self.states.setdefault(
+                config, {'running': False, 'button': '启动', 'current': '', 'waiting': []})
 
     def _set_state(self, config, **patch):
-        state = self.get_state(config)
-        state.update(patch)
-        self.hub.push(f'State:{config}', 'full', dict(state))
+        with self._control_lock:
+            state = self.get_state(config)
+            state.update(patch)
+            self.hub.push(f'State:{config}', 'full', dict(state))
+
+    def _busy(self, config):
+        worker = self.workers.get(config)
+        return (worker is not None and worker.is_alive()) or self.get_state(config)['running']
 
     # ---------- ocr ----------
 
@@ -85,11 +108,15 @@ class BaasService:
             try:
                 from main import Main
                 self.main = Main(ocr_needed=ocr_needed)
+                if not self.main.ready:
+                    raise RuntimeError(self.main.init_error or '识别服务初始化失败')
                 self.ocr_ready = True
-                self.hub.push('Meta', 'set', {'ocr_ready': True})
+                self.ocr_error = None
+                self.hub.push('Meta', 'set', {'ocr_ready': True, 'ocr_error': None})
                 self.hub.push_full('ConfigScan')
                 self._autostart()
             except Exception as e:
+                self.ocr_ready = False
                 self.ocr_error = str(e)
                 self.hub.log('__server__', 3, f'OCR init failed: {e}')
                 self.hub.push('Meta', 'set', {'ocr_ready': False, 'ocr_error': str(e)})
@@ -111,7 +138,12 @@ class BaasService:
         self.hub.log(config, level, message)
 
     def _on_button(self, config, state):
-        self._set_state(config, button=state, running=(state == '停止'))
+        with self._control_lock:
+            worker = self.workers.get(config)
+            if state == '启动' and worker is not None and worker.is_alive():
+                self._set_state(config, running=True, button='停止', current='正在停止')
+            else:
+                self._set_state(config, button=state, running=(state == '停止'))
 
     def _on_update(self, config, tasks):
         tasks = list(tasks)
@@ -121,7 +153,7 @@ class BaasService:
             self._set_state(config, current=tasks[0] if tasks else '', waiting=tasks[1:])
 
     def _on_exit(self, config, code):
-        self._set_state(config, running=False, button='启动')
+        self._on_button(config, '启动')
         self.hub.log(config, 1, '-- BAAS Exited --')
 
     # ---------- script control ----------
@@ -129,7 +161,7 @@ class BaasService:
     def _create_thread(self, config):
         from core.config.config_set import ConfigSet
         # a fresh Baas_thread per start, same as the old GUI (unique hash name)
-        name = f'{config}-{int(time.time() * 1000)}'
+        name = f'{config}-{time.time_ns()}'
         return self.main.get_thread(
             ConfigSet(config), name=name,
             logger_signal=_Signal(lambda level, msg: self._on_log(config, level, msg)),
@@ -139,85 +171,104 @@ class BaasService:
         )
 
     def start(self, config):
+        return self._launch(config)
+
+    def _launch(self, config, task=None):
+        config_path(config)
         if not self.ocr_ready:
             raise RuntimeError('OCR 尚未初始化完成，请稍候')
-        if self.get_state(config)['running']:
-            return
-        t = self._create_thread(config)
-        self.threads[config] = t
-        self._set_state(config, running=True, button='停止', current='初始化', waiting=[])
-        worker = threading.Thread(target=self._run, args=(config, t), daemon=True,
-                                  name=f'baas-{config}')
-        self.workers[config] = worker
-        worker.start()
+        with self._control_lock:
+            if self._busy(config):
+                if task is not None:
+                    raise ValueError('配置正在运行，请先停止')
+                return
+            t = self._create_thread(config)
+            cancelled = threading.Event()
+            worker = threading.Thread(target=self._run, args=(config, t, task, cancelled),
+                                      daemon=True, name=f'baas-{config}')
+            self.threads[config] = t
+            self.workers[config] = worker
+            self._stop_events[config] = cancelled
+            self._set_state(config, running=True, button='停止', current='初始化', waiting=[])
+            try:
+                worker.start()
+            except Exception:
+                self._set_state(config, running=False, button='启动', current='', waiting=[])
+                self.threads.pop(config, None)
+                self.workers.pop(config, None)
+                self._stop_events.pop(config, None)
+                raise
 
-    def _run(self, config, t):
+    def _run(self, config, t, task, cancelled):
         try:
+            if cancelled.is_set():
+                return
             if not t.init_all_data():
                 self.hub.log(config, 3, 'Initialization Failed')
                 return
-            self.hub.log(config, 1, 'Starting Blue Archive Auto Script...')
-            t.send('start')
+            if cancelled.is_set():
+                t.send('stop')
+                return
+            if task is None:
+                self.hub.log(config, 1, 'Starting Blue Archive Auto Script...')
+                t.send('start')
+            else:
+                self._set_state(config, current=task)
+                self.hub.log(config, 1, f'Run task: {task}')
+                t.send('solve', task)
         except Exception as e:
             self.hub.log(config, 3, f'Script error: {e}')
         finally:
-            self._set_state(config, running=False, button='启动')
+            with self._control_lock:
+                if self.threads.get(config) is t:
+                    self._set_state(config, running=False, button='启动', current='', waiting=[])
+                    self.threads.pop(config, None)
+                    self._stop_events.pop(config, None)
 
     def stop(self, config):
-        t = self.threads.get(config)
-        if t is not None:
-            t.send('stop')
-            self.hub.log(config, 1, 'Stop requested by user')
+        config_path(config)
+        with self._control_lock:
+            t = self.threads.get(config)
+            cancelled = self._stop_events.get(config)
+            if cancelled is not None:
+                cancelled.set()
+            if t is not None:
+                t.send('stop')
+                self._set_state(config, running=True, button='停止', current='正在停止')
+                self.hub.log(config, 1, 'Stop requested by user')
 
     def run_task(self, config, task):
-        if not self.ocr_ready:
-            raise RuntimeError('OCR 尚未初始化完成，请稍候')
-        t = self._create_thread(config)
-        self.threads[config] = t
-        worker = threading.Thread(target=self._run_task, args=(config, t, task), daemon=True,
-                                  name=f'baas-{config}-{task}')
-        self.workers[config] = worker
-        worker.start()
-        self.hub.log(config, 1, f'Run task: {task}')
-
-    def _run_task(self, config, t, task):
-        try:
-            if not t.init_all_data():
-                self.hub.log(config, 3, 'Initialization Failed')
-                return
-            t.send('solve', task)
-        except Exception as e:
-            self.hub.log(config, 3, f'Task error: {e}')
+        return self._launch(config, task)
 
     # ---------- config management ----------
 
     def config_set(self, config, params):
         from core.config.config_set import ConfigSet
+        config_path(config)
         ConfigSet(config).set(params['key'], params['value'])
         self.hub.push_full(f'ConfigArg:{config}')
 
     def config_add(self, name):
         from core.config.config_init import check_config
-        if not name or os.path.basename(name) != name:
-            raise ValueError(f'Invalid config name: {name}')
-        if os.path.exists(f'./config/{name}'):
+        path = config_path(name, require_exists=False)
+        if path.exists():
             raise ValueError(f'Config already exists: {name}')
         check_config([name])
         self.hub.push_full('ConfigScan')
 
     def config_delete(self, name):
-        if name == 'default_config':
-            raise ValueError('default_config 不允许删除')
-        if self.get_state(name)['running']:
-            raise ValueError('配置正在运行，请先停止')
-        path = f'./config/{name}'
-        if not os.path.exists(os.path.join(path, 'config.json')):
-            raise ValueError(f'Config not found: {name}')
-        shutil.rmtree(path)
-        self.hub.push_full('ConfigScan')
+        path = config_path(name)
+        with self._control_lock:
+            if name.casefold() == 'default_config':
+                raise ValueError('default_config 不允许删除')
+            if self._busy(name):
+                raise ValueError('配置正在运行，请先停止')
+            shutil.rmtree(path)
+            self.hub.push_full('ConfigScan')
 
     def config_rename(self, config, new_name):
         from core.config.config_set import ConfigSet
+        config_path(config)
         if not new_name or not new_name.strip():
             raise ValueError('名称不能为空')
         ConfigSet(config).set('name', new_name.strip())
@@ -227,16 +278,19 @@ class BaasService:
 
     def provide_config_arg(self, config):
         from core.config.config_set import ConfigSet
+        config_path(config)
         return asdict(ConfigSet(config).config)
 
     def provide_event_config(self, config):
         from core.config.config_set import ConfigSet
+        config_path(config)
         path = os.path.join(ConfigSet(config).config_dir, 'event.json')
         with open(path, encoding='utf-8') as f:
             return json.load(f)
 
     def save_event_config(self, config, events):
         from core.config.config_set import ConfigSet
+        config_path(config)
         path = os.path.join(ConfigSet(config).config_dir, 'event.json')
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(events, f, ensure_ascii=False, indent=2)

@@ -2,10 +2,7 @@ import re
 import threading
 import time
 
-import cv2
-import numpy as np
 from adbutils import adb
-from adbutils.errors import AdbError
 
 # reference : [ https://github.com/MaaAssistantArknights/MaaTouch ]
 # reference : [ https://github.com/LmeSzinc/StarRailCopilot/blob/master/module/device/method/maatouch.py ]
@@ -127,7 +124,7 @@ class MaaTouchControl:
                 y = int(y / height * self.max_y)
         return int(x), int(y)
 
-    def _send(self, content):
+    def _send(self, content, duration=0):
         with self._lock:
             if self._sock is None:
                 self._init_server()
@@ -139,19 +136,20 @@ class MaaTouchControl:
                 self._init_server()
                 self._sock.sendall(content.encode('utf-8'))
                 self._sock.recv(0)
+            # recv(0) does not acknowledge completion of the device-side waits.
+            # Keep the lock until the gesture finishes before accepting another.
+            time.sleep(duration + 0.05)
 
     # ---------- public interface ----------
 
     def click(self, x, y):
         x, y = self._convert(x, y)
         self._send(f'd 0 {x} {y} {TOUCH_PRESSURE}\nc\nu 0\nc\n')
-        time.sleep(0.05)
 
     def long_click(self, x, y, duration):
         x, y = self._convert(x, y)
-        duration = int(duration * 1000)
-        self._send(f'd 0 {x} {y} {TOUCH_PRESSURE}\nc\nw {duration}\nu 0\nc\n')
-        time.sleep(0.05)
+        duration = max(0, int(duration * 1000))
+        self._send(f'd 0 {x} {y} {TOUCH_PRESSURE}\nc\nw {duration}\nu 0\nc\n', duration / 1000)
 
     def swipe(self, x1, y1, x2, y2, duration):
         duration = max(duration, 0.1)
@@ -167,5 +165,4 @@ class MaaTouchControl:
             yi = int(y1 + (y2 - y1) * t)
             frames.append(f'm 0 {xi} {yi} {TOUCH_PRESSURE}\nc\nw 10\n')
         frames.append('u 0\nc\n')
-        self._send(''.join(frames))
-        time.sleep(0.05)
+        self._send(''.join(frames), (steps + 1) * 0.01)
