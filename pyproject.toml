@@ -27,6 +27,6 @@ dependencies = [
     "rich >= 14.2.0",
     "setuptools <= 80.10.2"
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 readme = "README.md"
 license = { text = "GPL-3.0-only" }
