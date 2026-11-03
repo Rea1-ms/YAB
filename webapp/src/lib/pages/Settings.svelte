@@ -25,6 +25,7 @@
     title: string;
     fields: FieldDef[];
     adb?: boolean;
+    hint?: string;
   }
 
   const SECTIONS: Section[] = [
@@ -39,28 +40,30 @@
           label: '截图方式',
           kind: 'select',
           optKey: 'screenshot_methods',
-          hint: "速度 nemu >> uiautomator2 ≈ adb ≈ adb_nc，推荐使用nemu；如果使用nemu, 请在'模拟器启动设置'里设置模拟器路径",
+          hint: '通用安卓设备可先用 adb（通用截图）或 scrcpy（投屏截图）；nemu（MuMu 专用截图）仅适用于对应的本机模拟器。',
         },
         {
           key: 'control_method',
           label: '控制方式',
           kind: 'select',
           optKey: 'control_methods',
-          hint: 'uiautomator2 兼容性最好；maatouch 速度更快',
+          hint: '通用安卓设备可先用 adb（通用触控）；maatouch（触控服务）需要设备支持。',
         },
       ],
     },
     {
-      title: '服务器',
+      title: '游戏服务器与设备',
       adb: true,
+      hint: '游戏服务器决定使用哪个版本的游戏，与设备类型无关。可以连接真机、模拟器或 redroid（容器安卓设备）。',
       fields: [
-        { key: 'server', label: '服务器', kind: 'select', optKey: 'servers' },
-        { key: 'adbIP', label: 'ADB IP', kind: 'text' },
-        { key: 'adbPort', label: 'ADB 端口', kind: 'text' },
+        { key: 'server', label: '游戏服务器', kind: 'select', optKey: 'servers' },
+        { key: 'adbIP', label: '设备地址或序列号', kind: 'text', hint: '网络设备填写地址；已连接的真机也可以填写序列号，并将端口留空。' },
+        { key: 'adbPort', label: '设备端口', kind: 'text', placeholder: '通常为 5555，以设备实际配置为准' },
       ],
     },
     {
       title: '模拟器启动设置',
+      hint: '这部分只用于自动打开本机模拟器。使用真机或 redroid（容器安卓设备）时保持关闭，无需填写模拟器路径。',
       fields: [
         { key: 'open_emulator_stat', label: '启动Baas时打开模拟器', kind: 'switch' },
         { key: 'emulator_wait_time', label: '等待时间（秒）', kind: 'text' },
@@ -103,6 +106,7 @@
 
   // —— adb 地址检测 ——
   let searching = $state(false);
+  let connecting = $state(false);
   let adbResults: string[] | null = $state(null);
 
   async function searchAdb(): Promise<void> {
@@ -112,7 +116,7 @@
       if (r !== undefined) {
         const list = Array.isArray(r) ? r : r == null ? [] : [r];
         adbResults = list.map((x) => String(x));
-        if (adbResults.length === 0) toast('info', '未检测到正在运行的模拟器');
+        if (adbResults.length === 0) toast('info', '暂未发现已连接设备。网络设备可以填写地址和端口后，点击“连接设备”。');
       }
     } finally {
       searching = false;
@@ -120,11 +124,29 @@
   }
 
   async function pickAdb(addr: string): Promise<void> {
-    const [ip, port] = addr.split(':');
-    await setConfigValue(dir, 'adbIP', ip ?? '');
-    await setConfigValue(dir, 'adbPort', port ?? '5555');
-    toast('success', `已写入 adb 地址：${addr}`);
+    const match = addr.match(/^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/);
+    const host = match ? match[1] ?? match[2] : addr;
+    const port = match?.[3] ?? '';
+    if (!await setConfigValue(dir, 'adbIP', host)) return;
+    if (!await setConfigValue(dir, 'adbPort', port)) return;
+    toast('success', `已选择设备：${addr}`);
     adbResults = null;
+  }
+
+  async function connectAdb(): Promise<void> {
+    connecting = true;
+    try {
+      const result = await callRpc<{ serial: string }>('Meta', 'connect_adb', {
+        host: String($argsStore?.adbIP ?? ''),
+        port: String($argsStore?.adbPort ?? ''),
+      });
+      if (result) {
+        toast('success', `设备已连接：${result.serial}`);
+        await searchAdb();
+      }
+    } finally {
+      connecting = false;
+    }
   }
 </script>
 
@@ -133,6 +155,9 @@
     {#each SECTIONS as sec (sec.title)}
       <div class="card sec">
         <h2>{sec.title}</h2>
+        {#if sec.hint}
+          <p class="hint">{sec.hint}</p>
+        {/if}
         {#each sec.fields as f (f.key)}
           <div class="field">
             <label for={f.key}>{f.label}</label>
@@ -162,12 +187,15 @@
         {/each}
         {#if sec.adb}
           <div class="adb-tools">
-            <button class="btn" type="button" disabled={searching} onclick={searchAdb}>
-              {searching ? '搜索中…' : '检测adb地址'}
+            <button class="btn" type="button" disabled={connecting || searching} onclick={connectAdb}>
+              {connecting ? '连接中…' : '连接设备'}
+            </button>
+            <button class="btn" type="button" disabled={searching || connecting} onclick={searchAdb}>
+              {searching ? '刷新中…' : '刷新设备列表'}
             </button>
             {#if adbResults}
               {#each adbResults as addr (addr)}
-                <button class="chip" type="button" title="点击写入 adbIP / adbPort" onclick={() => pickAdb(addr)}>
+                <button class="chip" type="button" title="点击选择设备" onclick={() => pickAdb(addr)}>
                   {addr}
                 </button>
               {/each}

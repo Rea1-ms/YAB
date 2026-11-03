@@ -117,11 +117,17 @@ def register_topics(hub: Hub, service: BaasService):
     hub.register_rpc('EventConfig', 'refresh_all', service.event_refresh_all)
 
     hub.register_rpc('Meta', 'autosearch_adb', lambda _config, _params: _autosearch_adb())
+    hub.register_rpc('Meta', 'connect_adb', lambda _config, params: _connect_adb(params))
 
 
 def _autosearch_adb():
-    from core.device import emulator_manager
-    return emulator_manager.autosearch()
+    from core.device.adb_devices import connected_devices
+    return connected_devices()
+
+
+def _connect_adb(params):
+    from core.device.adb_devices import connect_device
+    return connect_device(params.get('host', ''), params.get('port', ''))
 
 
 class SPAStaticFiles(StaticFiles):

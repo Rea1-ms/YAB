@@ -1,10 +1,12 @@
 import re
 import sys
+import ipaddress
 
 from adbutils import adb
 from adbutils.errors import AdbTimeout, AdbError
 
 from core.exception import RequestHumanTakeOver
+from core.device.adb_devices import connect_device, device_serial, split_serial
 
 # reference : [ https://github.com/LmeSzinc/AzurLaneAutoScript/blob/master/module/device/connection.py ]
 class Connection:
@@ -32,16 +34,10 @@ class Connection:
         self.package = None
         self.adbIP = self.config.adbIP
         self.adbPort = self.config.adbPort
-        is_usb_or_emulator_device = (self.adbIP == "" or self.adbPort == "")
-        if self.adbIP == "" and self.adbPort != "":
-            self.serial = self.adbPort
-        elif self.adbIP != "" and self.adbPort == "":
-            self.serial = self.adbIP
-
-        if not is_usb_or_emulator_device:
-            if isinstance(self.adbPort, int):
-                self.adbPort = str(self.adbPort)
-            self.serial = self.adbIP + ":" + self.adbPort
+        if not self.adbIP or not self.adbPort:
+            self.serial = str(self.adbIP or self.adbPort or 'auto')
+        else:
+            self.serial = device_serial(self.adbIP, self.adbPort)
             self.set_serial(self.serial)
         self.check_serial()
         self.detect_device()
@@ -63,7 +59,7 @@ class Connection:
         self.logger.info(f"Possible Window Process Name : {process_names}")
         self.app_process_window = win32_WindowInfo(process_names)
         if not self.app_process_window.is_valid_window():
-            self.logger.error(f"Didn't find process window, please check your game process is launched.")
+            self.logger.error("Didn't find process window, please check your game process is launched.")
             raise RequestHumanTakeOver("App process window not found.")
 
     def check_serial(self):
@@ -103,8 +99,8 @@ class Connection:
     @staticmethod
     def serial_port(serial):
         try:
-            port = int(serial.split(':')[1])
-        except IndexError:
+            port = int(split_serial(serial)[1])
+        except ValueError:
             return 0
         return port
 
@@ -139,8 +135,7 @@ class Connection:
             elif n_available == 1:
                 self.logger.info("Auto device detection found only one device, using it")
                 self.set_serial(available[0])
-            elif n_available == 2 and (available[0] == "127.0.0.1:16384" and available[1] == "127.0.0.1:7555") or \
-                    (available[0] == "127.0.0.1:7555" and available[1] == "127.0.0.1:16384"):
+            elif n_available == 2 and set(available) == {"127.0.0.1:16384", "127.0.0.1:7555"}:
                 self.logger.info("Find Same MuMu12 Device, using it")
                 self.set_serial("127.0.0.1:16384")
             else:
@@ -172,6 +167,8 @@ class Connection:
                         pass
                 port = self.serial_port(self.serial)
                 for device in available:
+                    if split_serial(device)[0] != self.adbIP:
+                        continue
                     temp = abs(self.serial_port(device) - port)
                     if temp == 0:
                         break
@@ -197,22 +194,27 @@ class Connection:
         return
 
     def is_mumu_family(self):
-        return self.adbPort == "7555" or self.is_mumu12_family()
+        return self._is_local_device() and (self.adbPort == "7555" or self.is_mumu12_family())
+
+    def _is_local_device(self):
+        if self.adbIP == 'localhost':
+            return True
+        try:
+            return ipaddress.ip_address(self.adbIP).is_loopback
+        except ValueError:
+            return False
 
     def set_serial(self, serial):
-        try:
-            ip = serial.split(':')[0]
-            port = serial.split(':')[1]
-        except IndexError:
-            ip = "127.0.0.1"
-            port = "0"
+        ip, port = split_serial(serial)
         self.config_set.set('adbIP', ip)
         self.config_set.set('adbPort', port)
         self.adbIP = ip
         self.adbPort = port
-        self.serial = ip + ':' + port
+        self.serial = serial
 
     def is_mumu12_family(self):
+        if not self._is_local_device():
+            return False
         try:
             port = int(self.adbPort)
         except ValueError:
@@ -311,7 +313,7 @@ class Connection:
         if target_package not in installed_packages:
             self.logger.error(f"Package [ {target_package} ] not found.")
             raise RequestHumanTakeOver("Package not found.")
-        self.logger.info(f"Package Found.")
+        self.logger.info("Package Found.")
         self.package = target_package
 
     def get_package_name(self):
@@ -336,44 +338,16 @@ class Connection:
         return ""
 
     def adb_connect(self):
-        for device in self.list_devices():
-            if device.state == 'offline':
-                self.logger.warning(f'Device {device.serial} is offline, disconnect it before connecting')
-                msg = adb.disconnect(device.serial)
-                if msg:
-                    self.logger.info(msg)
-            elif device.state == 'unauthorized':
-                self.logger.error(f'Device {device.serial} is unauthorized, please accept ADB debugging on your device')
-            elif device.state == 'device':
-                pass
-            else:
-                self.logger.warning(f'Device {device.serial} is is having a unknown status: {device.state}')
-
-        # Skip for emulator-5554
-        if 'emulator-' in self.serial:
-            self.logger.info(f'"{self.serial}" is a `emulator-*` serial, skip adb connect')
-            return True
-        if re.match(r'^[a-zA-Z0-9]+$', self.serial):
-            self.logger.info(f'"{self.serial}" seems to be a Android serial, skip adb connect')
-            return True
-
-        # Try to connect
+        host, port = split_serial(self.serial)
         for _ in range(3):
-            msg = adb.connect(self.serial)
-            self.logger.info(msg)
-            # Connected to 127.0.0.1:59865
-            # Already connected to 127.0.0.1:59865
-            if 'connected' in msg:
+            try:
+                connect_device(host, port)
+                self.logger.info(f'Device connected: {self.serial}')
                 return True
-            # bad port number '598265' in '127.0.0.1:598265'
-            elif 'bad port' in msg:
-                self.logger.error('Serial incorrect, might be a typo')
-                raise RequestHumanTakeOver
-
-        # Failed to connect
-        self.logger.warning(f'Failed to connect {self.serial} after 3 trial, assume connected')
-        self.detect_device()
-        return False
+            except (AdbError, RuntimeError) as exc:
+                error = str(exc)
+                self.logger.warning(error)
+        raise RequestHumanTakeOver(error)
 
     def get_serial(self):
         return self.serial
