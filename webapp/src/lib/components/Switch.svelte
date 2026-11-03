@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../i18n';
+
   let {
     checked,
     disabled = false,
@@ -19,7 +21,7 @@
   type="button"
   role="switch"
   aria-checked={checked}
-  aria-label={label}
+  aria-label={$t(label)}
   onclick={() => onchange(!checked)}
 >
   <span class="knob"></span>

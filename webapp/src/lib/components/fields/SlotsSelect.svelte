@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../../i18n';
+
   let {
     options = [],
     value,
@@ -27,13 +29,13 @@
       <span class="idx">#{i + 1}</span>
       <select class="input" value={String(slot ?? '')} onchange={(e) => pick(i, (e.currentTarget as HTMLSelectElement).value)}>
         {#each options as opt (opt)}
-          <option value={opt}>{opt}</option>
+          <option value={opt}>{$t(opt)}</option>
         {/each}
       </select>
     </label>
   {/each}
   {#if slots.length === 0}
-    <span class="dim">现值为空，无法渲染槽位</span>
+    <span class="dim">{$t('现值为空，无法渲染槽位')}</span>
   {/if}
 </div>
 

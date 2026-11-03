@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getDirStores } from '../stores';
+  import { t } from '../i18n';
   import PanelAccordion from '../components/fields/PanelAccordion.svelte';
 
   let { dir }: { dir: string } = $props();
@@ -12,9 +13,9 @@
 
 <div class="page">
   {#if !$panels}
-    <div class="placeholder dim">面板加载中…</div>
+    <div class="placeholder dim">{$t('面板加载中…')}</div>
   {:else if configPanels.length === 0}
-    <div class="placeholder dim">暂无配置面板</div>
+    <div class="placeholder dim">{$t('暂无配置面板')}</div>
   {:else}
     <div class="list">
       {#each configPanels as p, i (p.id)}

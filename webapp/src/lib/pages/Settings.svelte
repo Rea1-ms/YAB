@@ -1,6 +1,7 @@
 <script lang="ts">
   import { callRpc, getDirStores, meta, setConfigValue } from '../stores';
   import { toast } from '../toast';
+  import { t, tNow } from '../i18n';
   import Switch from '../components/Switch.svelte';
   import TextField from '../components/TextField.svelte';
   import PanelAccordion from '../components/fields/PanelAccordion.svelte';
@@ -117,7 +118,9 @@
       if (r !== undefined) {
         const list = Array.isArray(r) ? r : r == null ? [] : [r];
         adbResults = list.map((x) => String(x));
-        if (adbResults.length === 0) toast('info', '暂未发现已连接设备。网络设备可以填写地址和端口后，点击“连接设备”。');
+        if (adbResults.length === 0) {
+          toast('info', tNow()('暂未发现已连接设备。网络设备可以填写地址和端口后，点击“连接设备”。'));
+        }
       }
     } finally {
       searching = false;
@@ -130,7 +133,7 @@
     const port = match?.[3] ?? '';
     if (!await setConfigValue(dir, 'adbIP', host)) return;
     if (!await setConfigValue(dir, 'adbPort', port)) return;
-    toast('success', `已选择设备：${addr}`);
+    toast('success', tNow()('已选择设备：{0}').replace('{0}', () => addr));
     adbResults = null;
   }
 
@@ -142,7 +145,7 @@
         port: String($argsStore?.adbPort ?? ''),
       });
       if (result) {
-        toast('success', `设备已连接：${result.serial}`);
+        toast('success', tNow()('设备已连接：{0}').replace('{0}', () => result.serial));
         await searchAdb();
       }
     } finally {
@@ -158,13 +161,13 @@
   <div class="cards">
     {#each SECTIONS as sec (sec.title)}
       <div class="card sec">
-        <h2>{sec.title}</h2>
+        <h2>{$t(sec.title)}</h2>
         {#if sec.hint}
-          <p class="hint">{sec.hint}</p>
+          <p class="hint">{$t(sec.hint)}</p>
         {/if}
         {#each sec.fields as f (f.key)}
           <div class="field">
-            <label for={f.key}>{f.label}</label>
+            <label for={f.key}>{$t(f.label)}</label>
             <div class="ctl">
               {#if f.kind === 'switch'}
                 <Switch checked={Boolean($argsStore?.[f.key])} onchange={(v) => save(f.key, v)} />
@@ -175,16 +178,16 @@
                   value={String($argsStore?.[f.key] ?? '')}
                   onchange={(e) => save(f.key, (e.currentTarget as HTMLSelectElement).value)}
                 >
-                  <option value="" disabled>请选择</option>
+                  <option value="" disabled>{$t('请选择')}</option>
                   {#each optEntries(f, $meta) as [v, label] (v)}
-                    <option value={v}>{label}</option>
+                    <option value={v}>{$t(label)}</option>
                   {/each}
                 </select>
               {:else}
-                <TextField value={$argsStore?.[f.key]} onSave={(raw) => save(f.key, raw)} placeholder={f.placeholder} />
+                <TextField value={$argsStore?.[f.key]} onSave={(raw) => save(f.key, raw)} placeholder={f.placeholder ? $t(f.placeholder) : undefined} />
               {/if}
               {#if f.hint}
-                <div class="hint">{f.hint}</div>
+                <div class="hint">{$t(f.hint)}</div>
               {/if}
             </div>
           </div>
@@ -192,14 +195,14 @@
         {#if sec.adb}
           <div class="adb-tools">
             <button class="btn" type="button" disabled={connecting || searching} onclick={connectAdb}>
-              {connecting ? '连接中…' : '连接设备'}
+              {connecting ? $t('连接中…') : $t('连接设备')}
             </button>
             <button class="btn" type="button" disabled={searching || connecting} onclick={searchAdb}>
-              {searching ? '刷新中…' : '刷新设备列表'}
+              {searching ? $t('刷新中…') : $t('刷新设备列表')}
             </button>
             {#if adbResults}
               {#each adbResults as addr (addr)}
-                <button class="chip" type="button" title="点击选择设备" onclick={() => pickAdb(addr)}>
+                <button class="chip" type="button" title={$t('点击选择设备')} onclick={() => pickAdb(addr)}>
                   {addr}
                 </button>
               {/each}
@@ -212,7 +215,7 @@
 
   {#if settingsPanels.length > 0}
     <div class="panel-section">
-      <h2 class="panel-head">任务与功能设置</h2>
+      <h2 class="panel-head">{$t('任务与功能设置')}</h2>
       <div class="panel-list">
         {#each settingsPanels as p (p.id)}
           <PanelAccordion {dir} panel={p} args={$argsStore ?? {}} />

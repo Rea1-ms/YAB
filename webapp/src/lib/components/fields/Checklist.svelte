@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toStringArray } from './shared';
+  import { t } from '../../i18n';
 
   let {
     options = [],
@@ -26,11 +27,11 @@
   {#each options as opt (opt)}
     <label class="cell">
       <input type="checkbox" checked={selected.has(opt)} onchange={() => toggle(opt)} />
-      <span class="name">{opt}</span>
+      <span class="name">{$t(opt)}</span>
     </label>
   {/each}
   {#if options.length === 0}
-    <span class="dim">暂无可选项</span>
+    <span class="dim">{$t('暂无可选项')}</span>
   {/if}
 </div>
 

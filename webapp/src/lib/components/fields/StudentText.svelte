@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { toStringArray } from './shared';
+  import { t } from '../../i18n';
 
   let {
     options = [],
@@ -68,7 +69,7 @@
 <div class="wrap">
   <input
     class="input"
-    placeholder="学生名，逗号分隔"
+    placeholder={$t('学生名，逗号分隔')}
     bind:value={draft}
     oninput={schedule}
     onfocus={() => (focused = true)}
@@ -77,7 +78,7 @@
   <div class="add-row">
     <input
       class="input"
-      placeholder="从列表选择或输入学生名…"
+      placeholder={$t('从列表选择或输入学生名…')}
       list="student-options"
       bind:value={addName}
       onkeydown={(e) => e.key === 'Enter' && addStudent()}
@@ -87,7 +88,7 @@
         <option value={s}></option>
       {/each}
     </datalist>
-    <button class="btn" type="button" onclick={addStudent}>添加</button>
+    <button class="btn" type="button" onclick={addStudent}>{$t('添加')}</button>
   </div>
 </div>
 

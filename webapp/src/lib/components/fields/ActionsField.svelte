@@ -1,6 +1,7 @@
 <script lang="ts">
   import { callRpc } from '../../stores';
   import { toast } from '../../toast';
+  import { t, tNow } from '../../i18n';
   import type { ActionItem } from '../../types';
 
   let {
@@ -13,16 +14,18 @@
 
   async function run(task: string): Promise<void> {
     const r = await callRpc(`State:${dir}`, 'run_task', { task });
-    if (r !== undefined) toast('success', `已提交任务：${task}`);
+    if (r !== undefined) {
+      toast('success', tNow()('已提交任务：{0}').replace('{0}', () => tNow()(task)));
+    }
   }
 </script>
 
 <div class="actions">
   {#each actions as a (a.task)}
-    <button class="btn" type="button" onclick={() => void run(a.task)}>{a.label}</button>
+    <button class="btn" type="button" onclick={() => void run(a.task)}>{$t(a.label)}</button>
   {/each}
   {#if actions.length === 0}
-    <span class="dim">暂无动作</span>
+    <span class="dim">{$t('暂无动作')}</span>
   {/if}
 </div>
 

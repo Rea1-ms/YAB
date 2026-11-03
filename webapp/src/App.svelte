@@ -2,6 +2,7 @@
   import { callRpc, configScan, connected, meta, setActiveDir } from './lib/stores';
   import { GLOBAL_PAGES, navigate, pendingNavDir, PAGES, route } from './lib/router';
   import { toast } from './lib/toast';
+  import { LOCALES, locale, t, tNow, type LocaleCode } from './lib/i18n';
   import ToastHost from './lib/components/ToastHost.svelte';
   import Modal from './lib/components/Modal.svelte';
   import Home from './lib/pages/Home.svelte';
@@ -60,10 +61,14 @@
     if (v && v !== dir) navigate(v, page);
   }
 
+  function onLangChange(e: Event): void {
+    locale.set((e.currentTarget as HTMLSelectElement).value as LocaleCode);
+  }
+
   async function doAdd(): Promise<void> {
     const name = newName.trim();
     if (!name) {
-      toast('info', '请输入配置名称');
+      toast('info', tNow()('请输入配置名称'));
       return;
     }
     const r = await callRpc('ConfigScan', 'add', { name });
@@ -77,7 +82,7 @@
   async function doRename(): Promise<void> {
     const name = renameValue.trim();
     if (!name) {
-      toast('info', '名称不能为空');
+      toast('info', tNow()('名称不能为空'));
       return;
     }
     const r = await callRpc('ConfigScan', 'rename', { config: dir, name });
@@ -107,7 +112,7 @@
         {/each}
       </select>
       <div class="cfg-btns">
-        <button class="mini" type="button" onclick={() => { newName = ''; showAdd = true; }}>新建</button>
+        <button class="mini" type="button" onclick={() => { newName = ''; showAdd = true; }}>{$t('新建')}</button>
         <button
           class="mini"
           type="button"
@@ -117,39 +122,49 @@
             showRename = true;
           }}
         >
-          重命名
+          {$t('重命名')}
         </button>
         <button
           class="mini"
           type="button"
           disabled={!dir || dir === 'default_config'}
-          title="default_config 不允许删除"
+          title={$t('default_config 不允许删除')}
           onclick={() => (showDelete = true)}
         >
-          删除
+          {$t('删除')}
         </button>
       </div>
     </div>
 
     <nav class="nav">
       {#each PAGES as p (p.id)}
-        <a href={`#/${encodeURIComponent(dir)}/${p.id}`} class:active={page === p.id && !globalPage}>{p.label}</a>
+        <a href={`#/${encodeURIComponent(dir)}/${p.id}`} class:active={page === p.id && !globalPage}>{$t(p.label)}</a>
       {/each}
     </nav>
 
     <nav class="nav global-nav">
       {#each GLOBAL_PAGES as g (g.id)}
-        <a href={`#/${g.id}`} class:active={globalPage === g.id}>{g.label}</a>
+        <a href={`#/${g.id}`} class:active={globalPage === g.id}>{$t(g.label)}</a>
       {/each}
     </nav>
 
     <div class="side-status">
-      <div class="st" title={$connected ? '后端已连接' : '连接断开，自动重连中'}>
-        <span class="dot" class:ok={$connected}></span>连接
+      <div class="st" title={$t($connected ? '后端已连接' : '连接断开，自动重连中')}>
+        <span class="dot" class:ok={$connected}></span>{$t('连接')}
       </div>
-      <div class="st" title={$meta?.ocr_error || ($meta?.ocr_ready ? 'OCR 就绪' : 'OCR 初始化中…')}>
+      <div class="st" title={$meta?.ocr_error || $t($meta?.ocr_ready ? 'OCR 就绪' : 'OCR 初始化中…')}>
         <span class="dot" class:ok={$meta?.ocr_ready === true}></span>OCR
       </div>
+      <select
+        class="input lang-select"
+        value={$locale}
+        title={$t('界面语言')}
+        onchange={onLangChange}
+      >
+        {#each LOCALES as l (l.code)}
+          <option value={l.code}>{l.label}</option>
+        {/each}
+      </select>
     </div>
   </aside>
 
@@ -157,7 +172,7 @@
     {#if globalPage === 'update'}
       <UpdatePage />
     {:else if !dir}
-      <div class="placeholder">{scan.length === 0 ? '等待后端连接…' : '暂无配置'}</div>
+      <div class="placeholder">{scan.length === 0 ? $t('等待后端连接…') : $t('暂无配置')}</div>
     {:else}
       {#key dir}
         {#if page === 'home'}
@@ -178,26 +193,31 @@
 
 <ToastHost />
 
-<Modal bind:open={showAdd} title="新建配置" confirmText="创建" onconfirm={doAdd}>
+<Modal bind:open={showAdd} title={$t('新建配置')} confirmText="创建" onconfirm={doAdd}>
   <input
     class="input"
-    placeholder="配置名称（同时作为目录名）"
+    placeholder={$t('配置名称（同时作为目录名）')}
     bind:value={newName}
     onkeydown={(e) => e.key === 'Enter' && doAdd()}
   />
 </Modal>
 
-<Modal bind:open={showRename} title={`重命名「${currentName}」`} confirmText="确定" onconfirm={doRename}>
+<Modal
+  bind:open={showRename}
+  title={$t('重命名「{0}」').replace('{0}', () => currentName)}
+  confirmText="确定"
+  onconfirm={doRename}
+>
   <input
     class="input"
-    placeholder="新的显示名称"
+    placeholder={$t('新的显示名称')}
     bind:value={renameValue}
     onkeydown={(e) => e.key === 'Enter' && doRename()}
   />
 </Modal>
 
-<Modal bind:open={showDelete} title="删除配置" confirmText="删除" danger onconfirm={doDelete}>
-  <p>确认删除配置「{currentName}」？该操作不可恢复。</p>
+<Modal bind:open={showDelete} title={$t('删除配置')} confirmText="删除" danger onconfirm={doDelete}>
+  <p>{$t('确认删除配置「{0}」？该操作不可恢复。').replace('{0}', () => currentName)}</p>
 </Modal>
 
 <style>
@@ -296,6 +316,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .lang-select {
+    width: 100%;
+    font-size: 12px;
+    padding: 4px 6px;
   }
   .main {
     flex: 1;

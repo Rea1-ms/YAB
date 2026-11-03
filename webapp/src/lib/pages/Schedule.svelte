@@ -1,6 +1,7 @@
 <script lang="ts">
   import { callRpc, getDirStores, meta, setEventEnabled } from '../stores';
   import { toast } from '../toast';
+  import { t, tNow } from '../i18n';
   import Switch from '../components/Switch.svelte';
   import type { EventItem, Hms } from '../types';
 
@@ -71,7 +72,7 @@
       },
     });
     if (r !== undefined) {
-      toast('success', `已保存「${fn}」`);
+      toast('success', tNow()('已保存「{0}」').replace('{0}', () => fn));
       expanded = null;
     }
   }
@@ -101,36 +102,36 @@
   }
 
   async function saveNextTick(it: EventItem, value: string): Promise<void> {
-    const t = new Date(value).getTime();
-    if (Number.isNaN(t)) {
-      toast('error', '时间格式无效');
+    const t0 = new Date(value).getTime();
+    if (Number.isNaN(t0)) {
+      toast('error', tNow()('时间格式无效'));
       return;
     }
     await callRpc(`EventConfig:${dir}`, 'set_event', {
       func_name: it.func_name,
-      patch: { next_tick: Math.floor(t / 1000) },
+      patch: { next_tick: Math.floor(t0 / 1000) },
     });
   }
 </script>
 
 <div class="page">
   <div class="toolbar">
-    <button class="btn" type="button" onclick={() => enableAll(true)}>全部启用</button>
-    <button class="btn" type="button" onclick={() => enableAll(false)}>全部禁用</button>
-    <button class="btn" type="button" onclick={refreshAll}>刷新执行时间</button>
-    <span class="dim">共 {$eventStore?.length ?? 0} 个事件</span>
+    <button class="btn" type="button" onclick={() => enableAll(true)}>{$t('全部启用')}</button>
+    <button class="btn" type="button" onclick={() => enableAll(false)}>{$t('全部禁用')}</button>
+    <button class="btn" type="button" onclick={refreshAll}>{$t('刷新执行时间')}</button>
+    <span class="dim">{$t('共 {0} 个事件').replace('{0}', () => String($eventStore?.length ?? 0))}</span>
   </div>
 
   <div class="card table-wrap">
     <table class="table">
       <thead>
         <tr>
-          <th>启用</th>
-          <th>事件名</th>
-          <th>函数</th>
-          <th>下次执行</th>
-          <th>优先级</th>
-          <th>间隔（秒）</th>
+          <th>{$t('启用')}</th>
+          <th>{$t('事件名')}</th>
+          <th>{$t('函数')}</th>
+          <th>{$t('下次执行')}</th>
+          <th>{$t('优先级')}</th>
+          <th>{$t('间隔（秒）')}</th>
           <th></th>
         </tr>
       </thead>
@@ -138,7 +139,7 @@
         {#each $eventStore ?? [] as it (it.func_name)}
           <tr>
             <td><Switch checked={it.enabled} onchange={(v) => setEventEnabled(dir, it.func_name, v)} /></td>
-            <td>{it.event_name || it.func_name}</td>
+            <td>{$t(it.event_name || it.func_name)}</td>
             <td class="mono fn">{it.func_name}</td>
             <td>
               <input
@@ -152,7 +153,7 @@
             <td>{it.interval}</td>
             <td>
               <button class="mini" type="button" onclick={() => toggleRow(it.func_name, it)}>
-                {expanded === it.func_name ? '收起' : '展开编辑'}
+                {expanded === it.func_name ? $t('收起') : $t('展开编辑')}
               </button>
             </td>
           </tr>
@@ -161,42 +162,42 @@
               <td colspan="7" class="editor-cell">
                 <div class="editor">
                   <div>
-                    <div class="sec-title">每日重置 daily_reset（时 / 分 / 秒）</div>
+                    <div class="sec-title">{$t('每日重置 daily_reset（时 / 分 / 秒）')}</div>
                     {#each draft.daily_reset as tm, i (i)}
                       <div class="hms-row">
-                        <input class="input" type="number" min="0" max="23" value={tm[0]} oninput={(e) => (tm[0] = toInt(e.currentTarget.value))} /> 时
-                        <input class="input" type="number" min="0" max="59" value={tm[1]} oninput={(e) => (tm[1] = toInt(e.currentTarget.value))} /> 分
-                        <input class="input" type="number" min="0" max="59" value={tm[2]} oninput={(e) => (tm[2] = toInt(e.currentTarget.value))} /> 秒
-                        <button class="mini" type="button" onclick={() => draft.daily_reset.splice(i, 1)}>删除</button>
+                        <input class="input" type="number" min="0" max="23" value={tm[0]} oninput={(e) => (tm[0] = toInt(e.currentTarget.value))} /> {$t('时')}
+                        <input class="input" type="number" min="0" max="59" value={tm[1]} oninput={(e) => (tm[1] = toInt(e.currentTarget.value))} /> {$t('分')}
+                        <input class="input" type="number" min="0" max="59" value={tm[2]} oninput={(e) => (tm[2] = toInt(e.currentTarget.value))} /> {$t('秒')}
+                        <button class="mini" type="button" onclick={() => draft.daily_reset.splice(i, 1)}>{$t('删除')}</button>
                       </div>
                     {/each}
                     <button class="mini" type="button" onclick={() => draft.daily_reset.push([0, 0, 0])}>
-                      添加时间点
+                      {$t('添加时间点')}
                     </button>
                   </div>
 
                   <div>
-                    <div class="sec-title">禁用时段 disabled_time_range（开始 — 结束，时 / 分 / 秒）</div>
+                    <div class="sec-title">{$t('禁用时段 disabled_time_range（开始 — 结束，时 / 分 / 秒）')}</div>
                     {#each draft.disabled_time_range as rg, i (i)}
                       <div class="range-row">
-                        <input class="input" type="number" min="0" max="23" value={rg[0][0]} oninput={(e) => (rg[0][0] = toInt(e.currentTarget.value))} /> 时
-                        <input class="input" type="number" min="0" max="59" value={rg[0][1]} oninput={(e) => (rg[0][1] = toInt(e.currentTarget.value))} /> 分
-                        <input class="input" type="number" min="0" max="59" value={rg[0][2]} oninput={(e) => (rg[0][2] = toInt(e.currentTarget.value))} /> 秒
+                        <input class="input" type="number" min="0" max="23" value={rg[0][0]} oninput={(e) => (rg[0][0] = toInt(e.currentTarget.value))} /> {$t('时')}
+                        <input class="input" type="number" min="0" max="59" value={rg[0][1]} oninput={(e) => (rg[0][1] = toInt(e.currentTarget.value))} /> {$t('分')}
+                        <input class="input" type="number" min="0" max="59" value={rg[0][2]} oninput={(e) => (rg[0][2] = toInt(e.currentTarget.value))} /> {$t('秒')}
                         <span class="dim">—</span>
-                        <input class="input" type="number" min="0" max="23" value={rg[1][0]} oninput={(e) => (rg[1][0] = toInt(e.currentTarget.value))} /> 时
-                        <input class="input" type="number" min="0" max="59" value={rg[1][1]} oninput={(e) => (rg[1][1] = toInt(e.currentTarget.value))} /> 分
-                        <input class="input" type="number" min="0" max="59" value={rg[1][2]} oninput={(e) => (rg[1][2] = toInt(e.currentTarget.value))} /> 秒
-                        <button class="mini" type="button" onclick={() => draft.disabled_time_range.splice(i, 1)}>删除</button>
+                        <input class="input" type="number" min="0" max="23" value={rg[1][0]} oninput={(e) => (rg[1][0] = toInt(e.currentTarget.value))} /> {$t('时')}
+                        <input class="input" type="number" min="0" max="59" value={rg[1][1]} oninput={(e) => (rg[1][1] = toInt(e.currentTarget.value))} /> {$t('分')}
+                        <input class="input" type="number" min="0" max="59" value={rg[1][2]} oninput={(e) => (rg[1][2] = toInt(e.currentTarget.value))} /> {$t('秒')}
+                        <button class="mini" type="button" onclick={() => draft.disabled_time_range.splice(i, 1)}>{$t('删除')}</button>
                       </div>
                     {/each}
                     <button class="mini" type="button" onclick={() => draft.disabled_time_range.push([[0, 0, 0], [0, 0, 0]])}>
-                      添加时段
+                      {$t('添加时段')}
                     </button>
                   </div>
 
                   <div class="task-cols">
                     <div class="task-col">
-                      <div class="sec-title">前置任务 pre_task</div>
+                      <div class="sec-title">{$t('前置任务 pre_task')}</div>
                       {#each Object.entries(eventNames) as [fn, name] (fn)}
                         <label class="check">
                           <input
@@ -204,12 +205,12 @@
                             checked={draft.pre_task.includes(fn)}
                             onchange={(e) => toggleIn(draft.pre_task, fn, e.currentTarget.checked)}
                           />
-                          {name || fn} <span class="mono fnname">{fn}</span>
+                          {$t(name || fn)} <span class="mono fnname">{fn}</span>
                         </label>
                       {/each}
                     </div>
                     <div class="task-col">
-                      <div class="sec-title">后续任务 post_task</div>
+                      <div class="sec-title">{$t('后续任务 post_task')}</div>
                       {#each Object.entries(eventNames) as [fn, name] (fn)}
                         <label class="check">
                           <input
@@ -217,15 +218,15 @@
                             checked={draft.post_task.includes(fn)}
                             onchange={(e) => toggleIn(draft.post_task, fn, e.currentTarget.checked)}
                           />
-                          {name || fn} <span class="mono fnname">{fn}</span>
+                          {$t(name || fn)} <span class="mono fnname">{fn}</span>
                         </label>
                       {/each}
                     </div>
                   </div>
 
                   <div class="editor-foot">
-                    <button class="btn primary" type="button" onclick={saveDraft}>保存</button>
-                    <button class="btn" type="button" onclick={() => (expanded = null)}>取消</button>
+                    <button class="btn primary" type="button" onclick={saveDraft}>{$t('保存')}</button>
+                    <button class="btn" type="button" onclick={() => (expanded = null)}>{$t('取消')}</button>
                   </div>
                 </div>
               </td>
@@ -234,7 +235,7 @@
         {/each}
         {#if !$eventStore?.length}
           <tr>
-            <td colspan="7" class="dim empty">暂无事件数据</td>
+            <td colspan="7" class="dim empty">{$t('暂无事件数据')}</td>
           </tr>
         {/if}
       </tbody>

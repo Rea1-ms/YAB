@@ -1,6 +1,7 @@
 /** 字段渲染组件的公共工具：选项规范化、值规范化与保存封装 */
 import { setConfigValue } from '../../stores';
 import { toast } from '../../toast';
+import { tNow } from '../../i18n';
 import type { OptionItem, PanelField, ShopRow } from '../../types';
 
 /** select 选项统一为 [value,label] 对 */
@@ -71,7 +72,7 @@ export async function saveNumberValue(dir: string, field: PanelField, raw: strin
   const text = raw.trim();
   const n = Number(text);
   if (text === '' || Number.isNaN(n)) {
-    toast('error', `${field.label}：请输入有效数字`);
+    toast('error', tNow()('{0}：请输入有效数字').replace('{0}', () => tNow()(field.label)));
     return false;
   }
   let v = n;

@@ -1,6 +1,7 @@
 import { get, writable, type Writable } from 'svelte/store';
 import { ws } from './ws';
 import { toast } from './toast';
+import { tNow } from './i18n';
 import type {
   ConfigArgs,
   ConfigEntry,
@@ -119,7 +120,7 @@ export function setActiveDir(dir: string | null): void {
   }
 }
 
-/** RPC 封装：失败弹 toast 并返回 undefined */
+/** RPC 封装：失败弹 toast 并返回 undefined（错误消息按词典尝试翻译，缺失回退原文） */
 export async function callRpc<T = unknown>(
   topic: string,
   fn: string,
@@ -128,7 +129,7 @@ export async function callRpc<T = unknown>(
   try {
     return await ws.rpc<T>(topic, fn, args);
   } catch (err) {
-    toast('error', err instanceof Error ? err.message : String(err));
+    toast('error', tNow()(err instanceof Error ? err.message : String(err)));
     return undefined;
   }
 }

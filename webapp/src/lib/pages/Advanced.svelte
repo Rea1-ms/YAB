@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getDirStores, setConfigValue } from '../stores';
   import { toast } from '../toast';
+  import { t, tNow } from '../i18n';
   import Switch from '../components/Switch.svelte';
   import TextField from '../components/TextField.svelte';
 
@@ -40,7 +41,7 @@
     try {
       parsed = JSON.parse(raw);
     } catch {
-      toast('error', `${k}：JSON 解析失败`);
+      toast('error', tNow()('{0}：JSON 解析失败').replace('{0}', () => k));
       return;
     }
     if (await setConfigValue(dir, k, parsed)) {
@@ -52,7 +53,7 @@
   async function saveNum(k: string, raw: string): Promise<void> {
     const n = Number(raw);
     if (Number.isNaN(n)) {
-      toast('error', `${k}：不是有效数字`);
+      toast('error', tNow()('{0}：不是有效数字').replace('{0}', () => k));
       return;
     }
     await setConfigValue(dir, k, n);
@@ -68,11 +69,11 @@
 </script>
 
 <div class="page">
-  <div class="adv-hint">修改高级配置可能影响脚本运行</div>
+  <div class="adv-hint">{$t('修改高级配置可能影响脚本运行')}</div>
 
   <div class="adv-tools">
-    <input class="input" placeholder="按键名过滤…" bind:value={filter} />
-    <span class="dim">{entries.length} / {Object.keys($argsStore ?? {}).length} 项</span>
+    <input class="input" placeholder={$t('按键名过滤…')} bind:value={filter} />
+    <span class="dim">{entries.length} / {Object.keys($argsStore ?? {}).length} {$t('项')}</span>
   </div>
 
   <div class="card adv-list">
@@ -102,14 +103,14 @@
                 value={jsonDraft(k, v)}
                 oninput={(e) => onJsonInput(k, e.currentTarget.value)}
               ></textarea>
-              <button class="btn" type="button" onclick={() => applyJson(k)}>应用</button>
+              <button class="btn" type="button" onclick={() => applyJson(k)}>{$t('应用')}</button>
             </div>
           {/if}
         </div>
       </div>
     {/each}
     {#if entries.length === 0}
-      <div class="empty dim">无匹配配置项</div>
+      <div class="empty dim">{$t('无匹配配置项')}</div>
     {/if}
   </div>
 </div>
