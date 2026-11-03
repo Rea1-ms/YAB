@@ -32,8 +32,14 @@ def _resolve_options(name, config):
         return list(static.total_assault_difficulties[server])
     if name == 'common_shop_items':
         return [row[0] for row in static.common_shop_price_list[server]]
+    if name == 'common_shop_rows':
+        return [{'name': row[0], 'price': row[1], 'currency': row[2]}
+                for row in static.common_shop_price_list[server]]
     if name == 'tactical_shop_items':
         return [row[0] for row in static.tactical_challenge_shop_price_list[server]]
+    if name == 'tactical_shop_rows':
+        return [{'name': row[0], 'price': row[1]}
+                for row in static.tactical_challenge_shop_price_list[server]]
     if name == 'students':
         key = _STUDENT_NAME_KEY.get(server, 'CN_name')
         return [s[key] for s in static.student_names]
@@ -160,7 +166,7 @@ PANELS = [
                    _field('favorStudent1', '指定学生列表', 'student_text',
                           options_from='students', help='逗号分隔，从下拉添加或直接填写'),
                    _field('cafe_reward_invite1_starred_student_position', '收藏学生序号', 'select',
-                          options=['1', '2', '3', '4', '5'],
+                          options=['1', '2', '3', '4', '5'], coerce='int',
                           help='选择收藏学生在收藏列表中的序号'),
                    ),
             _group('2号咖啡厅',
@@ -169,7 +175,7 @@ PANELS = [
                    _field('favorStudent2', '指定学生列表', 'student_text',
                           options_from='students'),
                    _field('cafe_reward_invite2_starred_student_position', '收藏学生序号', 'select',
-                          options=['1', '2', '3', '4', '5']),
+                          options=['1', '2', '3', '4', '5'], coerce='int'),
                    ),
         ],
     },
@@ -194,9 +200,11 @@ PANELS = [
         'tip': '商店里买东西',
         'groups': [
             _group('',
-                   _field('CommonShopList', '请勾选购买物品', 'checklist',
-                          options_from='common_shop_items'),
-                   _field('CommonShopRefreshTime', '购买刷新次数', 'number', max=3),
+                   _field('CommonShopList', '请勾选购买物品', 'shop_checklist',
+                          options_from='common_shop_rows',
+                          help='勾选要购买的物品，刷新后仍会按此清单购买'),
+                   _field('CommonShopRefreshTime', '购买刷新次数', 'number', max=3,
+                          coerce='int'),
                    ),
         ],
     },
@@ -205,9 +213,10 @@ PANELS = [
         'tip': '竞技场商店里买东西',
         'groups': [
             _group('',
-                   _field('TacticalChallengeShopList', '请勾选购买物品', 'checklist',
-                          options_from='tactical_shop_items'),
-                   _field('TacticalChallengeShopRefreshTime', '购买刷新次数', 'number', max=3),
+                   _field('TacticalChallengeShopList', '请勾选购买物品', 'shop_checklist',
+                          options_from='tactical_shop_rows'),
+                   _field('TacticalChallengeShopRefreshTime', '购买刷新次数', 'number', max=3,
+                          coerce='int'),
                    ),
         ],
     },
@@ -236,7 +245,7 @@ PANELS = [
                           help='需要对手比你低几级，高几级则填负数'),
                    _field('maxArenaRefreshTimes', '最多刷新次数', 'number'),
                    _field('ArenaComponentNumber', '自定义对手的编号', 'select',
-                          options=['1', '2', '3']),
+                          options=['1', '2', '3'], coerce='int'),
                    ),
         ],
     },
@@ -247,7 +256,8 @@ PANELS = [
             _group('',
                    _field('use_acceleration_ticket', '是否使用加速券', 'switch'),
                    _field('createTime', '制造次数', 'number'),
-                   _field('create_phase', '制造级数', 'select', options=['1', '2', '3']),
+                   _field('create_phase', '制造级数', 'select', options=['1', '2', '3'],
+                          coerce='int'),
                    ),
             _group('一级制造配置',
                    _field('create_phase_1_select_item_rule', '材料选择', 'select',
