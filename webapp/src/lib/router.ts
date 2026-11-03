@@ -4,21 +4,37 @@ import { writable } from 'svelte/store';
 export const PAGES = [
   { id: 'home', label: '主页' },
   { id: 'schedule', label: '调度' },
+  { id: 'config', label: '配置' },
   { id: 'settings', label: '设置' },
   { id: 'advanced', label: '高级' },
 ] as const;
 
-export type PageId = (typeof PAGES)[number]['id'];
+/** 全局页定义（不属于某个配置目录，路由形如 #/update） */
+export const GLOBAL_PAGES = [{ id: 'update', label: '更新与帮助' }] as const;
 
-export interface Route {
+export type PageId = (typeof PAGES)[number]['id'];
+export type GlobalPageId = (typeof GLOBAL_PAGES)[number]['id'];
+
+export interface DirRoute {
   dir: string;
   page: PageId;
+  global?: undefined;
 }
+
+export interface GlobalRoute {
+  global: GlobalPageId;
+  dir?: undefined;
+  page?: undefined;
+}
+
+export type Route = DirRoute | GlobalRoute;
 
 function parse(): Route | null {
   const raw = location.hash.replace(/^#\/?/, '');
   if (!raw) return null;
   const [d = '', p = ''] = raw.split('/');
+  // 仅无第二段时视为全局页，避免与同名配置目录冲突
+  if (!p && GLOBAL_PAGES.some((x) => x.id === d)) return { global: d as GlobalPageId };
   let dir = d;
   try {
     dir = decodeURIComponent(d);

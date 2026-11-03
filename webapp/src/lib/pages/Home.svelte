@@ -1,6 +1,7 @@
 <script lang="ts">
   import { callRpc, getDirStores } from '../stores';
   import { toast } from '../toast';
+  import AssetBar from '../components/AssetBar.svelte';
 
   let { dir }: { dir: string } = $props();
   // dir 由外层 {#key dir} 保证变化时重挂载，初始化读取即最终值
@@ -57,6 +58,7 @@
 </script>
 
 <div class="page">
+  <AssetBar {dir} />
   <div class="card run-card">
     <button class="big-btn" class:running={running} type="button" onclick={toggleRun}>
       {buttonLabel}
