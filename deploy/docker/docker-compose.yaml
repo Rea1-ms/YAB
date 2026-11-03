@@ -4,9 +4,10 @@ services:
     image: baas:v1.0
     tty: true
     ports:
-      # You can change the first port number to any other port number.
-      # This is for VNC Viewer to access.
-      - "5900:5900"
+      # 可修改冒号前的端口，通过浏览器访问网页界面。
+      - "22267:22267"
+    environment:
+      BAAS_WEBUI_TOKEN: ${BAAS_WEBUI_TOKEN:?请先设置网页访问密码}
     restart: always
     container_name: blue_archive_auto_script
     volumes:

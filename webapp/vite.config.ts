@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
-// 开发时把 /api（含 WebSocket）代理到本地后端：python -m server --port 8000
+// 开发时把 /api（含 WebSocket）代理到本地后端：python -m server --api-only --port 8000
 export default defineConfig({
   plugins: [svelte()],
   server: {

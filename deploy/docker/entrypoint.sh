@@ -88,4 +88,5 @@ pip3.9 install -r requirements-linux.txt -i https://pypi.tuna.tsinghua.edu.cn/si
 # Start the app
 echo "[INFO] Starting the app..."
 # WebUI is headless: no X server required
-python3.9 -m server --host 0.0.0.0 --port 22267
+: "${BAAS_WEBUI_TOKEN:?请设置 BAAS_WEBUI_TOKEN 环境变量作为网页访问密码}"
+exec python3.9 -m server --host 0.0.0.0 --port 22267

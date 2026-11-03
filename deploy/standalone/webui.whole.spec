@@ -7,8 +7,9 @@
 import os
 
 datas = []
-if os.path.exists('webapp/dist'):
-    datas += [('webapp/dist', 'webapp/dist')]
+if not os.path.isfile('webapp/dist/index.html'):
+    raise RuntimeError('请先运行 python -m server.frontend 构建网页资源')
+datas += [('webapp/dist', 'webapp/dist')]
 if os.path.exists('src/maatouch_bin'):
     datas += [('src/maatouch_bin', 'src/maatouch_bin')]
 

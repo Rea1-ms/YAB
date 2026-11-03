@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import secrets
 import tempfile
 import threading
 import time
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from server import frontend
 from server.service import BaasService, config_path
 
 
@@ -230,6 +232,125 @@ class GestureTests(unittest.TestCase):
         content = control._sock.sendall.call_args.args[0]
         device_wait = sum(int(ms) for ms in re.findall(rb'w (\d+)\n', content)) / 1000
         self.assertGreaterEqual(sum(waits), device_wait)
+
+
+class FrontendTests(ScratchTest):
+    def source(self):
+        webapp = self.scratch / 'webapp'
+        webapp.mkdir()
+        (webapp / 'package.json').write_text('{}', encoding='utf-8')
+        return webapp
+
+    def test_missing_assets_are_built_and_existing_files_are_retained(self):
+        webapp = self.source()
+
+        def build(command, **kwargs):
+            if 'build' in command:
+                self.assertIn('false', command)
+                (webapp / 'dist').mkdir(exist_ok=True)
+                (webapp / 'dist/index.html').write_text('网页', encoding='utf-8')
+
+        with patch.object(frontend.shutil, 'which', return_value='tool'), \
+                patch.object(frontend.subprocess, 'check_output', return_value='v22.23.4'), \
+                patch.object(frontend.subprocess, 'run', side_effect=build) as run:
+            frontend.ensure_frontend(self.scratch)
+            self.assertTrue((webapp / 'dist/index.html').is_file())
+            self.assertEqual(run.call_count, 2)
+            frontend.ensure_frontend(self.scratch)
+            self.assertEqual(run.call_count, 2)
+            source = webapp / 'src/main.ts'
+            source.parent.mkdir()
+            source.write_text('// source changed', encoding='utf-8')
+            newer = (webapp / 'dist/index.html').stat().st_mtime + 2
+            os.utime(source, (newer, newer))
+            frontend.ensure_frontend(self.scratch)
+            self.assertEqual(run.call_count, 4)
+
+    def test_missing_tools_report_setup_requirements_before_installing(self):
+        self.source()
+        for missing in ('node', 'pnpm'):
+            with self.subTest(missing=missing), \
+                    patch.object(frontend.shutil, 'which', side_effect=lambda name: None if name == missing else name), \
+                    patch.object(frontend.subprocess, 'check_output', return_value='v24.22.1'), \
+                    patch.object(frontend.subprocess, 'run') as run, \
+                    self.assertRaisesRegex(RuntimeError, 'Node.js' if missing == 'node' else 'pnpm'):
+                frontend.ensure_frontend(self.scratch)
+            run.assert_not_called()
+
+    def test_incompatible_installed_node_reports_requirement_before_installing(self):
+        self.source()
+        for version in ('v18.20.8', 'v20.18.0', 'v22.11.0', 'v23.11.0'):
+            with self.subTest(version=version), \
+                    patch.object(frontend.shutil, 'which', return_value='tool'), \
+                    patch.object(frontend.subprocess, 'check_output', return_value=version), \
+                    patch.object(frontend.subprocess, 'run') as run, \
+                    self.assertRaisesRegex(RuntimeError, '不支持 Vite 8'):
+                frontend.ensure_frontend(self.scratch)
+            run.assert_not_called()
+
+    def test_existing_package_manager_is_used_without_version_pinning(self):
+        webapp = self.source()
+
+        def build(command, **kwargs):
+            if 'build' in command:
+                (webapp / 'dist').mkdir()
+                (webapp / 'dist/index.html').write_text('网页', encoding='utf-8')
+
+        with patch.object(frontend.shutil, 'which', side_effect=lambda name, **kwargs: name), \
+                patch.object(frontend.subprocess, 'check_output', return_value='v24.22.1') as version, \
+                patch.object(frontend.subprocess, 'run', side_effect=build) as run:
+            frontend.ensure_frontend(self.scratch)
+        version.assert_called_once_with(['node', '--version'], text=True)
+        self.assertEqual(run.call_args_list[0].args[0], ['pnpm', 'install', '--frozen-lockfile'])
+        self.assertEqual(run.call_args_list[1].args[0], ['pnpm', 'run', 'build', '--emptyOutDir', 'false'])
+        self.assertNotIn('env', run.call_args.kwargs)
+
+    def test_existing_built_assets_do_not_require_frontend_tools(self):
+        webapp = self.source()
+        (webapp / 'dist').mkdir()
+        (webapp / 'dist/index.html').write_text('网页', encoding='utf-8')
+        with patch.object(frontend.shutil, 'which', return_value=None) as which, \
+                patch.object(frontend.subprocess, 'run') as run:
+            frontend.ensure_frontend(self.scratch)
+        which.assert_not_called()
+        run.assert_not_called()
+
+    def test_incomplete_packaged_app_fails_instead_of_serving_404(self):
+        self.source()
+        with patch.object(frontend.sys, 'frozen', True, create=True), self.assertRaises(RuntimeError):
+            frontend.ensure_frontend(self.scratch)
+
+
+class CliTests(unittest.TestCase):
+    def test_api_only_skips_frontend_build(self):
+        from server.__main__ import main
+        with patch('sys.argv', ['server', '--api-only']), \
+                patch.dict(os.environ, {'BAAS_WEBUI_TOKEN': ''}), \
+                patch('server.__main__.ensure_frontend') as build, \
+                patch('server.__main__.create_app') as app, \
+                patch('server.__main__.uvicorn.run'):
+            main()
+        build.assert_not_called()
+        app.assert_called_once_with(serve_webapp=False)
+
+    def test_remote_binding_requires_environment_password(self):
+        from server.__main__ import main
+        with patch('sys.argv', ['server', '--host', '0.0.0.0']), \
+                patch.dict(os.environ, {'BAAS_WEBUI_TOKEN': ''}), \
+                self.assertRaises(SystemExit) as error:
+            main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_remote_binding_with_password_can_start(self):
+        from server.__main__ import main
+        with patch('sys.argv', ['server', '--host', '0.0.0.0']), \
+                patch.dict(os.environ, {'BAAS_WEBUI_TOKEN': secrets.token_urlsafe(16)}), \
+                patch('server.__main__.ensure_frontend') as build, \
+                patch('server.__main__.create_app'), \
+                patch('server.__main__.uvicorn.run') as run:
+            main()
+        build.assert_called_once()
+        run.assert_called_once()
 
 
 if __name__ == '__main__':

@@ -528,14 +528,14 @@ def start_app():
 
     if __system__ == "Linux":
         proc = subprocess.run(
-            [_path, str(BAAS_ROOT_PATH / "webui.py")],  # 直接用列表传递命令
+            [_path, str(BAAS_ROOT_PATH / "webui.py"), "--open"],  # 直接用列表传递命令
             cwd=BAAS_ROOT_PATH,  # 先 cd 到 BAAS_ROOT_PATH
             env=__env__  # 传递修改后的环境变量
         )
         return proc.returncode
     else:
         proc = subprocess.Popen(
-            [_path, str(BAAS_ROOT_PATH / "webui.py")],  # 直接用列表传递命令
+            [_path, str(BAAS_ROOT_PATH / "webui.py"), "--open"],  # 直接用列表传递命令
             cwd=BAAS_ROOT_PATH,  # 先 cd 到 BAAS_ROOT_PATH
             env=__env__,  # 传递修改后的环境变量
         )

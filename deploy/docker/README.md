@@ -9,11 +9,11 @@
     ```
 3. Method 1 for running the container: using `docker run`
     ```shell
-    docker run -it -v "$PWD:/app" -p 5900:5900 baas:v1.0
+    docker run -it -v "$PWD:/app" -p 22267:22267 -e BAAS_WEBUI_TOKEN baas:v1.0
     ```
 4. Method 2 for running the container: using `docker-compose`
     ```shell
     docker-compose up -d
     ```
-5. You can connect to the GUI via VNC Viewer, with the default port set to 5900.
-6. Additionally, if your system supports display, you can modify the instructions in `entrypoint.sh` to run it directly on your local machine.
+5. Set `BAAS_WEBUI_TOKEN` before starting; keep the password out of the repository.（启动前设置网页访问密码环境变量，不要把密码写入仓库。）
+6. Open `http://127.0.0.1:22267` and log in with that password. The first launch prepares the web assets and needs network access.（浏览器打开网页地址并输入密码登录，首次准备网页资源需要联网。）

@@ -4,12 +4,14 @@ import os
 
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from server.hub import Hub
+from server.security import WebAccess
 from server.service import BaasService, get_version, scan_configs
 
 THEN_OPTIONS = ['无动作', '退出 Baas', '退出 模拟器', '退出 Baas 和 模拟器', '关闭游戏', '关机']
@@ -140,7 +142,7 @@ class SPAStaticFiles(StaticFiles):
         return response
 
 
-def create_app() -> Starlette:
+def create_app(serve_webapp=True, access_token=None) -> Starlette:
     hub = Hub()
     service = BaasService(hub)
     register_topics(hub, service)
@@ -155,7 +157,9 @@ def create_app() -> Starlette:
     ]
 
     dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'webapp', 'dist')
-    if os.path.isdir(dist):
+    if serve_webapp:
+        if not os.path.isfile(os.path.join(dist, 'index.html')):
+            raise RuntimeError('缺少网页资源，请通过 python -m server 启动；仅开发后端时使用 --api-only')
         routes.append(Mount('/', SPAStaticFiles(directory=dist, html=True), name='webapp'))
 
     async def lifespan(_app):
@@ -165,4 +169,6 @@ def create_app() -> Starlette:
         service.init_ocr(derive_ocr_needed())
         yield
 
-    return Starlette(routes=routes, lifespan=lifespan)
+    token = os.environ.get('BAAS_WEBUI_TOKEN', '') if access_token is None else access_token
+    return Starlette(routes=routes, lifespan=lifespan,
+                     middleware=[Middleware(WebAccess, token=token)])

@@ -8,11 +8,11 @@
     ```
 3. 运行容器方法一：使用docker run
     ```shell
-    docker run -it -v "$PWD:/app" -p 5900:5900 baas:v1.0
+    docker run -it -v "$PWD:/app" -p 22267:22267 -e BAAS_WEBUI_TOKEN baas:v1.0
     ```
 4. 运行容器方法二：使用docker-compose
     ```shell
     docker-compose up -d
     ```
-5. 可以通过VNC Viewer连接到GUI画面，端口默认为5900
-6. 同时如果你的系统支持显示，可以通过修改`entrypoint.sh`中指示的内容，直接在本地运行。
+5. 启动前请设置 `BAAS_WEBUI_TOKEN`（网页访问密码环境变量），不要把密码写进仓库。
+6. 浏览器访问 `http://127.0.0.1:22267`（网页地址），输入上述密码登录。首次启动会自动准备网页资源，需要联网。
