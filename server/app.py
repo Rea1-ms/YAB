@@ -100,6 +100,7 @@ def register_topics(hub: Hub, service: BaasService):
     hub.register_provider('State', service.get_state)
     hub.register_provider('ConfigArg', service.provide_config_arg)
     hub.register_provider('EventConfig', service.provide_event_config)
+    hub.register_provider('Panels', service.provide_panels)
 
     hub.register_rpc('State', 'start', lambda config, _params: service.start(config))
     hub.register_rpc('State', 'stop', lambda config, _params: service.stop(config))
@@ -111,6 +112,8 @@ def register_topics(hub: Hub, service: BaasService):
                      lambda _config, params: service.config_rename(params['config'], params['name']))
 
     hub.register_rpc('ConfigArg', 'set', service.config_set)
+    hub.register_rpc('ConfigArg', 'set_sweep', service.set_sweep)
+    hub.register_rpc('Assets', 'get', lambda config, _params: service.provide_assets(config))
 
     hub.register_rpc('EventConfig', 'set_event', service.event_set)
     hub.register_rpc('EventConfig', 'enable_all', service.event_enable_all)
@@ -118,6 +121,12 @@ def register_topics(hub: Hub, service: BaasService):
 
     hub.register_rpc('Meta', 'autosearch_adb', lambda _config, _params: _autosearch_adb())
     hub.register_rpc('Meta', 'connect_adb', lambda _config, params: _connect_adb(params))
+    hub.register_rpc('Meta', 'update_get', lambda _config, params: service.update_get(params))
+    hub.register_rpc('Meta', 'update_save', lambda _config, params: service.update_save(params))
+    hub.register_rpc('Meta', 'cdk_test', lambda _config, params: service.cdk_test(params))
+    hub.register_rpc('Meta', 'sha_test', lambda _config, params: service.sha_test(params))
+    hub.register_rpc('Meta', 'help_list', lambda _config, params: service.help_list(params))
+    hub.register_rpc('Meta', 'help_content', lambda _config, params: service.help_content(params))
 
 
 def _autosearch_adb():

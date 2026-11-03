@@ -276,6 +276,42 @@ class BaasService:
 
     # ---------- topic providers ----------
 
+    ASSET_KEYS = ['ap', 'creditpoints', 'pyroxene', 'tactical_challenge_coin', 'bounty_coin', '_pass']
+
+    def provide_assets(self, config):
+        from core.config.config_set import ConfigSet
+        config_path(config)
+        cs = ConfigSet(config)
+        res = {key: cs.get(key) for key in self.ASSET_KEYS}
+        holding = cs.get('create_item_holding_quantity') or {}
+        res['Keystone-Piece'] = holding.get('Keystone-Piece')
+        res['Keystone'] = holding.get('Keystone')
+        return res
+
+    def set_sweep(self, config, params):
+        """Set mainlinePriority / hardPriority and refresh the companion
+        unfinished task lists, replicating the old GUI panel logic."""
+        from core.config.config_set import ConfigSet
+        from module.explore_tasks.sweep_task import read_task
+        config_path(config)
+        key = params.get('key')
+        if key not in ('mainlinePriority', 'hardPriority'):
+            raise ValueError('invalid sweep key')
+        is_normal = key == 'mainlinePriority'
+        raw = str(params.get('value', ''))
+        content = raw.replace(' ', '').replace('，', ',')
+        cs = ConfigSet(config)
+        companion = 'unfinished_normal_tasks' if is_normal else 'unfinished_hard_tasks'
+        if content == '':
+            cs.set(key, '')
+            cs.set(companion, [])
+        else:
+            tasks = [list(read_task(item, is_normal)) for item in content.split(',')]
+            cs.set(key, content)
+            cs.set(companion, tasks)
+        self.hub.push_full(f'ConfigArg:{config}')
+        return content
+
     def provide_config_arg(self, config):
         from core.config.config_set import ConfigSet
         config_path(config)
@@ -323,3 +359,135 @@ class BaasService:
             event['next_tick'] = now
         self.save_event_config(config, events)
         self.hub.push_full(f'EventConfig:{config}')
+
+    # ---------- panels / assets ----------
+
+    def provide_panels(self, config):
+        from server.panels import resolve_schema, switch_cards
+        from core.config.config_set import ConfigSet
+        config_path(config)
+        cs = ConfigSet(config)
+        return {'panels': resolve_schema(cs), 'cards': switch_cards()}
+
+    # ---------- update settings (setup.toml) ----------
+
+    UPDATE_KEYS = {
+        'mirrorc_cdk': 'General.mirrorc_cdk',
+        'repo_url_http': 'URLs.REPO_URL_HTTP',
+        'get_remote_sha_method': 'General.get_remote_sha_method',
+    }
+
+    REPO_URL_CHECK_UPDATE_METHOD = {
+        'https://github.com/pur1fying/blue_archive_auto_script.git': 'github',
+        'https://gitee.com/pur1fy/blue_archive_auto_script.git': 'gitee',
+        'https://gitcode.com/m0_74686738/blue_archive_auto_script.git': 'gitcode',
+        'https://e.coding.net/g-jbio0266/baas/blue_archive_auto_script.git': 'tencent_c_coding',
+    }
+
+    def _toml_config(self):
+        path = './setup.toml'
+        if not os.path.exists(path):
+            return None
+        from deploy.installer.toml_config import TOML_Config
+        return TOML_Config(path)
+
+    def update_get(self, _params):
+        cfg = self._toml_config()
+        if cfg is None:
+            return {'has_setup_toml': False, 'current_version': get_version()}
+        return {
+            'has_setup_toml': True,
+            'current_version': get_version(),
+            'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
+            'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
+            'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
+        }
+
+    def update_save(self, params):
+        cfg = self._toml_config()
+        if cfg is None:
+            raise ValueError('未找到 setup.toml（非完整发行包环境，更新设置不可用）')
+        patch = params.get('patch', {})
+        for name, value in patch.items():
+            key = self.UPDATE_KEYS.get(name)
+            if key is None:
+                raise ValueError(f'不允许修改: {name}')
+            cfg.set_and_save(key, value)
+        return self.update_get({})
+
+    def cdk_test(self, params):
+        cdk = str(params.get('cdk', '')).strip()
+        try:
+            from deploy.installer.mirrorc_update.mirrorc_updater import MirrorC_Updater
+            inst = MirrorC_Updater(app='BAAS_repo', current_version='')
+            ret = inst.get_latest_version(cdk=cdk, timeout=3.0)
+            return {'ok': True, 'data': ret}
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+
+    def sha_test(self, params):
+        url = params.get('repo_url_http', '')
+        method_name = self.REPO_URL_CHECK_UPDATE_METHOD.get(url)
+        if not method_name:
+            raise ValueError('未知仓库地址，请先选择 Git 更新仓库')
+        from deploy.installer.const import get_remote_sha_methods, GetShaMethod
+        conf = next((c for c in get_remote_sha_methods if c['name'] == method_name), None)
+        if conf is None:
+            raise ValueError(f'未找到更新方式配置: {method_name}')
+        t0 = time.time()
+        if conf['method'] == GetShaMethod.GITHUB_API:
+            ok, sha = self._github_api_get_latest_sha(conf)
+        else:
+            ok, sha = self._dulwich_get_latest_sha(conf)
+        return {'ok': ok, 'sha': sha, 'elapsed': round(time.time() - t0, 2)}
+
+    @staticmethod
+    def _github_api_get_latest_sha(conf):
+        try:
+            import requests
+            url = f"https://api.github.com/repos/{conf['owner']}/{conf['repo']}/branches/{conf['branch']}"
+            resp = requests.get(url, timeout=3.0)
+            resp.raise_for_status()
+            return True, resp.json().get('commit', {}).get('sha')
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def _dulwich_get_latest_sha(conf):
+        try:
+            import binascii
+            import dulwich.porcelain
+            remote_refs = dulwich.porcelain.ls_remote(conf['url'])
+            for ref_name, sha in remote_refs.items():
+                name = ref_name.decode('utf-8') if isinstance(ref_name, bytes) else ref_name
+                if name.endswith('refs/heads/' + str(conf['branch'])) or name == str(conf['branch']):
+                    raw = sha[:20] if len(sha) > 20 else sha
+                    return True, binascii.hexlify(raw).decode('utf-8')
+            return False, f'branch not found: {conf["branch"]}'
+        except Exception as e:
+            return False, str(e)
+
+    # ---------- help documents ----------
+
+    def help_list(self, _params):
+        base = Path('src/descriptions')
+        if not base.is_dir():
+            return []
+        res = []
+        for lang in sorted(os.listdir(base)):
+            lang_dir = base / lang
+            if lang_dir.is_dir():
+                res.append({'lang': lang,
+                            'files': sorted(f for f in os.listdir(lang_dir) if f.endswith('.html'))})
+        return res
+
+    def help_content(self, params):
+        base = Path('src/descriptions').resolve()
+        lang = str(params.get('lang', ''))
+        name = str(params.get('name', ''))
+        if not lang or not name or '/' in name or '\\' in name or '..' in name or not name.endswith('.html'):
+            raise ValueError('非法的文档路径')
+        path = (base / lang / name).resolve()
+        if path.parent != (base / lang).resolve() or not path.is_file():
+            raise ValueError('文档不存在')
+        return {'lang': lang, 'name': name, 'html': path.read_text(encoding='utf-8', errors='replace')}
