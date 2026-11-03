@@ -2,6 +2,7 @@
   /** 全局页：更新设置（setup.toml）与帮助文档 */
   import { callRpc } from '../stores';
   import { toast } from '../toast';
+  import { LOCALES, t, tNow } from '../i18n';
   import type { CdkTestResult, HelpLangEntry, ShaTestResult, UpdateInfo } from '../types';
 
   // —— 更新设置 ——
@@ -42,7 +43,7 @@
     if (r) {
       info = r;
       cdk = r.mirrorc_cdk ?? '';
-      toast('success', 'Mirror酱 CDK 已保存');
+      toast('success', tNow()('Mirror酱 CDK 已保存'));
     }
   }
 
@@ -60,7 +61,7 @@
     if (r) {
       info = r;
       shaMethod = r.get_remote_sha_method ?? '';
-      toast('success', 'SHA 获取方式已保存');
+      toast('success', tNow()('SHA 获取方式已保存'));
     }
   }
 
@@ -108,6 +109,11 @@
 
   const langEntry = $derived(helpList.find((x) => x.lang === helpLang) ?? null);
 
+  /** 帮助语言 tab 名：按 LOCALES 原文 label 显示（不翻译），未知代码回退原值 */
+  function langLabel(code: string): string {
+    return LOCALES.find((l) => l.code === code)?.label ?? code;
+  }
+
   async function openHelp(name: string): Promise<void> {
     const r = await callRpc<{ html: string }>('Meta', 'help_content', { lang: helpLang, name });
     if (r) {
@@ -130,16 +136,16 @@
 
 <div class="page">
   <div class="card sec">
-    <h2>更新设置</h2>
+    <h2>{$t('更新设置')}</h2>
     <div class="ver">
-      当前版本：<b class="mono">{info?.current_version ?? '…'}</b>
+      {$t('当前版本：')}<b class="mono">{info?.current_version ?? '…'}</b>
       {#if info && !editable}
-        <span class="warn">开发环境，更新设置不可用</span>
+        <span class="warn">{$t('开发环境，更新设置不可用')}</span>
       {/if}
     </div>
 
     <div class="field">
-      <label for="upd-cdk">Mirror酱 CDK</label>
+      <label for="upd-cdk">{$t('Mirror酱 CDK')}</label>
       <div class="ctl">
         <div class="row">
           <input
@@ -150,23 +156,24 @@
             disabled={!editable}
             onkeydown={(e) => e.key === 'Enter' && saveCdk()}
           />
-          <button class="btn" type="button" disabled={!editable} onclick={() => void saveCdk()}>保存</button>
+          <button class="btn" type="button" disabled={!editable} onclick={() => void saveCdk()}>{$t('保存')}</button>
           <button class="btn" type="button" disabled={!editable || testingCdk} onclick={() => void testCdk()}>
-            {testingCdk ? '测试中…' : '测试 CDK'}
+            {testingCdk ? $t('测试中…') : $t('测试 CDK')}
           </button>
         </div>
         {#if cdkResult}
-          {#if cdkResult.ok}
-            <div class="result ok">测试通过：{cdkSummary(cdkResult)}</div>
+          {@const cr = cdkResult}
+          {#if cr.ok}
+            <div class="result ok">{$t('测试通过：{0}').replace('{0}', () => cdkSummary(cr))}</div>
           {:else}
-            <div class="result err">测试失败：{cdkResult.error ?? '未知错误'}</div>
+            <div class="result err">{$t('测试失败：{0}').replace('{0}', () => cr.error ?? tNow()('未知错误'))}</div>
           {/if}
         {/if}
       </div>
     </div>
 
     <div class="field">
-      <label for="upd-repo">Git 更新仓库</label>
+      <label for="upd-repo">{$t('Git 更新仓库')}</label>
       <div class="ctl">
         <select
           id="upd-repo"
@@ -175,30 +182,33 @@
           disabled={!editable}
           onchange={(e) => void saveRepo((e.currentTarget as HTMLSelectElement).value)}
         >
-          <option value="" disabled>请选择</option>
+          <option value="" disabled>{$t('请选择')}</option>
           {#each REPOS as [url, label] (url)}
-            <option value={url}>{label}</option>
+            <option value={url}>{$t(label)}</option>
           {/each}
         </select>
         <div class="row">
           <button class="btn" type="button" disabled={!editable || testingSha} onclick={() => void testSha()}>
-            {testingSha ? '测试中…' : '测试仓库连接'}
+            {testingSha ? $t('测试中…') : $t('测试仓库连接')}
           </button>
         </div>
         {#if shaResult}
-          {#if shaResult.ok && shaResult.sha}
+          {@const sr = shaResult}
+          {#if sr.ok && sr.sha}
             <div class="result ok">
-              连接正常：SHA {shaResult.sha.slice(0, 12)}…（耗时 {shaResult.elapsed ?? '?'} 秒）
+              {$t('连接正常：SHA {0}…（耗时 {1} 秒）')
+                .replace('{0}', () => sr.sha!.slice(0, 12))
+                .replace('{1}', () => String(sr.elapsed ?? '?'))}
             </div>
           {:else}
-            <div class="result err">连接失败：{shaResult.error ?? shaResult.sha ?? '未知错误'}</div>
+            <div class="result err">{$t('连接失败：{0}').replace('{0}', () => sr.error ?? sr.sha ?? tNow()('未知错误'))}</div>
           {/if}
         {/if}
       </div>
     </div>
 
     <div class="field">
-      <label for="upd-sha">SHA获取方式</label>
+      <label for="upd-sha">{$t('SHA获取方式')}</label>
       <div class="ctl">
         <input
           id="upd-sha"
@@ -215,20 +225,20 @@
           <option value="mirrorc_api"></option>
           <option value="pygit2"></option>
         </datalist>
-        <div class="help">取远端最新提交 SHA 的方式，保存后用于检查更新</div>
+        <div class="help">{$t('取远端最新提交 SHA 的方式，保存后用于检查更新')}</div>
       </div>
     </div>
   </div>
 
   <div class="card sec">
-    <h2>帮助文档</h2>
+    <h2>{$t('帮助文档')}</h2>
     {#if helpList.length === 0}
-      <div class="dim">暂无帮助文档</div>
+      <div class="dim">{$t('暂无帮助文档')}</div>
     {:else}
       <div class="tabs">
         {#each helpList as entry (entry.lang)}
           <button class="tab" type="button" class:active={helpLang === entry.lang} onclick={() => (helpLang = entry.lang)}>
-            {entry.lang}
+            {langLabel(entry.lang)}
           </button>
         {/each}
       </div>
@@ -242,9 +252,9 @@
         </div>
         <div class="doc">
           {#if helpHtml}
-            <iframe title={helpName || '帮助文档'} class="doc-frame" srcdoc={styledHtml}></iframe>
+            <iframe title={helpName || $t('帮助文档')} class="doc-frame" srcdoc={styledHtml}></iframe>
           {:else}
-            <div class="dim doc-empty">从左侧选择文档查看</div>
+            <div class="dim doc-empty">{$t('从左侧选择文档查看')}</div>
           {/if}
         </div>
       </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toStringArray } from './shared';
+  import { t } from '../../i18n';
 
   let {
     options = [],
@@ -37,21 +38,21 @@
     {#each current as item, i (item + i)}
       <span class="chip static">
         <span class="idx">{i + 1}</span>
-        {item}
-        <button class="op" type="button" title="上移" disabled={i === 0} onclick={() => move(i, -1)}>↑</button>
-        <button class="op" type="button" title="下移" disabled={i === current.length - 1} onclick={() => move(i, 1)}>↓</button>
-        <button class="op" type="button" title="移除" onclick={() => remove(i)}>×</button>
+        {$t(item)}
+        <button class="op" type="button" title={$t('上移')} disabled={i === 0} onclick={() => move(i, -1)}>↑</button>
+        <button class="op" type="button" title={$t('下移')} disabled={i === current.length - 1} onclick={() => move(i, 1)}>↓</button>
+        <button class="op" type="button" title={$t('移除')} onclick={() => remove(i)}>×</button>
       </span>
     {/each}
     {#if current.length === 0}
-      <span class="dim">尚未设置优先级</span>
+      <span class="dim">{$t('尚未设置优先级')}</span>
     {/if}
   </div>
   {#if remaining.length > 0}
     <div class="add-row">
-      <span class="dim">可添加：</span>
+      <span class="dim">{$t('可添加：')}</span>
       {#each remaining as item (item)}
-        <button class="chip" type="button" title="点击添加" onclick={() => add(item)}>+ {item}</button>
+        <button class="chip" type="button" title={$t('点击添加')} onclick={() => add(item)}>+ {$t(item)}</button>
       {/each}
     </div>
   {/if}

@@ -1,4 +1,5 @@
 import type { ClientMsg, RpcReply, ServerData, ServerMsg } from './types';
+import { tNow } from './i18n';
 
 export type DataHandler = (msg: ServerData) => void;
 export type ConnHandler = (up: boolean) => void;
@@ -93,13 +94,13 @@ class WebsocketManager {
   rpc<T = unknown>(topic: string, fn: string, args: Record<string, unknown> = {}): Promise<T> {
     const socket = this.ws;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('未连接到后端服务'));
+      return Promise.reject(new Error(tNow()('未连接到后端服务')));
     }
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`RPC 超时：${topic}.${fn}`));
+        reject(new Error(tNow()('RPC 超时：{0}').replace('{0}', () => `${topic}.${fn}`)));
       }, RPC_TIMEOUT_MS);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       this.rawSend({ t: topic, o: 'rpc', f: fn, v: args, i: id });
@@ -141,7 +142,7 @@ class WebsocketManager {
     this.ws = null;
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
-      p.reject(new Error('连接已断开'));
+      p.reject(new Error(tNow()('连接已断开')));
     }
     this.pending.clear();
     for (const h of [...this.connHandlers]) h(false);

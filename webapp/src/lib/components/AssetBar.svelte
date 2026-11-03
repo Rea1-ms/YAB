@@ -2,6 +2,7 @@
   /** 主页资产条：挂载时每 2s 轮询 Assets:<dir>.get（卸载自动停止） */
   import { getDirStores } from '../stores';
   import { ws } from '../ws';
+  import { t } from '../i18n';
   import type { AssetCount, AssetsData } from '../types';
 
   let { dir }: { dir: string } = $props();
@@ -39,25 +40,25 @@
 
   function countText(a: AssetCount | null | undefined): string {
     const c = countOf(a);
-    return c === null || c <= 0 ? '未知' : String(c);
+    return c === null || c <= 0 ? $t('未知') : String(c);
   }
 
   function maxText(a: AssetCount | null | undefined): string {
     const m = a?.max;
-    return typeof m === 'number' && m > 0 ? String(m) : '未知';
+    return typeof m === 'number' && m > 0 ? String(m) : $t('未知');
   }
 
-  const apText = $derived((countOf(data?.ap) ?? -1) <= 0 ? '未知' : `${countText(data?.ap)}/${maxText(data?.ap)}`);
+  const apText = $derived((countOf(data?.ap) ?? -1) <= 0 ? $t('未知') : `${countText(data?.ap)}/${maxText(data?.ap)}`);
 
   function timeText(a: AssetCount | null | undefined): string {
-    const t = a?.time;
-    if (typeof t !== 'number' || t <= 0) return '-';
-    const mins = Math.max(0, Math.floor((now - t) / 60));
-    return `${mins}分钟前`;
+    const t0 = a?.time;
+    if (typeof t0 !== 'number' || t0 <= 0) return '-';
+    const mins = Math.max(0, Math.floor((now - t0) / 60));
+    return $t('{0}分钟前').replace('{0}', () => String(mins));
   }
 
   function keystoneText(v: number | null | undefined): string {
-    return typeof v === 'number' && v > 0 ? String(v) : '未知';
+    return typeof v === 'number' && v > 0 ? String(v) : $t('未知');
   }
 
   const passLevel = $derived(data?._pass?.level);
@@ -72,18 +73,18 @@
   const cells = $derived.by<Cell[]>(() => {
     const d = data;
     const list: Cell[] = [
-      { label: '体力', value: apText, time: timeText(d?.ap) },
-      { label: '信用点', value: countText(d?.creditpoints), time: timeText(d?.creditpoints) },
-      { label: '青辉石', value: countText(d?.pyroxene), time: timeText(d?.pyroxene) },
-      { label: '竞技币', value: countText(d?.tactical_challenge_coin), time: timeText(d?.tactical_challenge_coin) },
-      { label: '悬赏币', value: countText(d?.bounty_coin), time: timeText(d?.bounty_coin) },
-      { label: '制造石', value: keystoneText(d?.Keystone), title: 'Keystone' },
-      { label: '制造石碎片', value: keystoneText(d?.['Keystone-Piece']), title: 'Keystone-Piece' },
+      { label: $t('体力'), value: apText, time: timeText(d?.ap) },
+      { label: $t('信用点'), value: countText(d?.creditpoints), time: timeText(d?.creditpoints) },
+      { label: $t('青辉石'), value: countText(d?.pyroxene), time: timeText(d?.pyroxene) },
+      { label: $t('竞技币'), value: countText(d?.tactical_challenge_coin), time: timeText(d?.tactical_challenge_coin) },
+      { label: $t('悬赏币'), value: countText(d?.bounty_coin), time: timeText(d?.bounty_coin) },
+      { label: $t('制造石'), value: keystoneText(d?.Keystone), title: 'Keystone' },
+      { label: $t('制造石碎片'), value: keystoneText(d?.['Keystone-Piece']), title: 'Keystone-Piece' },
     ];
     if (isJp) {
       list.push({
         label: 'Pass',
-        value: typeof passLevel === 'number' && passLevel > 0 ? `Lv.${passLevel}` : '未知',
+        value: typeof passLevel === 'number' && passLevel > 0 ? `Lv.${passLevel}` : $t('未知'),
       });
     }
     return list;

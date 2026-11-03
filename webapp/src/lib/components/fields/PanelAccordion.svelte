@@ -1,6 +1,7 @@
 <script lang="ts">
   /** 面板手风琴卡片：标题可展开收起，内部按组渲染字段 */
   import FieldControl from './FieldControl.svelte';
+  import { t } from '../../i18n';
   import type { ConfigArgs, Panel } from '../../types';
 
   let {
@@ -23,9 +24,9 @@
 <div class="acc card">
   <button class="head" type="button" onclick={() => (open = !open)} aria-expanded={open}>
     <span class="arrow">{open ? '▾' : '▸'}</span>
-    <span class="name">{panel.name}</span>
+    <span class="name">{$t(panel.name)}</span>
     {#if panel.tip}
-      <span class="tip">{panel.tip}</span>
+      <span class="tip">{$t(panel.tip)}</span>
     {/if}
   </button>
   {#if open}
@@ -33,15 +34,15 @@
       {#each panel.groups as g, gi (gi)}
         <div class="group">
           {#if g.title}
-            <div class="gtitle">{g.title}</div>
+            <div class="gtitle">{$t(g.title)}</div>
           {/if}
           {#each g.fields as f, fi (fi)}
             <div class="field">
-              <div class="flabel">{f.label}</div>
+              <div class="flabel">{$t(f.label)}</div>
               <div class="ctl">
                 <FieldControl {dir} field={f} {args} />
                 {#if f.help}
-                  <div class="help">{f.help}</div>
+                  <div class="help">{$t(f.help)}</div>
                 {/if}
               </div>
             </div>

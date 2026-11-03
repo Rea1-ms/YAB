@@ -1,6 +1,7 @@
 <script lang="ts">
   /** 面板字段渲染分发器：按 field.type 选择对应控件并处理保存 */
   import { setConfigValue, setSweep } from '../../stores';
+  import { t } from '../../i18n';
   import type { ConfigArgs, OptionItem, PanelField, ShopRow } from '../../types';
   import Switch from '../Switch.svelte';
   import TextField from '../TextField.svelte';
@@ -57,9 +58,9 @@
     value={value == null ? '' : String(value)}
     onchange={(e) => void saveSelectValue(dir, field, (e.currentTarget as HTMLSelectElement).value)}
   >
-    <option value="" disabled>请选择</option>
+    <option value="" disabled>{$t('请选择')}</option>
     {#each toOptionPairs(field.options as OptionItem[] | undefined) as [v, label] (v)}
-      <option value={v}>{label}</option>
+      <option value={v}>{$t(label)}</option>
     {/each}
   </select>
 {:else if field.type === 'checklist'}
@@ -98,5 +99,5 @@
 {:else if field.type === 'actions'}
   <ActionsField actions={field.actions ?? []} {dir} />
 {:else}
-  <span class="dim">未知字段类型：{field.type}</span>
+  <span class="dim">{$t('未知字段类型：{0}').replace('{0}', () => field.type)}</span>
 {/if}

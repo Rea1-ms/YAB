@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { t } from '../../i18n';
   import type { StudentStages } from '../../types';
 
   let {
@@ -107,11 +108,11 @@
     {#each tokens as token, i (token + i)}
       <span class="chip static">
         {token}
-        <button class="op" type="button" title="移除" onclick={() => void removeToken(i)}>×</button>
+        <button class="op" type="button" title={$t('移除')} onclick={() => void removeToken(i)}>×</button>
       </span>
     {/each}
     {#if tokens.length === 0}
-      <span class="dim">暂无扫荡设置</span>
+      <span class="dim">{$t('暂无扫荡设置')}</span>
     {/if}
   </div>
 
@@ -127,12 +128,12 @@
     <select class="input" bind:value={addTimes}>
       {#each TIMES as t (t)}<option value={t}>{t}</option>{/each}
     </select>
-    <button class="btn" type="button" onclick={() => void addEntry()}>添加</button>
+    <button class="btn" type="button" onclick={() => void addEntry()}>{$t('添加')}</button>
     {#if studentStages.length > 0}
       <select class="input" bind:value={addStudent} onchange={() => void addStudentStages()}>
-        <option value="" disabled>按学生添加…</option>
+        <option value="" disabled>{$t('按学生添加…')}</option>
         {#each studentStages as s (s.student)}
-          <option value={s.student}>{s.student}</option>
+          <option value={s.student}>{$t(s.student)}</option>
         {/each}
       </select>
     {/if}
@@ -140,7 +141,7 @@
 
   <input
     class="input text"
-    placeholder="自由编辑，格式 关卡-次数，如 1-1-1,1-2-3"
+    placeholder={$t('自由编辑，格式 关卡-次数，如 1-1-1,1-2-3')}
     bind:value={draft}
     oninput={scheduleText}
     onfocus={() => (focused = true)}

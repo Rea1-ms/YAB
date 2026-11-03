@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../../i18n';
+
   let {
     regions = [],
     levels = [],
@@ -63,15 +65,15 @@
 
 <div class="wrap">
   <div class="head">
-    <span class="hregion">区域</span>
+    <span class="hregion">{$t('区域')}</span>
     {#each levelLabels as lab, i (lab + i)}
-      <span class="hlv">{lab}</span>
+      <span class="hlv">{$t(lab)}</span>
     {/each}
-    <span class="htimes">次数</span>
+    <span class="htimes">{$t('次数')}</span>
   </div>
   {#each regions as region, i (region)}
     <div class="row">
-      <span class="region" title={region}>{region}</span>
+      <span class="region" title={region}>{$t(region)}</span>
       {#each levels as level (level)}
         <span class="lv">
           <input
@@ -91,7 +93,7 @@
     </div>
   {/each}
   {#if regions.length === 0}
-    <span class="dim">暂无区域数据</span>
+    <span class="dim">{$t('暂无区域数据')}</span>
   {/if}
 </div>
 

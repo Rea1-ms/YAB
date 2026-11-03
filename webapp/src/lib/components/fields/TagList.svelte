@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toStringArray } from './shared';
+  import { t } from '../../i18n';
 
   let {
     value,
@@ -31,16 +32,16 @@
     {#each items as item, i (item + i)}
       <span class="chip static">
         {item}
-        <button class="op" type="button" title="移除" onclick={() => remove(i)}>×</button>
+        <button class="op" type="button" title={$t('移除')} onclick={() => remove(i)}>×</button>
       </span>
     {/each}
     {#if items.length === 0}
-      <span class="dim">暂无条目</span>
+      <span class="dim">{$t('暂无条目')}</span>
     {/if}
   </div>
   <input
     class="input"
-    {placeholder}
+    placeholder={$t(placeholder)}
     bind:value={input}
     onkeydown={(e) => e.key === 'Enter' && add()}
   />

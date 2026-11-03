@@ -1,6 +1,7 @@
 <script lang="ts">
   import { callRpc, getDirStores } from '../stores';
   import { toast } from '../toast';
+  import { t, tNow } from '../i18n';
   import AssetBar from '../components/AssetBar.svelte';
 
   let { dir }: { dir: string } = $props();
@@ -13,8 +14,12 @@
   let stick = $state(true);
 
   const running = $derived($stateStore?.running ?? false);
-  const buttonLabel = $derived($stateStore?.button ?? (running ? '停止' : '启动'));
-  const currentTask = $derived($stateStore?.current || '—');
+  // State.button 为后端下发的中文（'启动'/'停止'），仅翻译显示
+  const buttonLabel = $derived(
+    $stateStore?.button ? $t($stateStore.button) : running ? $t('停止') : $t('启动'),
+  );
+  // current 为中文事件名或 '暂无任务'，仅翻译显示
+  const currentTask = $derived($stateStore?.current ? $t($stateStore.current) : '—');
   const waiting = $derived($stateStore?.waiting ?? []);
 
   function toggleRun(): void {
@@ -25,11 +30,13 @@
   async function runTask(): Promise<void> {
     const task = taskInput.trim();
     if (!task) {
-      toast('info', '请输入任务名');
+      toast('info', tNow()('请输入任务名'));
       return;
     }
     const r = await callRpc(`State:${dir}`, 'run_task', { task });
-    if (r !== undefined) toast('success', `已提交任务：${task}`);
+    if (r !== undefined) {
+      toast('success', tNow()('已提交任务：{0}').replace('{0}', () => tNow()(task)));
+    }
   }
 
   function onScroll(): void {
@@ -64,33 +71,33 @@
       {buttonLabel}
     </button>
     <div class="run-meta">
-      <div class="cur">当前任务：<b>{currentTask}</b></div>
+      <div class="cur">{$t('当前任务：')}<b>{currentTask}</b></div>
       <div class="queue">
-        等待队列：
+        {$t('等待队列：')}
         {#if waiting.length}
           {#each waiting as w (w)}
-            <button class="chip" type="button" title="点击填入运行任务" onclick={() => (taskInput = w)}>
-              {w}
+            <button class="chip" type="button" title={$t('点击填入运行任务')} onclick={() => (taskInput = w)}>
+              {$t(w)}
             </button>
           {/each}
         {:else}
-          <span class="dim">空</span>
+          <span class="dim">{$t('空')}</span>
         {/if}
       </div>
       <div class="task-run">
         <input
           class="input"
-          placeholder="输入任务名，单独运行一个任务"
+          placeholder={$t('输入任务名，单独运行一个任务')}
           bind:value={taskInput}
           onkeydown={(e) => e.key === 'Enter' && runTask()}
         />
-        <button class="btn" type="button" onclick={runTask}>运行任务</button>
+        <button class="btn" type="button" onclick={runTask}>{$t('运行任务')}</button>
       </div>
     </div>
   </div>
 
   <div class="card log-card">
-    <div class="log-head">运行日志 <span class="dim">{$logStore.length} 条</span></div>
+    <div class="log-head">{$t('运行日志')} <span class="dim">{$logStore.length} {$t('条')}</span></div>
     <div class="log-body" bind:this={logEl} onscroll={onScroll}>
       {#each $logStore as e, i (i)}
         <div class="log-line {lvlClass(e.l)}">

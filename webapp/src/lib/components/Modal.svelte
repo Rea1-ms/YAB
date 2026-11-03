@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { t } from '../i18n';
 
   let {
     open = $bindable(false),
@@ -11,6 +12,7 @@
   }: {
     open?: boolean;
     title?: string;
+    /** 确认按钮文案（中文原文，显示时经 $t 翻译） */
     confirmText?: string;
     danger?: boolean;
     onconfirm: () => unknown;
@@ -38,9 +40,9 @@
       <div class="modal-title">{title}</div>
       <div class="modal-body">{@render children?.()}</div>
       <div class="modal-foot">
-        <button class="btn" type="button" onclick={() => (open = false)}>取消</button>
+        <button class="btn" type="button" onclick={() => (open = false)}>{$t('取消')}</button>
         <button class="btn {danger ? 'danger' : 'primary'}" type="button" onclick={onconfirm}>
-          {confirmText}
+          {$t(confirmText)}
         </button>
       </div>
     </div>
