@@ -692,7 +692,6 @@ class Baas_thread:
             },
             'Global': {
                 'main_page_news': (1239, 50),
-                'main_page_login-store': (883, 162),
                 'main_page_insufficient-inventory-space': (912, 140),
                 'main_page_Failed-to-convert-errorResponse': (641, 511),
             }

@@ -1,5 +1,44 @@
 from core import picture
+from core.exception import RequestHumanTakeOver
 from core.picture import GAME_ONE_TIME_POP_UPS
+
+
+STORE_ERRORS = {
+    'main_page_login-store': '应用商店未登录，无法执行“收集免费购买体力”。请恢复商店登录后重试，或关闭此任务。',
+    'main_page_store-service-unavailable': '应用商店服务不可用，无法执行“收集免费购买体力”。请恢复商店服务后重试，或关闭此任务。',
+}
+
+
+class StoreLoginGuard:
+    def __init__(self, claim_stage=False):
+        self.claim_stage = claim_stage
+        self.claim_started = False
+        self.dismissed_features = set()
+
+    def before_reaction(self, feature, click):
+        if self.claim_stage and feature in (
+                'main_page_purchase-pyroxenes-menu',
+                'main_page_purchase-pyroxenes-confirm-purchase-notice'):
+            self.claim_started = True
+        if feature not in ('main_page_login-store', 'main_page_login-store-session-unchecked'):
+            return
+        if self.claim_started:
+            raise RequestHumanTakeOver(STORE_ERRORS['main_page_login-store'])
+        # Allow a delayed startup prompt to be dismissed once in each stage.
+        # The hook runs only for actual clicks, after duplicate-click suppression.
+        if feature in self.dismissed_features:
+            raise RequestHumanTakeOver(
+                '应用商店登录提示反复出现，无法继续“收集免费购买体力”。请恢复商店登录后重试，或关闭此任务。')
+        self.dismissed_features.add(feature)
+
+
+def detect_store(self, *args, claim_stage=False, **kwargs):
+    if self.server == 'Global':
+        kwargs['img_errors'] = {
+            'main_page_store-service-unavailable': STORE_ERRORS['main_page_store-service-unavailable'],
+        }
+        kwargs['before_reaction'] = StoreLoginGuard(claim_stage).before_reaction
+    return picture.co_detect(self, *args, **kwargs)
 
 
 def implement(self):
@@ -27,7 +66,7 @@ def collect_daily_free_power(self):
     }
     img_ends = "main_page_full-notice"
     rgb_ends = "reward_acquired"
-    picture.co_detect(self, rgb_ends, None, img_ends, img_possibles, skip_first_screenshot=True)
+    detect_store(self, rgb_ends, None, img_ends, img_possibles, skip_first_screenshot=True, claim_stage=True)
     self.logger.info("Get 10 AP")
 
 def return_to_main_page(self):
@@ -40,7 +79,7 @@ def return_to_main_page(self):
         "reward_acquired": (640, 180)
     }
     rgb_ends = "main_page"
-    picture.co_detect(self, rgb_ends, rgb_possibles, None, img_possibles, skip_first_screenshot=True)
+    detect_store(self, rgb_ends, rgb_possibles, None, img_possibles, skip_first_screenshot=True)
 
 def to_purchase_pyroxenes_menu(self):
     img_possibles = GAME_ONE_TIME_POP_UPS[self.server]
@@ -49,7 +88,7 @@ def to_purchase_pyroxenes_menu(self):
     }
     img_ends = "main_page_purchase-pyroxenes-menu"
 
-    picture.co_detect(self, None, rgb_possibles, img_ends, img_possibles, skip_first_screenshot=True)
+    detect_store(self, None, rgb_possibles, img_ends, img_possibles, skip_first_screenshot=True)
 
 
 def to_jp_daily_free_product(self):
@@ -57,7 +96,7 @@ def to_jp_daily_free_product(self):
         "main_page_purchase-pyroxenes-general-selected-1",
         "main_page_purchase-pyroxenes-general-selected-2",
     ]
-    picture.co_detect(
+    detect_store(
         self,
         None,
         None,
@@ -65,7 +104,7 @@ def to_jp_daily_free_product(self):
         {"main_page_purchase-pyroxenes-menu": (130, 318)},
         skip_first_screenshot=True,
     )
-    picture.co_detect(
+    detect_store(
         self,
         None,
         None,
@@ -113,14 +152,14 @@ def to_purchase_type(self, tp):
     }
     for img_end in img_ends:
         img_possibles.pop(img_end, None)
-    picture.co_detect(self, None, None, img_ends, img_possibles, skip_first_screenshot=True)
+    detect_store(self, None, None, img_ends, img_possibles, skip_first_screenshot=True)
 
 def detect_free_power_availability(self):
     img_ends = [
         "main_page_purchase-pyroxenes-daily-free-purchasable",
         "main_page_purchase-pyroxenes-daily-free-non-purchasable",
     ]
-    ret = picture.co_detect(self, None, None, img_ends, None, skip_first_screenshot=True)
+    ret = detect_store(self, None, None, img_ends, None, skip_first_screenshot=True)
     if ret == "main_page_purchase-pyroxenes-daily-free-purchasable":
         return True
     return False
