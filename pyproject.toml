@@ -5,16 +5,16 @@ description = "用于实现蔚蓝档案自动化"
 authors = [{ name = "pur1fying", email = "2274916027@qq.com" }]
 dependencies = [
     "lmdb",
-    "pyqt5==5.15.11",
-    "pyqt5-qt5==5.15.2",
     "numpy < 2.0",
     "av == 12.0.0",
     "imgaug",
     "win11toast; sys_platform == 'win32'",
+    "pywin32; sys_platform == 'win32'",
     "adbutils == 2.2.1",
     "uiautomator2 == 2.16.23",
     "opencv-python == 4.8.1.78",
-    "PyQt-Fluent-Widgets == 1.2.0",
+    "starlette >= 0.37.2, < 1.0",
+    "uvicorn[standard] >= 0.30.6",
     "pyinstaller",
     "requests",
     "dulwich",
@@ -25,8 +25,9 @@ dependencies = [
     "PyAutoGUI == 0.9.54",
     "mss == 10.0.0",
     "rich >= 14.2.0",
-    "setuptools <= 80.10.2"
+    # 兼容现有安卓连接库和旧打包工具，避免冻结后端启动失败。
+    "setuptools < 70"
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 readme = "README.md"
 license = { text = "GPL-3.0-only" }

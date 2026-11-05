@@ -2,11 +2,20 @@ import time
 import numpy as np
 
 from core import picture
+from core.config.shop_config import migrate_tactical_shop_list, validate_tactical_shop_list
 from module.shop.shop_utils import get_purchase_state, to_common_shop, goto_shop_by_name, buy
 
 
 def implement(self):
-    buy_list = np.array(self.config.TacticalChallengeShopList)
+    price = self.static_config.tactical_challenge_shop_price_list[self.server]
+    flags = migrate_tactical_shop_list(self.config.TacticalChallengeShopList, self.server, price)
+    validate_tactical_shop_list(flags, price)
+    if flags != self.config.TacticalChallengeShopList:
+        self.config_set.set('TacticalChallengeShopList', flags)
+        self.config.TacticalChallengeShopList = flags
+        self.logger.info('竞技场商店旧购买列表已按商品迁移。')
+    buy_list = np.array(flags, dtype=int)
+    asset_required = sum(flag * row[1] for flag, row in zip(flags, price))
     if not buy_list.any():
         self.logger.info("Nothing to buy in tactical challenge shop.")
         return True
@@ -19,12 +28,6 @@ def implement(self):
     }
     goto_shop_by_name(self, shop_name_idx[self.server])
     tactical_challenge_assets = get_tactical_challenge_assets(self)
-    price = self.static_config.tactical_challenge_shop_price_list[self.server]
-    temp = []
-    for i in range(0, len(price)):
-        temp.append(price[i][1])
-    temp = np.array(temp)
-    asset_required = (buy_list * temp).sum()
     refresh_time = min(self.config.TacticalChallengeShopRefreshTime, 3)
     refresh_price = [10, 10, 10]
     for i in range(0, refresh_time + 1):

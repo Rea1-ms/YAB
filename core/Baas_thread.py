@@ -98,6 +98,7 @@ class Baas_thread:
         self.ratio = None
         self.next_time = 0
         self.task_finish_to_main_page = False
+        self._game_closed = False
         self.static_config = ConfigSet.static_config
         self.ocr = None
         self.logger = utils.Logger(logger_signal)
@@ -447,10 +448,13 @@ class Baas_thread:
             Features:
             1.Never stop until user push the "stop" button on ui, or an unmanageable error occurs.
             2.task solve order is fully controlled by the scheduler (core/scheduler.py).
+            3.The game is only launched when a task is actually due; during idle
+              waits the game may be closed (then == '关闭游戏') and it is
+              relaunched right before the next due task.
         """
         try:
             self.logger.info("-------------- Start Scheduler ----------------")
-            self.solve('restart')  # check package and go to main_page
+            self._game_closed = False
             while self.flag_run:
                 nextTask = self.scheduler.heartbeat()  # get next task
                 if nextTask:
@@ -458,6 +462,13 @@ class Baas_thread:
                     self.daily_config_refresh()
                     if time.time() - self.last_refresh_u2_time > 10800:
                         self.solve('refresh_uiautomator2')
+                    if self._game_closed:
+                        self.logger.info("Game was closed during wait, relaunch it for the due task")
+                        if not self.solve('restart'):
+                            self.signal_stop()
+                            notify(title='', body='任务已停止')
+                            return
+                        self._game_closed = False
                     self.genScheduleLog(nextTask)
 
                     task_with_log_info = []
@@ -491,11 +502,15 @@ class Baas_thread:
                         self.signal_stop()
                 else:
                     if self.task_finish_to_main_page:
-                        self.logger.info("all activities finished, return to main page")
-                        push(self.logger, self.config)
-                        self.to_main_page()
-                        self.main_page_update_data()
-                        self.task_finish_to_main_page = False
+                        if self._game_closed:
+                            # game was closed during wait, nothing to return to
+                            self.task_finish_to_main_page = False
+                        else:
+                            self.logger.info("all activities finished, return to main page")
+                            push(self.logger, self.config)
+                            self.to_main_page()
+                            self.main_page_update_data()
+                            self.task_finish_to_main_page = False
                     self.scheduler.update_valid_task_queue()
                     time.sleep(1)
                     if self.flag_run:  # allow user to stop script before then action
@@ -677,7 +692,6 @@ class Baas_thread:
             },
             'Global': {
                 'main_page_news': (1239, 50),
-                'main_page_login-store': (883, 162),
                 'main_page_insufficient-inventory-space': (912, 140),
                 'main_page_Failed-to-convert-errorResponse': (641, 511),
             }
@@ -925,9 +939,13 @@ class Baas_thread:
         self.config.unfinished_normal_tasks = []
         if type(temp) is str:
             temp = temp.split(',')
-        for i in range(0, len(temp)):
+        for task in temp:
+            if isinstance(task, str):
+                task = task.strip()
+                if not task:
+                    continue
             try:
-                self.config.unfinished_normal_tasks.append(read_task(temp[i], True))
+                self.config.unfinished_normal_tasks.append(read_task(task, True))
             except Exception as e:
                 self.logger.error(e.__str__())
         self.config_set.set("unfinished_normal_tasks", self.config.unfinished_normal_tasks)
@@ -938,9 +956,13 @@ class Baas_thread:
         temp = self.config.hardPriority
         if type(temp) is str:
             temp = temp.split(',')
-        for i in range(0, len(temp)):
+        for task in temp:
+            if isinstance(task, str):
+                task = task.strip()
+                if not task:
+                    continue
             try:
-                self.config.unfinished_hard_tasks.append(read_task(temp[i], False))
+                self.config.unfinished_hard_tasks.append(read_task(task, False))
             except Exception as e:
                 self.logger.error(e.__str__())
         self.config_set.set("unfinished_hard_tasks", self.config.unfinished_hard_tasks)
@@ -956,6 +978,13 @@ class Baas_thread:
         elif action == '退出 Baas 和 模拟器':  # Exit Baas and Emulator
             self.exit_emulator()
             self.exit_baas()
+        elif action == '关闭游戏':  # Close Game during wait, keep the scheduler alive
+            # close the game once to save resources; the scheduler keeps
+            # waiting and relaunches the game right before the next due task
+            if not self._game_closed:
+                self.close_game()
+                self._game_closed = True
+            return
         elif action == '关机':  # Shutdown
             self.shutdown()
         self.signal_stop()  # avoid rerunning then action in case of error
@@ -979,6 +1008,40 @@ class Baas_thread:
     def exit_baas(self):
         if self.exit_signal is not None:
             self.exit_signal.emit(0)
+
+    def close_game(self):
+        self.logger.info("-- BAAS Close Game --")
+        if self.is_android_device:
+            package_name = self.connection.get_package_name()
+            if not package_name:
+                self.logger.error("Package not found, cannot close game.")
+                return False
+            self.connection.close_current_app(package_name)
+            return True
+        return self.close_pc_game()
+
+    def close_pc_game(self):
+        window = self.connection.app_process_window
+        win = window.get_window()
+        if win is None or not window.is_valid_window():
+            self.logger.warning("Game window not found, skip closing game.")
+            return False
+        try:
+            win.close()  # send WM_CLOSE
+            for _ in range(10):
+                if not window.is_valid_window():
+                    return True
+                time.sleep(0.5)
+            import ctypes
+            from ctypes import wintypes
+            pid = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(win._hWnd, ctypes.byref(pid))
+            self.logger.info(f"Game is still running, force kill process, pid : {pid.value}")
+            psutil.Process(pid.value).kill()
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to close game : {e}")
+            return False
 
     def shutdown(self):
         try:

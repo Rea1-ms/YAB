@@ -32,8 +32,9 @@
 
 6. 启动
    ```bash
-    python window.py
+    python webui.py
     ```
+   启动后用浏览器访问 http://127.0.0.1:22267 打开 WebUI。
 
 ## Mac 用户须知
 

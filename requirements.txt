@@ -1,16 +1,16 @@
-setuptools <= 80.10.2
+setuptools < 70
 lmdb
-PyQt5 == 5.15.11
 numpy < 2.0
 av == 12.0.0
 imgaug
 win11toast; sys_platform == 'win32'
+pywin32; sys_platform == 'win32'
 adbutils == 2.2.1
 uiautomator2 == 2.16.23
 opencv-python == 4.8.1.78
 
-PyQt-Fluent-Widgets == 1.2.0
-# gevent
+starlette >= 0.37.2, < 1.0
+uvicorn[standard] >= 0.30.6
 
 #windows installer auto build
 pyinstaller

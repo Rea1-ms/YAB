@@ -1,0 +1,6 @@
+packages:
+  - '.'
+
+allowBuilds:
+  # NSIS packaging does not use the Squirrel installer dependency.
+  electron-winstaller: false

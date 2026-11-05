@@ -27,7 +27,9 @@ def co_detect(
     pop_ups_rgb_reactions: dict = None,
     pop_ups_img_reactions: dict = None,
     time_out=600,
-    check_pkg_interval=20
+    check_pkg_interval=20,
+    img_errors: dict = None,
+    before_reaction: typing.Callable = None,
 ):
     """
         Detects specific RGB or image features on the screen and performs actions based on the detection.
@@ -47,6 +49,9 @@ def co_detect(
             pop_ups_img_reactions (dict, optional): Possible image features for pop-ups and their corresponding click positions.
             time_out (int, optional): Timeout(second(s)) for the detection process.
             check_pkg_interval (int, optional): Interval(second(s)) for checking the current package.
+            img_errors (dict, optional): Image features that stop the task with an explanatory message.
+            before_reaction (callable, optional): Called with the feature and click position before
+                a stage reaction or main-page overlay click is dispatched.
 
         Raises:
             FunctionCallTimeout: If the detection process times out.
@@ -95,6 +100,19 @@ def co_detect(
         # loading check
         color.wait_loading(self)
 
+        # A blocking store error must not be dismissed by generic popup handling.
+        if img_errors:
+            for feature, message in img_errors.items():
+                if match_img_feature(self, feature):
+                    raise RequestHumanTakeOver(message)
+
+        # These overlays can cover a screen whose normal end/reaction features
+        # are still visible. Close them before accepting the underlying screen.
+        if handle_global_main_page_overlay(self, before_reaction):
+            fail_cnt = 0
+            feature_last_appear_time = current_time
+            continue
+
         # exit the stage if any end feature is matched
         for rgb_feature in rgb_ends:
             if rgb_feature is None:
@@ -124,6 +142,8 @@ def co_detect(
                         break
                     self.logger.info(f"RGB feature: {rgb_feature} -> Click @ ({click[0]},{click[1]})")
                     if click[0] >= 0 and click[1] >= 0:
+                        if before_reaction is not None:
+                            before_reaction(rgb_feature, (click[0], click[1]))
                         self.last_click_time = current_time
                         self.click(click[0], click[1])
                         self.last_click_position = (click[0], click[1])
@@ -142,6 +162,8 @@ def co_detect(
                         break
                     self.logger.info(f"Image feature: {img_feature} -> Click @ ({click[0]},{click[1]})")
                     if click[0] >= 0 and click[1] >= 0:
+                        if before_reaction is not None:
+                            before_reaction(img_feature, (click[0], click[1]))
                         self.last_click_time = feature_last_appear_time
                         self.click(click[0], click[1])
                         self.last_click_position = (click[0], click[1])
@@ -163,6 +185,38 @@ def co_detect(
 
     if not self.flag_run:
         raise RequestHumanTakeOver("Request Human Take Over.")
+
+
+def handle_global_main_page_overlay(self, before_reaction=None):
+    if self.server != 'Global':
+        return False
+    # Startup promotions have a different frame from the news webview. Match
+    # the close control and footer icon, which do not depend on the artwork
+    # or the language of the "Don't show again today" label.
+    if (image.compare_image(self, 'main_page_startup-promo-dismiss')
+            and image.compare_image(self, 'main_page_startup-promo-close')):
+        feature, click = 'main_page_startup-promo-close', (1173, 75)
+    elif (image.compare_image(self, 'main_page_news-webview')
+            and image.compare_image(self, 'main_page_news-webview-close')):
+        feature, click = 'main_page_news-webview', (1214, 43)
+    elif image.compare_image(self, 'main_page_login-store'):
+        if image.compare_image(self, 'main_page_login-store-session-unchecked', threshold=0.95):
+            feature, click = 'main_page_login-store-session-unchecked', (572, 610)
+        else:
+            feature, click = 'main_page_login-store', (886, 165)
+    else:
+        return False
+    if (self.last_click_name == feature and self.last_click_position == click
+            and time.time() - self.last_click_time <= 2):
+        return True
+    if before_reaction is not None:
+        before_reaction(feature, click)
+    self.logger.info(f'Found overlay: {feature} -> Click @ {click}')
+    self.click(*click, wait_over=True)
+    self.last_click_time = time.time()
+    self.last_click_position = click
+    self.last_click_name = feature
+    return True
 
 
 def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reactions: dict = None):
@@ -203,7 +257,6 @@ def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reac
 
         },
         'Global': {
-            'main_page_login-store': (883, 162),
             'main_page_net-work-unstable': (767, 501),
             'main_page_store-service-unavailable': (640, 500),
             'main_page_request-failed-notice': (640, 513),

@@ -11,23 +11,28 @@ class Main:
     def __init__(self, logger_signal=None, ocr_needed=None):
         self.ocr_needed = ocr_needed
         self.ocr = None
+        self.init_error = None
         self.logger = Logger(logger_signal)
         self.project_dir = os.path.abspath(os.path.dirname(__file__))
         self.logger.info(self.project_dir)
-        self.init_all_data()
+        self.ready = self.init_all_data()
         self.threads = {}
 
     def init_all_data(self):
         if not self.init_ocr():
             self.logger.error("Ocr Init Incomplete Please restart .")
-            return
-        self.init_static_config()
+            self.init_error = self.init_error or '识别服务初始化失败'
+            return False
+        if not self.init_static_config():
+            self.init_error = '静态配置初始化失败'
+            return False
         self.logger.info("-- All Data Initialization Complete Script ready--")
+        return True
 
     def init_ocr(self):
         try:
             check_git(self.logger)
-        except Exception as e:
+        except Exception:
             self.logger.error("OCR Update Failed.")
             import traceback
             self.logger.error(traceback.format_exc())
@@ -38,6 +43,7 @@ class Main:
             self.ocr.client.start_server()
             return True
         except Exception as e:
+            self.init_error = str(e)
             self.logger.error(e)
             return False
 
