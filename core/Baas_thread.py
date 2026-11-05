@@ -940,9 +940,13 @@ class Baas_thread:
         self.config.unfinished_normal_tasks = []
         if type(temp) is str:
             temp = temp.split(',')
-        for i in range(0, len(temp)):
+        for task in temp:
+            if isinstance(task, str):
+                task = task.strip()
+                if not task:
+                    continue
             try:
-                self.config.unfinished_normal_tasks.append(read_task(temp[i], True))
+                self.config.unfinished_normal_tasks.append(read_task(task, True))
             except Exception as e:
                 self.logger.error(e.__str__())
         self.config_set.set("unfinished_normal_tasks", self.config.unfinished_normal_tasks)
@@ -953,9 +957,13 @@ class Baas_thread:
         temp = self.config.hardPriority
         if type(temp) is str:
             temp = temp.split(',')
-        for i in range(0, len(temp)):
+        for task in temp:
+            if isinstance(task, str):
+                task = task.strip()
+                if not task:
+                    continue
             try:
-                self.config.unfinished_hard_tasks.append(read_task(temp[i], False))
+                self.config.unfinished_hard_tasks.append(read_task(task, False))
             except Exception as e:
                 self.logger.error(e.__str__())
         self.config_set.set("unfinished_hard_tasks", self.config.unfinished_hard_tasks)
