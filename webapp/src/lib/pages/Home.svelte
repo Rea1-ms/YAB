@@ -75,7 +75,7 @@
       <div class="queue">
         {$t('等待队列：')}
         {#if waiting.length}
-          {#each waiting as w (w)}
+          {#each waiting as w, i (i)}
             <button class="chip" type="button" title={$t('点击填入运行任务')} onclick={() => (taskInput = w)}>
               {$t(w)}
             </button>
