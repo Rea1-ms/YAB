@@ -45,6 +45,9 @@ branch = branch[arch]
 
 
 def check_git(logger):
+    if getattr(sys, 'frozen', False) and os.path.isfile(os.path.join(SERVER_BIN_DIR, 'BAAS_ocr_server.exe')):
+        logger.info('Using bundled OCR server.')
+        return
     if not os.path.exists(SERVER_BIN_DIR + '/.git'):
         clone_repo(logger)
     else:

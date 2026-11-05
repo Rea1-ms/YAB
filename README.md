@@ -38,7 +38,7 @@
 
 ## 安装与启动
 
-**请确保安装路径没有中文。** 当前版本在浏览器里操作，启动后没有单独的桌面窗口。
+**请确保安装路径没有中文。** 网页模式在浏览器里操作；桌面应用会在独立窗口中显示相同界面。
 
 ### 使用安装包
 
@@ -120,6 +120,9 @@ uv run python -m server.frontend --force
 ```
 
 `--force`（强制重新构建）会重新生成网页资源。需要自行打包的话，安装器构建说明在 `deploy/installer`（安装器目录），完整程序的打包脚本在 `deploy/standalone`（独立发行包目录）；打包完整程序前请先构建网页。
+
+桌面安装包可在 `desktop`（桌面应用目录）执行 `pnpm install --frozen-lockfile`（安装构建依赖），
+再执行 `pnpm run dist`（构建安装包）。会一并包含后端和素材，具体准备方式见该目录说明。
 
 我们会在github issue和开发文档中发布一些需求,如果您有兴趣可以参与开发, 欢迎向**BAAS**提交pull request,我们会仔细阅读你的每一行代码, 哦对了,别忘了阅读[开发文档](https://blog.lzwi.fun/blue_archive_auto_script/develop_doc/develop_guide)
 

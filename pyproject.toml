@@ -25,7 +25,8 @@ dependencies = [
     "PyAutoGUI == 0.9.54",
     "mss == 10.0.0",
     "rich >= 14.2.0",
-    "setuptools <= 80.10.2"
+    # 兼容现有安卓连接库和旧打包工具，避免冻结后端启动失败。
+    "setuptools < 70"
 ]
 requires-python = ">=3.9,<3.13"
 readme = "README.md"

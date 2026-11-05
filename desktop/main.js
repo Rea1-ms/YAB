@@ -42,6 +42,13 @@ const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const { spawn } = require('child_process');
+const { prepareRuntime } = require('./runtime.cjs');
+
+if (process.env.BAAS_DESKTOP_DATA) {
+  const dataPath = path.resolve(process.env.BAAS_DESKTOP_DATA);
+  fs.mkdirSync(dataPath, { recursive: true });
+  app.setPath('userData', dataPath);
+}
 
 const SMOKE_MODE = process.argv.includes('--smoke');
 const HOST = '127.0.0.1';
@@ -102,12 +109,17 @@ function looksLikeRepoRoot(dir) {
 }
 
 // 仓库根解析：开发期 = desktop/ 的上级；打包期 BAAS_ROOT > exe 同级/上级 > resources 及其上级
-function resolveRepoRoot() {
+async function resolveRepoRoot() {
   const fromEnv = process.env.BAAS_ROOT;
   if (fromEnv && fromEnv.trim()) {
     return path.resolve(fromEnv.trim());
   }
   if (app.isPackaged) {
+    const bundle = path.join(process.resourcesPath, 'backend');
+    if (fs.existsSync(path.join(bundle, 'bundle.json'))) {
+      const userData = process.env.BAAS_DESKTOP_DATA || app.getPath('userData');
+      return prepareRuntime(bundle, userData);
+    }
     const exeDir = path.dirname(app.getPath('exe'));
     const candidates = [
       exeDir,
@@ -251,7 +263,9 @@ async function launchBackend(root, port) {
 
 function healthCheck(port) {
   return new Promise((resolve) => {
-    const req = http.get({ host: HOST, port, path: HEALTH_PATH, timeout: 3000 }, (res) => {
+    const token = process.env.BAAS_WEBUI_TOKEN;
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const req = http.get({ host: HOST, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
       res.resume();
       resolve(res.statusCode === 200);
     });
@@ -456,7 +470,7 @@ function createTray() {
 async function runGui() {
   await app.whenReady();
   try {
-    repoRoot = resolveRepoRoot();
+    repoRoot = await resolveRepoRoot();
     serverPort = await acquirePort();
     log(`仓库根: ${repoRoot}`);
     log(`端口: ${serverPort}`);
@@ -473,7 +487,7 @@ async function runSmoke() {
   app.disableHardwareAcceleration();
   await app.whenReady();
   try {
-    repoRoot = resolveRepoRoot();
+    repoRoot = await resolveRepoRoot();
     serverPort = await acquirePort();
     console.log(`[smoke] repoRoot=${repoRoot}`);
     console.log(`[smoke] port=${serverPort}`);

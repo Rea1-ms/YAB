@@ -1,14 +1,13 @@
 # BAAS Desktop（Electron 桌面壳 + 系统托盘）
 
 用 Electron 包一层 BAAS WebUI：主进程负责拉起后端 `python -m server`、探测就绪后加载
-`http://127.0.0.1:<port>/`，并提供系统托盘常驻。零构建（无 TypeScript、无打包步骤），
-CommonJS 直接运行。
+`http://127.0.0.1:<port>/`，并提供系统托盘常驻。开发时直接运行；发行包会带上后端和素材。
 
 ## 目录
 
 ```
 desktop/
-├─ package.json     # name baas-desktop；scripts: start / smoke
+├─ package.json     # 启动、验证和发行包构建入口
 ├─ pnpm-lock.yaml   # 锁定依赖（electron ^45）
 ├─ main.js          # 主进程全部逻辑（后端管理/窗口/托盘/清理/冒烟）
 ├─ preload.js       # contextBridge 暴露 process.versions 等无害信息（window.baasDesktop）
@@ -54,7 +53,8 @@ CI 建议先构建前端再跑 smoke。冒烟模式不申请单实例锁，可�
 |---|---|---|
 | `BAAS_PYTHON` | 指定后端 python 解释器（需已装好依赖） | 不设则用候选链 |
 | `BAAS_DESKTOP_PORT` | 固定后端端口 | 自动选取空闲端口 |
-| `BAAS_ROOT` | 指定 BAAS 仓库根 / 发行包根（打包期用） | 开发期为 `desktop/` 上级；打包期为 exe 同级/上级目录探测 |
+| `BAAS_ROOT` | 指定已有的源码或后端目录，跳过内置运行环境准备 | 开发期为 `desktop/` 上级 |
+| `BAAS_DESKTOP_DATA` | 指定桌面发行包的数据目录 | 系统当前用户的应用数据目录 |
 
 后端可执行文件候选优先级（`main.js` 的 `backendCandidates`）：
 
@@ -81,41 +81,25 @@ server 始终以仓库根为 cwd 启动（它按相对路径读 `config/`、`src
 - **macOS**：行为简化为与 Windows 一致（关闭隐藏到托盘、托盘菜单退出），未做 Dock 菜单
   等 macOS 惯例适配。
 
-## 打包思路（未实现）
+## 构建 Windows（视窗系统）安装包
 
-用 electron-builder 打 Windows NSIS 安装包时的要点：
+在 64 位系统准备好项目的 Python 3.11（后端运行环境）和前端构建工具，并先按源码方式
+启动一次，让识别程序和模型准备完成。然后在本目录执行：
 
-- 打包时 `BAAS_ROOT` 之外还要带上**运行所需的一切**：`webapp/dist`（前端产物，server 启动
-  时 `ensure_frontend` 发现缺失会尝试现场构建——发行包里没有 node/pnpm 时直接报错）、
-  `src/`（图像模板等静态资源）、`core/`、`module/`、`server/` 等 python 代码。
-- python 环境有两条路线：
-  1. **带 `.venv` 整目录**：把仓库根的 `.venv` 与代码一起放进安装目录，`BAAS_ROOT` 指向
-     该目录，desktop 直接用 `.venv/Scripts/python.exe`。venv 是绝对路径固定的，换安装
-     目录后部分入口脚本会失效，稳妥做法是用 `python -m server`（我们正是这么调用的，
-     `python.exe` 本体可搬迁，只要 venv 内启用 `include-system-site-packages=false` 且代码
-     全部走 `-m`/cwd 相对路径即可）。
-  2. **PyInstaller 产物**：先把 server 冻结成 `webui.exe`（见 `deploy/standalone/`），
-     electron-builder 只分发 electron 壳 + `webui.exe` + 静态资源，desktop 的候选 ③ 会
-     直接命中它（spawn 参数自动去掉 `-m server`）。
-- `assets/logo.ico` 已复制到 `desktop/assets/`，可直接作 electron-builder 的 `icon`。
-- electron-builder `build` 配置字段示例（**未验证**，仅示意）：
+构建前先在仓库根运行 `uv sync --python 3.11`（按锁文件安装后端依赖），避免旧打包工具
+与较新版依赖混用，导致生成的后端无法启动。
 
-```jsonc
-{
-  "appId": "org.baas.desktop",
-  "productName": "BAAS",
-  "directories": { "output": "release" },
-  "files": ["main.js", "preload.js", "assets/**"],
-  "extraResources": [
-    { "from": "../webapp/dist", "to": "webapp/dist" },
-    { "from": "../src", "to": "src" },
-    { "from": "../.venv", "to": ".venv" }
-    // 以及 core/ module/ server/ config 模板等运行所需目录
-  ],
-  "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "assets/logo.ico" },
-  "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
-}
+```powershell
+pnpm install --frozen-lockfile
+pnpm run dist
 ```
 
-打包后首启时若资源放在 `resources/` 下，`resolveRepoRoot()` 会在 exe 同级、上级及
-`resources` 目录里探测 `server/__main__.py`；也可用 `BAAS_ROOT` 显式指定。
+构建过程先准备网页，再用 PyInstaller（后端打包工具）生成独立后端，最后用
+electron-builder（安装包工具）生成可选择安装目录的安装程序。每次产物放在新的
+`release/<构建时间>/`（发行输出目录），构建中间文件保留在 `build/`（构建目录）。
+`pnpm run pack`（构建解压目录）可只生成应用目录，便于本机验证。
+当前生成的安装包不做代码签名。
+
+安装后不需要另装后端运行环境。首次启动会把内置后端和素材复制到当前用户的应用数据
+目录，之后从那里运行；升级时保留用户配置和识别设置。构建不会打入现有用户配置、
+访问密码、日志或识别程序的仓库元数据。发行包使用内置识别版本，随应用更新。
