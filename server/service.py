@@ -244,16 +244,20 @@ class BaasService:
 
     def config_set(self, config, params):
         from core.config.config_set import ConfigSet
+        if params['key'] == 'name':
+            return self.config_rename(config, params['value'])
         config_path(config)
         ConfigSet(config).set(params['key'], params['value'])
         self.hub.push_full(f'ConfigArg:{config}')
 
     def config_add(self, name):
         from core.config.config_init import check_config
+        from core.config.config_set import ConfigSet
         path = config_path(name, require_exists=False)
         if path.exists():
             raise ValueError(f'Config already exists: {name}')
         check_config([name])
+        ConfigSet(name).set('name', name)
         self.hub.push_full('ConfigScan')
 
     def config_delete(self, name):
@@ -269,10 +273,11 @@ class BaasService:
     def config_rename(self, config, new_name):
         from core.config.config_set import ConfigSet
         config_path(config)
-        if not new_name or not new_name.strip():
+        if not isinstance(new_name, str) or not new_name.strip():
             raise ValueError('名称不能为空')
         ConfigSet(config).set('name', new_name.strip())
         self.hub.push_full('ConfigScan')
+        self.hub.push_full(f'ConfigArg:{config}')
 
     # ---------- topic providers ----------
 

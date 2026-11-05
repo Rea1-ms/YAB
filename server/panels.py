@@ -42,7 +42,8 @@ def _resolve_options(name, config):
                 for row in static.tactical_challenge_shop_price_list[server]]
     if name == 'students':
         key = _STUDENT_NAME_KEY.get(server, 'CN_name')
-        return [s[key] for s in static.student_names]
+        # Student records can share a localized name; selectors store names only.
+        return list(dict.fromkeys(s[key] for s in static.student_names))
     if name == 'hard_student_stages':
         # hard_task_student_material rows: [stage like "1-1", 学生名]
         mapping = {}

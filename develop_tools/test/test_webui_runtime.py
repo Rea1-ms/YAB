@@ -1,5 +1,6 @@
 """Offline regressions for worker ownership, startup, paths, and gestures."""
 
+import json
 import os
 from pathlib import Path
 import secrets
@@ -11,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from server import frontend
-from server.service import BaasService, config_path
+from server.service import BaasService, config_path, scan_configs
 
 
 class ScratchTest(unittest.TestCase):
@@ -172,6 +173,63 @@ class WorkerTests(ScratchTest):
             with self.assertRaises(ValueError):
                 call()
         self.assertEqual(config_path('account'), self.scratch / 'config/account')
+
+
+class ConfigNameTests(ScratchTest):
+    def setUp(self):
+        super().setUp()
+        from core.config.config_set import ConfigSet
+        from core.config.default_config import STATIC_DEFAULT_CONFIG
+        from core.config.generated_static_config import StaticConfig
+        static = StaticConfig(**json.loads(STATIC_DEFAULT_CONFIG))
+        static_patch = patch.object(ConfigSet, 'static_config', static)
+        static_patch.start()
+        self.addCleanup(static_patch.stop)
+        self.hub = FakeHub()
+        self.hub.push_full = Mock()
+        self.service = BaasService(self.hub)
+
+    def test_new_config_uses_requested_display_name(self):
+        self.service.config_add('设备一')
+        self.assertEqual(scan_configs(), [{'dir': '设备一', 'name': '设备一'}])
+        self.assertEqual(self.service.provide_config_arg('设备一')['name'], '设备一')
+
+    def test_rename_refreshes_both_views_and_preserves_directory_and_values(self):
+        self.service.config_add('account')
+        before = self.service.provide_config_arg('account')
+        self.hub.push_full.reset_mock()
+        self.service.config_rename('account', '  主账号  ')
+        self.assertEqual(scan_configs(), [{'dir': 'account', 'name': '主账号'}])
+        self.assertEqual(self.service.provide_config_arg('account'),
+                         {**before, 'name': '主账号'})
+        self.assertEqual([call.args[0] for call in self.hub.push_full.call_args_list],
+                         ['ConfigScan', 'ConfigArg:account'])
+        self.assertTrue((self.scratch / 'config/account/config.json').is_file())
+        self.assertFalse((self.scratch / 'config/主账号').exists())
+
+    def test_name_edit_in_advanced_config_also_refreshes_list(self):
+        self.service.config_add('account')
+        self.hub.push_full.reset_mock()
+        self.service.config_set('account', {'key': 'name', 'value': '  备用账号  '})
+        self.assertEqual(scan_configs(), [{'dir': 'account', 'name': '备用账号'}])
+        self.assertEqual(self.service.provide_config_arg('account')['name'], '备用账号')
+        self.assertEqual([call.args[0] for call in self.hub.push_full.call_args_list],
+                         ['ConfigScan', 'ConfigArg:account'])
+
+    def test_invalid_names_are_rejected_by_both_edit_paths(self):
+        self.service.config_add('account')
+        before = self.service.provide_config_arg('account')
+        self.hub.push_full.reset_mock()
+        for value in ('', '  ', None, 42):
+            for entrypoint in ('rename', 'set'):
+                with self.subTest(value=value, entrypoint=entrypoint):
+                    with self.assertRaises(ValueError):
+                        if entrypoint == 'rename':
+                            self.service.config_rename('account', value)
+                        else:
+                            self.service.config_set('account', {'key': 'name', 'value': value})
+                    self.assertEqual(self.service.provide_config_arg('account'), before)
+        self.hub.push_full.assert_not_called()
 
 
 class OcrTests(unittest.TestCase):

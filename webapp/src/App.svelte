@@ -108,7 +108,7 @@
     <div class="cfg-block">
       <select class="input" value={dir} onchange={onConfigChange} disabled={scan.length === 0}>
         {#each scan as c (c.dir)}
-          <option value={c.dir}>{c.name}</option>
+          <option value={c.dir}>{c.name}{c.name !== c.dir ? `（${c.dir}）` : ''}</option>
         {/each}
       </select>
       <div class="cfg-btns">

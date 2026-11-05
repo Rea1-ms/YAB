@@ -20,6 +20,8 @@
 
   // 远端值用逗号连接显示（参考旧 GUI）
   const remote = $derived(toStringArray(value).join(','));
+  // 兼容含重名学生的候选列表，避免重复键导致整个配置页渲染失败。
+  const studentOptions = $derived([...new Set(options)]);
 
   // 仅在远端值变化且未在编辑时同步草稿
   $effect(() => {
@@ -84,7 +86,7 @@
       onkeydown={(e) => e.key === 'Enter' && addStudent()}
     />
     <datalist id="student-options">
-      {#each options as s (s)}
+      {#each studentOptions as s (s)}
         <option value={s}></option>
       {/each}
     </datalist>
