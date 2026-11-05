@@ -5,6 +5,7 @@ from datetime import datetime
 
 from core.config import default_config
 from core.config.config_set import ConfigSet
+from core.config.shop_config import migrate_tactical_shop_list
 
 
 # =============================================================================
@@ -67,6 +68,12 @@ def check_and_update_user_config(dir_path='./default_config'):
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         data = update_config_reserve_old(data, json.loads(default_config.DEFAULT_CONFIG))
+        server = ConfigSet.get_server_mode(data['server'])
+        prices = json.loads(default_config.STATIC_DEFAULT_CONFIG)['tactical_challenge_shop_price_list']
+        if server in prices:
+            data['TacticalChallengeShopList'] = migrate_tactical_shop_list(
+                data['TacticalChallengeShopList'], server, prices[server]
+            )
         with open(path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception:

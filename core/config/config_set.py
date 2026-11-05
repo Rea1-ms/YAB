@@ -2,6 +2,9 @@ import json
 import os
 from core.config.generated_user_config import Config
 from core.config.generated_static_config import StaticConfig
+from core.config.shop_config import (
+    migrate_tactical_shop_list, remap_tactical_shop_list, validate_tactical_shop_list,
+)
 from dataclasses import asdict
 
 
@@ -38,6 +41,11 @@ class ConfigSet:
         with open(os.path.join(self.config_dir, "config.json"), 'r', encoding='utf-8') as f:
             self.config = Config(**json.load(f))
         self.server_mode = self.get_server_mode(self.config.server)
+        prices = self.static_config.tactical_challenge_shop_price_list
+        if self.server_mode in prices:
+            self.config.TacticalChallengeShopList = migrate_tactical_shop_list(
+                self.config.TacticalChallengeShopList, self.server_mode, prices[self.server_mode]
+            )
 
     @staticmethod
     def get_server_mode(server):
@@ -58,6 +66,18 @@ class ConfigSet:
 
     def set(self, key, value):
         self._init_config()
+        prices = self.static_config.tactical_challenge_shop_price_list
+        if key == 'TacticalChallengeShopList':
+            validate_tactical_shop_list(value, prices[self.server_mode])
+        elif key == 'server':
+            server = self.get_server_mode(value)
+            if server is None:
+                raise ValueError('未知的游戏服务器')
+            if server != self.server_mode:
+                self.config.TacticalChallengeShopList = remap_tactical_shop_list(
+                    self.config.TacticalChallengeShopList, prices[self.server_mode], prices[server]
+                )
+                self.server_mode = server
         setattr(self.config, key, value)
         self.save()
 

@@ -468,6 +468,8 @@ DEFAULT_CONFIG = """
         0,
         0,
         0,
+        0,
+        0,
         0
     ],
     "CommonShopRefreshTime": "0",

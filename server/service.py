@@ -249,6 +249,8 @@ class BaasService:
         config_path(config)
         ConfigSet(config).set(params['key'], params['value'])
         self.hub.push_full(f'ConfigArg:{config}')
+        if params['key'] == 'server':
+            self.hub.push_full(f'Panels:{config}')
 
     def config_add(self, name):
         from core.config.config_init import check_config
