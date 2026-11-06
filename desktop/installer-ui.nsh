@@ -99,6 +99,21 @@ Var yabSidebarBitmap
 ; multi-user page has created its controls. Custom pages call it explicitly.
 !macroundef MUI_PAGE_FUNCTION_CUSTOM
 !macro MUI_PAGE_FUNCTION_CUSTOM TYPE
+  !if "${TYPE}" == "PRE"
+    !ifndef BUILD_UNINSTALLER
+      ; UAC restarts the wizard after acceptance. Skip only the license in
+      ; that trusted inner instance, keeping normal first-run acceptance.
+      !searchreplace YAB_LICENSE_PRE "${__FUNCTION__}" "mui.LicensePre_" ""
+      !if "${YAB_LICENSE_PRE}" != "${__FUNCTION__}"
+        !ifdef UAC_IsInnerInstance
+          ${if} ${UAC_IsInnerInstance}
+            Abort
+          ${endif}
+        !endif
+      !endif
+      !undef YAB_LICENSE_PRE
+    !endif
+  !endif
   !ifdef MUI_PAGE_CUSTOMFUNCTION_${TYPE}
     Call "${MUI_PAGE_CUSTOMFUNCTION_${TYPE}}"
     !undef MUI_PAGE_CUSTOMFUNCTION_${TYPE}
@@ -111,6 +126,15 @@ Var yabSidebarBitmap
     !else
       Call yabApplyTheme
     !endif
+    !searchreplace YAB_INSTFILES_SHOW "${__FUNCTION__}" "mui.InstFilesShow_" ""
+    !if "${YAB_INSTFILES_SHOW}" != "${__FUNCTION__}"
+      !ifdef __UNINSTALL__
+        Call un.yabStartProgress
+      !else
+        Call yabStartProgress
+      !endif
+    !endif
+    !undef YAB_INSTFILES_SHOW
   !endif
 !macroend
 
@@ -125,14 +149,6 @@ Var yabSidebarBitmap
     System::Call '*$1(i, i.r0)'
     System::Free $1
     IntOp $yabHighContrast $0 & 1
-    ${if} $yabHighContrast = 0
-      System::Call '*(i 1, p 0, i 0, i 0) p.r1'
-      System::Call 'gdiplus::GdiplusStartup(*p.r0, p r1, p 0) i.r2'
-      System::Free $1
-      ${if} $2 = 0
-        StrCpy $yabGdiToken $0
-      ${endif}
-    ${endif}
     ClearErrors
     !insertmacro yabReadThemePreference $0
     ${ifNot} ${Errors}
@@ -215,25 +231,45 @@ Var yabSidebarBitmap
   FunctionEnd
 
   Function ${PREFIX}yabApplyTheme
-    ${if} $yabDarkMode != 1
-      Return
-    ${endif}
     Push $0
+    ${if} $yabDarkMode = 1
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 20, *i 1, i 4) i.r0'
     ${if} $0 != 0
       System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 19, *i 1, i 4)'
     ${endif}
     Push $HWNDPARENT
     Call ${PREFIX}yabColorWindow
-    System::Call 'user32::RedrawWindow(p $HWNDPARENT, p 0, p 0, i 0x185)'
+    ${endif}
+    YabInstallUI::Apply /NOUNLOAD $yabDarkMode $yabHighContrast
     Pop $0
+  FunctionEnd
+
+  Function ${PREFIX}yabStartProgress
+    ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
+      !if "${PREFIX}" == "un."
+        YabInstallUI::Progress /NOUNLOAD "正在卸载程序文件…"
+      !else
+        YabInstallUI::Progress /NOUNLOAD "正在安装程序文件…"
+      !endif
+    ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
+      !if "${PREFIX}" == "un."
+        YabInstallUI::Progress /NOUNLOAD "正在移除程式檔案…"
+      !else
+        YabInstallUI::Progress /NOUNLOAD "正在安裝程式檔案…"
+      !endif
+    ${else}
+      !if "${PREFIX}" == "un."
+        YabInstallUI::Progress /NOUNLOAD "Removing application files..."
+      !else
+        YabInstallUI::Progress /NOUNLOAD "Installing application files..."
+      !endif
+    ${endif}
   FunctionEnd
 !macroend
 
 !macro yabUIHeader
   Var yabDarkMode
   Var yabHighContrast
-  Var yabGdiToken
   !ifdef BUILD_UNINSTALLER
     !insertmacro yabThemeFunctions "un."
     !insertmacro yabCheckboxFunctions "un."

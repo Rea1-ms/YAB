@@ -6,19 +6,35 @@
   SetDetailsPrint textonly
   ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
     DetailPrint "正在检查 YAB 运行状态…"
+    YabInstallUI::Stage /NOUNLOAD "正在检查 YAB 运行状态…"
   ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
     DetailPrint "正在檢查 YAB 執行狀態…"
+    YabInstallUI::Stage /NOUNLOAD "正在檢查 YAB 執行狀態…"
   ${else}
     DetailPrint "Checking whether YAB is running..."
+    YabInstallUI::Stage /NOUNLOAD "Checking whether YAB is running..."
   ${endif}
   !insertmacro IS_POWERSHELL_AVAILABLE
   !insertmacro _CHECK_APP_RUNNING
   ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
     DetailPrint "正在准备程序文件…"
+    YabInstallUI::Stage /NOUNLOAD "正在安装程序文件…"
   ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
     DetailPrint "正在準備程式檔案…"
+    YabInstallUI::Stage /NOUNLOAD "正在安裝程式檔案…"
   ${else}
     DetailPrint "Preparing application files..."
+    YabInstallUI::Stage /NOUNLOAD "Installing application files..."
+  ${endif}
+!macroend
+
+!macro customInstall
+  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
+    YabInstallUI::Stage /NOUNLOAD "正在完成安装…"
+  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
+    YabInstallUI::Stage /NOUNLOAD "正在完成安裝…"
+  ${else}
+    YabInstallUI::Stage /NOUNLOAD "Finishing installation..."
   ${endif}
 !macroend
 
@@ -40,6 +56,16 @@
     Var yabKeepAppData
     Var yabKeepAppDataCheckbox
     Var yabDataDialog
+
+    Function un.yabWelcomeText
+      ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
+        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:这个向导将指引你完成 YAB 的卸载。$\r$\n$\r$\n开始前，请退出 YAB，并确认没有正在运行的 YAB 进程。$\r$\n$\r$\n点击「下一步」继续。"
+      ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
+        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:此精靈將引導你移除 YAB。$\r$\n$\r$\n開始前，請結束 YAB，並確認沒有正在執行的 YAB 處理程序。$\r$\n$\r$\n按「下一步」繼續。"
+      ${else}
+        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:This wizard will guide you through removing YAB.$\r$\n$\r$\nBefore continuing, close YAB and make sure no YAB processes are running.$\r$\n$\r$\nClick Next to continue."
+      ${endif}
+    FunctionEnd
 
     Function un.yabDataPageCreate
       ${if} ${isUpdated}
@@ -98,6 +124,7 @@
 !macroend
 
 !macro customUnWelcomePage
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.yabWelcomeText
   !insertmacro MUI_UNPAGE_WELCOME
   UninstPage custom un.yabDataPageCreate un.yabDataPageLeave
 !macroend

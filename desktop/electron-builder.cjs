@@ -49,6 +49,8 @@ module.exports = {
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));
+    fs.mkdirSync(path.join(release, 'assets'), { recursive: true });
+    fs.copyFileSync(path.join(__dirname, 'assets/YabInstallUI.dll'), path.join(release, 'assets/YabInstallUI.dll'));
     fs.writeFileSync(path.join(release, 'installer-generated.nsh'), lines.join('\r\n'));
   },
   files: ['main.js', 'preload.js', 'runtime.cjs', 'webui.cjs', 'assets/**', 'package.json'],

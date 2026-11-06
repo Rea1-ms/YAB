@@ -420,3 +420,183 @@ SectionEnd
     assert.equal(result[3], 'keyboard=1');
   }
 });
+
+test('license paragraphs, branding and elevated resume use the real page callbacks', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/license-layout-'));
+  const executable = path.join(scratch, 'license-check.exe');
+  const source = path.join(scratch, 'license-check.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+Var testInner
+Var report
+!define UAC_IsInnerInstance '$testInner = 1'
+!macro skipPageIfUpdated
+!macroend
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} 0
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB license layout test"
+BrandingText "YAB 1.4.3"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectLicense
+!insertmacro MUI_PAGE_LICENSE "${path.resolve(__dirname, '../../LICENSE')}"
+Page custom afterLicense
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  ReadEnvStr $testInner "YAB_PREVIEW_INNER"
+  FileOpen $report "$EXEDIR\layout.txt" w
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+FunctionEnd
+Function inspectLicense
+  Call yabApplyTheme
+  System::Alloc 156
+  Pop $R0
+  System::Call '*$R0(i 156)'
+  SendMessage $mui.LicensePage.LicenseText @{EM_SETSEL} 0 0
+  SendMessage $mui.LicensePage.LicenseText 0x43D 0 $R0 ; EM_GETPARAFORMAT
+  System::Call '*$R0(i, i, i, i, i, i, &i2.r0)'
+  FileWriteUTF16LE $report "title=$0$\r$\n"
+  SendMessage $mui.LicensePage.LicenseText @{EM_LINEINDEX} 1 0 $0
+  SendMessage $mui.LicensePage.LicenseText @{EM_SETSEL} $0 $0
+  SendMessage $mui.LicensePage.LicenseText 0x43D 0 $R0
+  System::Call '*$R0(i, i, i, i, i, i, &i2.r0)'
+  FileWriteUTF16LE $report "version=$0$\r$\n"
+  SendMessage $mui.LicensePage.LicenseText @{EM_LINEINDEX} 2 0 $0
+  SendMessage $mui.LicensePage.LicenseText @{EM_SETSEL} $0 $0
+  SendMessage $mui.LicensePage.LicenseText 0x43D 0 $R0
+  System::Call '*$R0(i, i, i, i, i, i, &i2.r0)'
+  FileWriteUTF16LE $report "body=$0$\r$\n"
+  System::Free $R0
+  GetDlgItem $0 $HWNDPARENT 1028
+  System::Call 'user32::GetWindowLongW(p r0, i -16) i.r0'
+  IntOp $0 $0 & @{WS_VISIBLE}
+  FileWriteUTF16LE $report "branding-shadow=$0$\r$\n"
+  GetDlgItem $0 $HWNDPARENT 1256
+  SendMessage $0 @{WM_GETFONT} 0 0 $R0
+  SendMessage $HWNDPARENT @{WM_GETFONT} 0 0 $R1
+  IntCmp $R0 $R1 0 +3 +3
+  FileWriteUTF16LE $report "branding-font=dialog$\r$\n"
+  Goto +2
+  FileWriteUTF16LE $report "branding-font=mismatch$\r$\n"
+  System::Call 'user32::GetWindowTextW(p $mui.LicensePage.LicenseText, w.r1, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $report "content=$1$\r$\n"
+  SendMessage $mui.LicensePage.LicenseText @{EM_SETSEL} 0 0
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+FunctionEnd
+Function afterLicense
+  FileWriteUTF16LE $report "after-license$\r$\n"
+  FileClose $report
+  Quit
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: '0' } });
+  const normal = await fs.readFile(path.join(scratch, 'layout.txt'), 'utf16le');
+  assert.match(normal, /^title=3\r?\nversion=3\r?\nbody=1\r?\nbranding-shadow=0\r?\nbranding-font=dialog/);
+  assert.match(normal, /content=GNU GENERAL PUBLIC LICENSE\r?\nVersion 3, 29 June 2007/);
+  assert.match(normal, /Copyright \(C\) 2007 Free Software Foundation, Inc\./);
+  assert.match(normal, /after-license/);
+  execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: '1' } });
+  assert.equal((await fs.readFile(path.join(scratch, 'layout.txt'), 'utf16le')).trim(), 'after-license',
+    'A resumed UAC inner instance must proceed directly, without requesting license acceptance again.');
+});
+
+test('installation status remains visible and updates when the builder suppresses details', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-status-'));
+  const executable = path.join(scratch, 'status-check.exe');
+  const source = path.join(scratch, 'status-check.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '1 = 1'
+!macro skipPageIfUpdated
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB live status test"
+OutFile "${executable}"
+RequestExecutionLevel user
+Page custom testProgress
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+FunctionEnd
+Function testProgress
+  nsDialogs::Create 1018
+  Pop $0
+  @{NSD_CreateLabel} 0 0 100% 16u ""
+  Pop $2
+  System::Call 'user32::SetWindowLongW(p r2, i -12, i 1006)'
+  @{NSD_CreateProgressBar} 0 20u 100% 16u ""
+  Pop $1
+  System::Call 'user32::SetWindowLongW(p r1, i -12, i 1004)'
+  Call yabApplyTheme
+  Call yabStartProgress
+  SetDetailsPrint none
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $3 $0 0x7F10
+  SendMessage $1 0x406 0 100 ; PBM_SETRANGE32
+  FileOpen $4 "$EXEDIR\status.txt" w
+  SendMessage $2 @{WM_SETTEXT} 0 "STR:"
+  SendMessage $1 0x402 50 0 ; PBM_SETPOS
+  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $4 "$5$\r$\n"
+  SendMessage $1 0x402 75 0
+  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $4 "$5$\r$\n"
+  FileClose $4
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+  nsDialogs::Show
+FunctionEnd
+Section
+  ; The actual MUI progress callback must also create its independent label.
+  SetDetailsPrint none
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $3 $0 0x7F10
+  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+  FileOpen $4 "$EXEDIR\status.txt" a
+  FileSeek $4 0 END
+  FileWriteUTF16LE $4 "actual-page=$5$\r$\n"
+  FileClose $4
+  SetErrorLevel 0
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  execute(executable, []);
+  const lines = (await fs.readFile(path.join(scratch, 'status.txt'), 'utf16le')).trim().split(/\r?\n/);
+  assert.deepEqual(lines.slice(0, 2), ['正在安装程序文件…  50%', '正在安装程序文件…  75%']);
+  assert.match(lines[2], /^actual-page=正在安装程序文件…  \d+%$/);
+});
