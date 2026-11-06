@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+# 历史冻结构建入口；当前桌面发行使用 bundle.py + uv，不再调用本文件。
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files
 
@@ -28,7 +29,7 @@ a = Analysis([str(root / 'webui.py')], pathex=[str(root)], binaries=[], datas=da
              excludes=['PyQt5', 'PySide2', 'PySide6', 'tkinter', 'matplotlib', 'pytest'],
              noarchive=False)
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='BAAS',
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='YAB',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=True, icon=str(root / 'assets/logo.ico'), contents_directory='.')
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='BAAS')
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='YAB')

@@ -1,5 +1,5 @@
 [project]
-name = "blue_archive_auto_script"
+name = "yab"
 version = "1.4.3"
 description = "用于实现蔚蓝档案自动化"
 authors = [{ name = "pur1fying", email = "2274916027@qq.com" }]
@@ -15,7 +15,6 @@ dependencies = [
     "opencv-python == 4.8.1.78",
     "starlette >= 0.37.2, < 1.0",
     "uvicorn[standard] >= 0.30.6",
-    "pyinstaller",
     "requests",
     "dulwich",
     "psutil",
@@ -25,9 +24,13 @@ dependencies = [
     "PyAutoGUI == 0.9.54",
     "mss == 10.0.0",
     "rich >= 14.2.0",
-    # 兼容现有安卓连接库和旧打包工具，避免冻结后端启动失败。
+    # 旧安卓连接库仍使用 pkg_resources。
     "setuptools < 70"
 ]
 requires-python = ">=3.9,<3.13"
 readme = "README.md"
 license = { text = "GPL-3.0-only" }
+
+[dependency-groups]
+# 仅保留给旧版冻结打包脚本，桌面发行不安装此组。
+legacy-build = ["pyinstaller"]

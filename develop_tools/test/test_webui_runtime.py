@@ -378,6 +378,25 @@ class FrontendTests(ScratchTest):
         with patch.object(frontend.sys, 'frozen', True, create=True), self.assertRaises(RuntimeError):
             frontend.ensure_frontend(self.scratch)
 
+    def test_source_distribution_uses_built_assets_without_developer_tools(self):
+        webapp = self.source()
+        (self.scratch / 'distribution.json').write_text('{"version":"1.4.3"}', encoding='utf-8')
+        (webapp / 'dist').mkdir()
+        (webapp / 'dist/index.html').write_text('网页', encoding='utf-8')
+        newer = (webapp / 'dist/index.html').stat().st_mtime + 2
+        os.utime(webapp / 'package.json', (newer, newer))
+        with patch.object(frontend.shutil, 'which') as which, patch.object(frontend.subprocess, 'run') as run:
+            frontend.ensure_frontend(self.scratch)
+        which.assert_not_called()
+        run.assert_not_called()
+
+    def test_incomplete_source_distribution_never_installs_frontend_dependencies(self):
+        self.source()
+        (self.scratch / 'distribution.json').write_text('{}', encoding='utf-8')
+        with patch.object(frontend.subprocess, 'run') as run, self.assertRaisesRegex(RuntimeError, '发行包缺少'):
+            frontend.ensure_frontend(self.scratch)
+        run.assert_not_called()
+
 
 class DistributionTests(ScratchTest):
     def test_ocr_initializes_an_existing_empty_config_directory(self):

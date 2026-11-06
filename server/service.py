@@ -51,6 +51,10 @@ def scan_configs():
 
 
 def get_version():
+    from core.distribution import distribution_version
+    bundled = distribution_version()
+    if bundled:
+        return bundled
     if os.path.exists('./setup.toml'):
         try:
             try:
@@ -154,7 +158,7 @@ class BaasService:
 
     def _on_exit(self, config, code):
         self._on_button(config, '启动')
-        self.hub.log(config, 1, '-- BAAS Exited --')
+        self.hub.log(config, 1, '-- YAB Exited --')
 
     # ---------- script control ----------
 
@@ -210,7 +214,7 @@ class BaasService:
                 t.send('stop')
                 return
             if task is None:
-                self.hub.log(config, 1, 'Starting Blue Archive Auto Script...')
+                self.hub.log(config, 1, 'Starting YAB...')
                 t.send('start')
             else:
                 self._set_state(config, current=task)

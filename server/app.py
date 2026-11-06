@@ -164,7 +164,8 @@ def create_app(serve_webapp=True, access_token=None) -> Starlette:
     ws_server = WebsocketServer(hub)
 
     async def health(_request):
-        return JSONResponse({'status': 'ok', 'version': get_version()})
+        return JSONResponse({'status': 'ok', 'version': get_version(),
+                             'ocr_ready': service.ocr_ready, 'ocr_error': service.ocr_error})
 
     routes = [
         WebSocketRoute('/api/ws', ws_server.endpoint),

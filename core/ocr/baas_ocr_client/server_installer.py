@@ -14,6 +14,7 @@ if sys.stdin is None:
 import shutil
 import os
 from core.exception import OcrInternalError
+from core.distribution import is_distribution
 from dulwich import porcelain
 from dulwich.repo import Repo
 import platform
@@ -45,7 +46,9 @@ branch = branch[arch]
 
 
 def check_git(logger):
-    if getattr(sys, 'frozen', False) and os.path.isfile(os.path.join(SERVER_BIN_DIR, 'BAAS_ocr_server.exe')):
+    if is_distribution():
+        if not os.path.isfile(os.path.join(SERVER_BIN_DIR, 'BAAS_ocr_server.exe')):
+            raise OcrInternalError('发行包缺少识别程序，请重新下载完整发行包')
         logger.info('Using bundled OCR server.')
         return
     if not os.path.exists(SERVER_BIN_DIR + '/.git'):
