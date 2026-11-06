@@ -3,6 +3,7 @@
   import { callRpc } from '../stores';
   import { toast } from '../toast';
   import { LOCALES, t, tNow } from '../i18n';
+  import { styleHelpDocument } from '../help-document';
   import type { CdkTestResult, HelpLangEntry, ShaTestResult, UpdateInfo } from '../types';
 
   // —— 更新设置 ——
@@ -122,10 +123,7 @@
     }
   }
 
-  // 暗色主题注入：白色文字 + 透明背景
-  const styledHtml = $derived(
-    helpHtml ? '<style>body{color:#e6e6e6;background:transparent}</style>' + helpHtml : '',
-  );
+  const styledHtml = $derived(styleHelpDocument(helpHtml));
 
   // 挂载时加载（全局页无 dir 依赖）
   $effect(() => {
@@ -252,7 +250,8 @@
         </div>
         <div class="doc">
           {#if helpHtml}
-            <iframe title={helpName || $t('帮助文档')} class="doc-frame" srcdoc={styledHtml}></iframe>
+            <iframe title={helpName || $t('帮助文档')} class="doc-frame"
+              sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc={styledHtml}></iframe>
           {:else}
             <div class="dim doc-empty">{$t('从左侧选择文档查看')}</div>
           {/if}
