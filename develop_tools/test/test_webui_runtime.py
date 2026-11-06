@@ -379,6 +379,56 @@ class FrontendTests(ScratchTest):
             frontend.ensure_frontend(self.scratch)
 
 
+class DistributionTests(ScratchTest):
+    def test_ocr_initializes_an_existing_empty_config_directory(self):
+        from core.ocr.baas_ocr_client.Client import BaasOcrClient, ServerConfig
+        ocr = self.scratch / 'ocr'
+        (ocr / 'config').mkdir(parents=True)
+        (ocr / 'resource').mkdir()
+        defaults = {'ocr': {'server': {'host': '127.0.0.1', 'port': 8000}}}
+        (ocr / 'resource/global_setting.json').write_text(json.dumps(defaults), encoding='utf-8')
+        with patch.object(BaasOcrClient, 'server_folder_path', str(ocr)):
+            config = ServerConfig()
+        self.assertEqual(config.config, defaults)
+        self.assertEqual(json.loads((ocr / 'config/global_setting.json').read_text()), defaults)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows directory junction regression')
+    def test_desktop_config_junctions_allow_first_start_and_preserve_settings(self):
+        import _winapi
+        from core.config.config_init import check_config
+        from core.config.config_set import ConfigSet
+        from core.ocr.baas_ocr_client.Client import BaasOcrClient, ServerConfig
+
+        # Match the desktop layout: both mutable directories are shared junctions.
+        shared = self.scratch / 'backend'
+        version = self.scratch / 'versions' / 'test-version'
+        ocr_relative = Path('core/ocr/baas_ocr_client/bin')
+        ocr = version / ocr_relative
+        ocr.mkdir(parents=True)
+        for relative in (Path('config'), ocr_relative / 'config'):
+            target = shared / relative
+            target.mkdir(parents=True)
+            _winapi.CreateJunction(str(target), str(version / relative))
+        (ocr / 'resource').mkdir()
+        defaults = {'ocr': {'server': {'host': '127.0.0.1', 'port': 8000}}}
+        (ocr / 'resource/global_setting.json').write_text(json.dumps(defaults), encoding='utf-8')
+
+        os.chdir(version)
+        with patch.object(ConfigSet, 'static_config', None), \
+                patch.object(BaasOcrClient, 'server_folder_path', str(ocr)):
+            check_config(['default_config'])
+            ConfigSet('default_config').set('name', '保留我的配置')
+            config = ServerConfig()
+            self.assertEqual(config.config, defaults)
+            config.config['ocr']['server']['port'] = 9000
+            config.save()
+            check_config(['default_config'])
+            self.assertEqual(ServerConfig().port, 9000)
+            self.assertEqual(ConfigSet('default_config').get('name'), '保留我的配置')
+        self.assertEqual(json.loads((shared / ocr_relative / 'config/global_setting.json').read_text())
+                         ['ocr']['server']['port'], 9000)
+
+
 class CliTests(unittest.TestCase):
     def test_api_only_skips_frontend_build(self):
         from server.__main__ import main

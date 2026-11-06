@@ -28,7 +28,7 @@ class ServerConfig:
             default_config_file_path = os.path.join(BaasOcrClient.server_folder_path, "resource", "global_setting.json")
             if not os.path.exists(default_config_file_path):
                 raise FileNotFoundError("Didn't find default config file.")
-            os.mkdir(os.path.dirname(self.config_path))
+            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
             shutil.copy(default_config_file_path, self.config_path)
         with open(self.config_path, "r") as f:
             self.config = json.load(f)
