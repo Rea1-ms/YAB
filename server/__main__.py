@@ -9,7 +9,7 @@ from server.security import is_loopback
 
 
 def main():
-    parser = argparse.ArgumentParser(description='BAAS WebUI server')
+    parser = argparse.ArgumentParser(description='YAB WebUI server')
     parser.add_argument('--host', default='127.0.0.1', help='listen host, default 127.0.0.1')
     parser.add_argument('--port', type=int, default=22267, help='listen port, default 22267')
     parser.add_argument('--open', action='store_true', help='open browser after start')
@@ -25,7 +25,7 @@ def main():
     if ':' in host:
         host = f'[{host}]'
     url = f'http://{host}:{args.port}'
-    print(f'-- BAAS WebUI running at {url} --')
+    print(f'-- YAB WebUI running at {url} --')
     if args.open:
         import threading
         import webbrowser

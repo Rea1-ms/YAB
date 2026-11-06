@@ -12,11 +12,11 @@ headers = {
 def push(logger: Logger, config: Config, error: str = None):
     data = {}
     if error and config.push_after_error:
-        data['title'] = "Baas Error"
+        data['title'] = "YAB Error"
         data['desp'] = error
 
     if not error and config.push_after_completion:
-        data['title'] = "Baas Completed"
+        data['title'] = "YAB Completed"
         data['desp'] = "all activities finished"
 
     if data:

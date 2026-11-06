@@ -11,7 +11,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 COOKIE_NAME = 'baas_session'
 LOGIN_PAGE = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BAAS 登录</title><body><main><h1>登录 BAAS</h1>
+<title>YAB 登录</title><body><main><h1>登录 YAB</h1>
 <form method="post" action="/login"><label>访问密码
 <input name="token" type="password" autocomplete="current-password" required></label>
 <button type="submit">登录</button></form></main></body></html>'''

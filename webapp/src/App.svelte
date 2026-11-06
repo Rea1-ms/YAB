@@ -100,7 +100,7 @@
     <div class="brand">
       <div class="logo">BA</div>
       <div>
-        <div class="brand-name">BAAS</div>
+        <div class="brand-name">YAB</div>
         <div class="brand-ver">{$meta?.version ?? '…'}</div>
       </div>
     </div>

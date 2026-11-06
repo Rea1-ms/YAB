@@ -1,11 +1,12 @@
 {
-  "name": "baas-desktop",
+  "name": "yab-desktop",
+  "productName": "YAB",
   "version": "1.4.3",
   "private": true,
-  "description": "BAAS 桌面壳：Electron 系统托盘 + 拉起 WebUI 后端（python -m server）",
+  "description": "YAB 桌面壳：Electron 系统托盘 + 拉起 WebUI 后端（python -m server）",
   "main": "main.js",
   "license": "GPL-3.0-only",
-  "author": "BAAS contributors",
+  "author": "YAB contributors",
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",

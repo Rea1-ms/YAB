@@ -110,7 +110,7 @@ class Connection:
         n_available = 0
         available = []
         unavailable = []
-        self.logger.info("Available devices are listed below, choose the one you want to run BAAS on.")
+        self.logger.info("Available devices are listed below, choose the one you want to run YAB on.")
         for i, device in enumerate(devices):
             if device.state == 'device':
                 n_available += 1

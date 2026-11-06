@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "Blue Archive Auto Script",
+  title: "YAB",
   description: "用于实现蔚蓝档案自动化",
   // NOTE: 默认情况下，我们假设站点将部署在域的根路径（/）。
   // 如果你的网站将在子路径上提供服务，例如 https://mywebsite.com/blog/，
