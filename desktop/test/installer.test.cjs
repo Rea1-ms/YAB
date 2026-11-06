@@ -47,6 +47,9 @@ Unicode true
 !include FileFunc.nsh
 !define BUILD_UNINSTALLER
 !define APP_FILENAME "YAB"
+!define MUI_ICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+!define MUI_UNICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
 !macro yabReadThemePreference OUTPUT
   ClearErrors
   StrCpy @{OUTPUT} ${mode}
@@ -155,6 +158,8 @@ Unicode true
 !include LogicLib.nsh
 !include FileFunc.nsh
 !define APP_FILENAME "YAB"
+!define MUI_ICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
 !define isUpdated '0 = 1'
 !macro skipPageIfUpdated
 !macroend
@@ -229,4 +234,189 @@ SectionEnd
     }
   }
   t.diagnostic(`Preview executables: ${scratch}`);
+});
+
+test('real MUI fonts and sidebar rendering work from 100% through 400%', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-dpi-'));
+  const executable = path.join(scratch, 'render-check.exe');
+  const source = path.join(scratch, 'render-check.nsi');
+  const sizes = [[164, 314], [246, 471], [328, 628], [492, 942], [656, 1256]];
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!macro skipPageIfUpdated
+!macroend
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB render check"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW checkRendering
+!insertmacro MUI_PAGE_FINISH
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  ReadEnvStr $LANGUAGE "YAB_PREVIEW_LANGUAGE"
+  !insertmacro customInit
+FunctionEnd
+Function checkRendering
+  FileOpen $R5 "$EXEDIR\metrics.txt" w
+  FileWriteUTF16LE $R5 "language-font=$(^Font)$\r$\n"
+  System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i.r0'
+  FileWriteUTF16LE $R5 "dpi=$0$\r$\n"
+  SendMessage $mui.FinishPage.Title @{WM_GETFONT} 0 0 $0
+  System::Call 'user32::GetDC(p $mui.FinishPage.Title) p.r1'
+  System::Call 'gdi32::SelectObject(p r1, p r0) p.r3'
+  System::Call 'gdi32::GetTextFaceW(p r1, i @{NSIS_MAX_STRLEN}, w.r2)'
+  FileWriteUTF16LE $R5 "title-font=$2$\r$\n"
+  System::Call 'gdi32::SelectObject(p r1, p r3)'
+  System::Call 'user32::ReleaseDC(p $mui.FinishPage.Title, p r1)'
+  System::Alloc 24
+  Pop $R6
+  ${sizes.map(([width, height]) => String.raw`
+  @{NSD_CreateBitmap} 0 0 ${width} ${height} ""
+  Pop $R7
+  !insertmacro MUI_INTERNAL_FULLWINDOW_LOADWIZARDIMAGE "" $R7 "$PLUGINSDIR\modern-wizard.bmp" $R8
+  System::Call 'gdi32::GetObjectW(p R8, i 24, p R6) i.r0'
+  System::Call '*$R6(i, i.r1, i.r2)'
+  FileWriteUTF16LE $R5 "bitmap=$0,$1,$2$\r$\n"
+  SendMessage $R7 @{STM_SETIMAGE} @{IMAGE_BITMAP} 0
+  @{NSD_FreeImage} $R8
+  System::Call 'user32::DestroyWindow(p R7)'
+`).join('')}
+  System::Free $R6
+  FileClose $R5
+  Quit
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  for (const language of [2052, 1028, 1033]) {
+    const font = 'Microsoft YaHei UI';
+    execute(executable, [], { env: { ...process.env, YAB_PREVIEW_LANGUAGE: String(language) } });
+    const lines = (await fs.readFile(path.join(scratch, 'metrics.txt'), 'utf16le')).trim().split(/\r?\n/);
+    assert.equal(lines[0], `language-font=${font}`);
+    assert.match(lines[1], /^dpi=\d+$/);
+    assert.equal(lines[2], `title-font=${font}`, 'MUI titles must use the configured outline font.');
+    assert.deepEqual(lines.slice(3), sizes.map(([width, height]) => `bitmap=24,${width},${height}`),
+      'Render an actual bitmap at each target size, rather than a scaled stock image.');
+    t.diagnostic(`${language}: ${lines.slice(0, 3).join(', ')}`);
+  }
+});
+
+test('native checkbox notifications paint the new glyph and retain click and keyboard state', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/checkbox-render-'));
+  for (const mode of [0, 1]) {
+    const executable = path.join(scratch, `checkbox-${mode}.exe`);
+    const source = path.join(scratch, `checkbox-${mode}.nsi`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!macro skipPageIfUpdated
+!macroend
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} ${mode}
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB checkbox rendering test"
+OutFile "${executable}"
+RequestExecutionLevel user
+XPStyle on
+Var checkbox
+Var tick
+Var resultLog
+Page custom testPage
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE English
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro customHeader
+!insertmacro yabCheckboxFunctions ""
+Function .onInit
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+  StrCpy $tick 0
+FunctionEnd
+Function testPage
+  nsDialogs::Create 1018
+  Pop $0
+  @{NSD_CreateCheckbox} 0 12u 100% 16u "Keep application data"
+  Pop $checkbox
+  Call yabApplyTheme
+  !insertmacro yabStyleCheckbox $checkbox ""
+  @{NSD_CreateTimer} testState 100
+  nsDialogs::Show
+FunctionEnd
+Function testState
+  IntOp $tick $tick + 1
+  @{if} $tick = 1
+    FileOpen $resultLog "$EXEDIR\checkbox-${mode}.txt" w
+    @{NSD_Check} $checkbox
+    System::Call 'user32::RedrawWindow(p $checkbox, p 0, p 0, i 0x185)'
+    @{NSD_GetState} $checkbox $0
+    FileWrite $resultLog "checked=$0$\r$\n"
+    System::Call 'user32::GetDpiForWindow(p $checkbox) i.r0'
+    System::Call 'kernel32::MulDiv(i 4, i r0, i 96) i.r1'
+    System::Call 'kernel32::MulDiv(i 16, i r0, i 96) i.r2'
+    System::Call 'user32::GetClientRect(p $checkbox, @r3)'
+    System::Call '*$3(i, i, i.r5, i.r4)'
+    System::Call 'user32::GetDC(p $checkbox) p.r0'
+    System::Call 'gdi32::CreateCompatibleDC(p r0) p.R0'
+    System::Call 'gdi32::CreateCompatibleBitmap(p r0, i r5, i r4) p.R1'
+    System::Call 'gdi32::SelectObject(p R0, p R1) p.R2'
+    SendMessage $checkbox 0x318 $R0 4 ; WM_PRINTCLIENT, PRF_CLIENT
+    IntOp $4 $4 - $2
+    IntOp $4 $4 / 2
+    IntOp $4 $4 + $1
+    System::Call 'gdi32::GetPixel(p R0, i r1, i r4) i.r2'
+    FileWrite $resultLog "pixel=$2$\r$\n"
+    System::Call 'gdi32::SelectObject(p R0, p R2)'
+    System::Call 'gdi32::DeleteObject(p R1)'
+    System::Call 'gdi32::DeleteDC(p R0)'
+    System::Call 'user32::ReleaseDC(p $checkbox, p r0)'
+    SendMessage $checkbox @{BM_CLICK} 0 0
+    @{NSD_GetState} $checkbox $0
+    FileWrite $resultLog "clicked=$0$\r$\n"
+    System::Call 'user32::SetFocus(p $checkbox)'
+    SendMessage $checkbox @{WM_KEYDOWN} 32 0
+    SendMessage $checkbox @{WM_KEYUP} 32 0
+    @{NSD_GetState} $checkbox $0
+    FileWrite $resultLog "keyboard=$0$\r$\n"
+  @{else}
+    FileClose $resultLog
+    System::Call 'kernel32::ExitProcess(i 0)'
+  @{endif}
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    execute(executable, []);
+    const result = (await fs.readFile(path.join(scratch, `checkbox-${mode}.txt`), 'utf8')).trim().split(/\r?\n/);
+    assert.equal(result[0], 'checked=1');
+    assert.equal(result[1], `pixel=${mode === 0 ? 0xFFCD60 : 0xD47800}`, 'The real control must use our blue glyph.');
+    assert.equal(result[2], 'clicked=0');
+    assert.equal(result[3], 'keyboard=1');
+  }
 });

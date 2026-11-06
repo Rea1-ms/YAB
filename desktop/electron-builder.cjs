@@ -48,6 +48,7 @@ module.exports = {
     lines.push('  Delete "$INSTDIR\\${UNINSTALL_FILENAME}"', '  RMDir "$INSTDIR"', '  ClearErrors', '!macroend', '');
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));
     fs.writeFileSync(path.join(release, 'installer-generated.nsh'), lines.join('\r\n'));
   },
   files: ['main.js', 'preload.js', 'runtime.cjs', 'assets/**', 'package.json'],
@@ -60,6 +61,10 @@ module.exports = {
   },
   nsis: {
     include: path.join(release, 'installer-generated.nsh'),
+    installerIcon: 'assets/installer.ico',
+    uninstallerIcon: 'assets/installer.ico',
+    installerSidebar: 'assets/installer-sidebar.bmp',
+    uninstallerSidebar: 'assets/installer-sidebar.bmp',
     artifactName: 'YAB-${version}-${arch}-setup.${ext}',
     oneClick: false,
     perMachine: false,

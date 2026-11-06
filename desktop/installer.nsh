@@ -1,9 +1,39 @@
 !include "${__FILEDIR__}\installer-ui.nsh"
 
+; The builder calls this after its own SetDetailsPrint none. Restore only the
+; live status line, keeping its application-running checks and file operations.
+!macro customCheckAppRunning
+  SetDetailsPrint textonly
+  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
+    DetailPrint "正在检查 YAB 运行状态…"
+  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
+    DetailPrint "正在檢查 YAB 執行狀態…"
+  ${else}
+    DetailPrint "Checking whether YAB is running..."
+  ${endif}
+  !insertmacro IS_POWERSHELL_AVAILABLE
+  !insertmacro _CHECK_APP_RUNNING
+  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
+    DetailPrint "正在准备程序文件…"
+  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
+    DetailPrint "正在準備程式檔案…"
+  ${else}
+    DetailPrint "Preparing application files..."
+  ${endif}
+!macroend
+
 ; Use native dialog scaling at the display's startup DPI instead of bitmap scaling.
 ; This also applies to the generated uninstaller; it is not per-monitor DPI support.
 !macro customHeader
   ManifestDPIAware true
+  ; Language packs otherwise choose SimSun, including its bitmap strikes.
+  ; MUI uses these same language fonts for its separately created bold titles.
+  SetFont "Microsoft YaHei UI" 9
+  !ifmacrodef _CHECK_APP_RUNNING
+    ; Defining the hook above makes the builder skip these default declarations.
+    Var pid
+    !include "getProcessInfo.nsh"
+  !endif
   !insertmacro yabUIHeader
   !ifdef BUILD_UNINSTALLER
     !include nsDialogs.nsh
@@ -39,6 +69,7 @@
       Pop $0
       ${NSD_SetState} $yabKeepAppDataCheckbox $yabKeepAppData
       Call un.yabApplyTheme
+      !insertmacro yabStyleCheckbox $yabKeepAppDataCheckbox "un."
       nsDialogs::Show
     FunctionEnd
 

@@ -1,6 +1,87 @@
 !include MUI2.nsh
 !include FileFunc.nsh
 !include nsDialogs.nsh
+!include "${__FILEDIR__}\installer-controls.nsh"
+Var yabSidebarBitmap
+
+; Load the high-resolution sidebar at its original size, then downsample to
+; the actual DPI-scaled control. LoadImage(cx, cy), used by MUI by default,
+; stretches with nearest-neighbour filtering and leaves jagged edges.
+!macroundef MUI_INTERNAL_FULLWINDOW_LOADWIZARDIMAGE
+!macro MUI_INTERNAL_FULLWINDOW_LOADWIZARDIMAGE _un CONTROL IMAGE HANDLE
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $9
+  Push $R0
+  Push $R1
+  Push $R2
+  StrCpy $0 ${CONTROL}
+  StrCpy $4 0
+  System::Call 'user32::LoadImageW(p 0, w "${IMAGE}", i ${IMAGE_BITMAP}, i 0, i 0, i ${LR_LOADFROMFILE}|${LR_CREATEDIBSECTION}) p.r1'
+  ${if} $1 P<> 0
+    System::Alloc 24
+    Pop $9
+    System::Call 'gdi32::GetObjectW(p r1, i 24, p r9)'
+    System::Call '*$9(i, i.r5, i.r6)'
+    System::Free $9
+    System::Call 'user32::GetClientRect(p r0, @r9)'
+    System::Call '*$9(i, i, i.r7, i.r8)'
+    System::Call 'user32::GetDC(p r0) p.R2'
+    System::Call 'gdi32::CreateCompatibleDC(p R2) p.r2'
+    System::Call 'gdi32::CreateCompatibleDC(p R2) p.r3'
+    System::Call 'gdi32::CreateCompatibleBitmap(p R2, i r7, i r8) p.r4'
+    ${if} $2 P<> 0
+    ${andIf} $3 P<> 0
+    ${andIf} $4 P<> 0
+      System::Call 'gdi32::SelectObject(p r2, p r1) p.R0'
+      System::Call 'gdi32::SelectObject(p r3, p r4) p.R1'
+      System::Call 'gdi32::SetStretchBltMode(p r3, i 4)'
+      System::Call 'gdi32::SetBrushOrgEx(p r3, i 0, i 0, p 0)'
+      System::Call 'gdi32::StretchBlt(p r3, i 0, i 0, i r7, i r8, p r2, i 0, i 0, i r5, i r6, i 0x00CC0020) i.r9'
+      System::Call 'gdi32::SelectObject(p r2, p R0)'
+      System::Call 'gdi32::SelectObject(p r3, p R1)'
+      ${if} $9 = 0
+        System::Call 'gdi32::DeleteObject(p r4)'
+        StrCpy $4 0
+      ${endif}
+    ${else}
+      System::Call 'gdi32::DeleteObject(p r4)'
+      StrCpy $4 0
+    ${endif}
+    System::Call 'gdi32::DeleteDC(p r2)'
+    System::Call 'gdi32::DeleteDC(p r3)'
+    System::Call 'user32::ReleaseDC(p r0, p R2)'
+    System::Call 'gdi32::DeleteObject(p r1)'
+  ${endif}
+  ${if} $4 P= 0
+    ; Retain MUI's loading behavior if a graphics allocation fails.
+    ${NSD_SetStretchedImage} $0 "${IMAGE}" $4
+  ${else}
+    SendMessage $0 ${STM_SETIMAGE} ${IMAGE_BITMAP} $4
+  ${endif}
+  StrCpy $yabSidebarBitmap $4
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+  StrCpy ${HANDLE} $yabSidebarBitmap
+!macroend
 
 !ifmacrondef yabReadThemePreference
   !macro yabReadThemePreference OUTPUT
@@ -39,6 +120,19 @@
     Push $1
     Push $2
     StrCpy $yabDarkMode 0
+    System::Call '*(i 12, i 0, p 0) p.r1'
+    System::Call 'user32::SystemParametersInfoW(i 0x42, i 12, p r1, i 0)'
+    System::Call '*$1(i, i.r0)'
+    System::Free $1
+    IntOp $yabHighContrast $0 & 1
+    ${if} $yabHighContrast = 0
+      System::Call '*(i 1, p 0, i 0, i 0) p.r1'
+      System::Call 'gdiplus::GdiplusStartup(*p.r0, p r1, p 0) i.r2'
+      System::Free $1
+      ${if} $2 = 0
+        StrCpy $yabGdiToken $0
+      ${endif}
+    ${endif}
     ClearErrors
     !insertmacro yabReadThemePreference $0
     ${ifNot} ${Errors}
@@ -138,8 +232,11 @@
 
 !macro yabUIHeader
   Var yabDarkMode
+  Var yabHighContrast
+  Var yabGdiToken
   !ifdef BUILD_UNINSTALLER
     !insertmacro yabThemeFunctions "un."
+    !insertmacro yabCheckboxFunctions "un."
   !else
     Var yabDirectoryDialog
     Var yabDirectoryInput
