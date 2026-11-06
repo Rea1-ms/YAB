@@ -1,18 +1,16 @@
-# Blue Archive Auto Script
-![Python](https://img.shields.io/badge/-Python-000000?style=flat&logo=python)
-![C++](https://img.shields.io/badge/C%2B%2B-blue?logo=c%2B%2B)
-![GitHub stars](https://img.shields.io/github/stars/pur1fying/blue_archive_auto_script?style=social)
-![star](https://atomgit.com/m0_74686738/blue_archive_auto_script/star/badge.svg)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-purple)
+# YAB
 
+**YAB**（Yet Another BAAS），一个带网页界面的蔚蓝档案脚本（全服支持），适用于 16:9 的游戏画面（1280x720 最佳）。Fork 自 [BAAS](https://github.com/pur1fying/blue_archive_auto_script), 受 [M9A](https://github.com/MAA1999/M9A) | [Alasio](https://github.com/LmeSzinc/Alasio) | [SRC](https://github.com/LmeSzinc/StarRailCopilot) | [zzz-od](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon) 启发。
 
-**BAAS**（蔚蓝档案自动化脚本），一个带网页界面的蔚蓝档案脚本（全服支持），适用于 16:9 的游戏画面（1280x720 最佳）。最终目的是接管一切蔚蓝档案任务，实现完全自动化。
+当前网页界面：
 
-旧版界面预览，当前版本已改用网页界面：
+**主页**：查看资产、当前任务和运行日志，也可以单独运行一个任务。
 
-<img src="docs/assets/ui.png" alt="gui" width="50%">
-<img src="docs/assets/ui2.png" alt="gui" width="50%">
-<img src="docs/assets/ui3.png" alt="gui" width="50%">
+<img src="docs/assets/webui-home.png" alt="主页：资产、任务启停与运行日志" width="100%">
+
+**调度**：启用任务，调整下次执行时间、优先级和执行间隔。
+
+<img src="docs/assets/webui-schedule.png" alt="调度：任务开关、执行时间、优先级与间隔" width="100%">
 
 ## 功能 Features
 - **角色好感度**: 咖啡厅一日8摸, 日程自动找指定学生, 每日最大限度提升好感度
@@ -23,9 +21,9 @@
 - **体力清理**: 可指定任意主线关卡(普通困难) 特别委托 活动关卡 扫荡任意次数
 - **日程**: 优先做指定角色存在的日程, 可优先做加好感度多的日程, 指定每个区域日程次数
 - **竞技场**: 清理到没有竞技场挑战券为止，自动领取每日奖励
-- **制造**: 无缝制造三解 指定制造优先级 次数 是否使用加速券 
+- **制造**: 无缝制造三解 指定制造优先级 次数 是否使用加速券
 - **momotalk**: 自动完成所有未结束对话 完成剧情 领取青辉石
-- **总力战**: 清空总力战挑战券并领取奖励(自动凹分功已在[该仓库](https://github.com/pur1fying/BAAS_Cpp)适配, 正在接入**BAAS**)
+- **总力战**: 清空总力战挑战券并领取奖励(自动凹分功已在[该仓库](https://github.com/pur1fying/BAAS_Cpp)适配, 上游正在接入**BAAS**)
 - **战术综合测试**: 在考试开启期间自动清票
 - **剧情**: 一键清理主线剧情，小组剧情, 迷你剧情
 - **活动**: 一键活动推剧情，任务，挑战，走格子(三服活动稳定更新)
@@ -42,7 +40,11 @@
 
 ### 使用安装包
 
-解压发布页或交流群中的下载包，双击 `BlueArchiveAutoScript.exe`（安装与启动程序），等待环境安装完成。程序会自动打开浏览器；没有自动打开的话，手动访问 [本机网页界面](http://127.0.0.1:22267) 就可以。
+桌面版提供 `YAB-<版本>-x64-setup.exe`（安装程序）和 `YAB-<版本>-x64.zip`（完整压缩包），内含独立运行环境、离线依赖、源码、网页和识别素材。安装后从快捷方式启动；压缩包解压后双击其中的 `YAB.exe`（桌面入口）。首次启动自动准备环境，不需要另装开发工具或联网下载依赖。关闭窗口会隐藏到系统托盘，需要结束程序时，右键托盘图标选择“退出”。自行构建的方法见下方“构建桌面安装包”。
+
+更新时关闭程序，运行新版安装包或解压新版完整压缩包后启动即可。配置保存在 YAB.exe（桌面入口）旁的 config（配置目录）内，包含 profiles（任务配置）和 ocr（识别设置）。旧配置首次启动时自动复制迁移，原目录保留；覆盖安装始终保留配置，卸载时默认勾选“保留应用数据”，可取消以清理本地配置和默认应用数据。依赖未变时会复用环境，新版启动失败会保留并恢复上一版本。桌面版目前需要手动下载新包。
+
+使用上游旧版启动器形式的下载包时，解压发布页或交流群中的下载包，双击 `BlueArchiveAutoScript.exe`（安装与启动程序），等待环境安装完成。程序会自动打开浏览器；没有自动打开的话，手动访问 [本机网页界面](http://127.0.0.1:22267) 就可以。
 
 以后仍然通过这个程序启动。[安装相关文档](https://baas.wiki/usage_doc/install/choose_platform.html)中还有各平台的安装说明，旧版界面截图与当前网页可能不同。
 
@@ -92,9 +94,9 @@ uv run python -m server --host 0.0.0.0 --port 22267
 ## 如何上报bug How to Report Bugs
 在提问题之前至少花费 5 分钟来思考和准备, 才会有人花费他的 5 分钟来帮助你。
 
-在提问题前，请先。
-检查 BAAS 的更新，确认使用的是最新版(重启程序自动更新至最新版本)。
-如果是非预期的行为，请提供非预期行为发生时UI界面的日志,模拟器截图或视频。
+在提问题前，请先：
+- 检查 YAB 的更新，确认使用的是最新版；桌面版需要下载新版发行包，旧启动器按自身更新设置运行。
+- 如果是非预期的行为，请提供非预期行为发生时UI界面的日志,模拟器截图或视频。
 
 ## 开发
 
@@ -124,34 +126,19 @@ uv run python -m server.frontend --force
 
 `--force`（强制重新构建）会重新生成网页资源。需要自行打包的话，安装器构建说明在 `deploy/installer`（安装器目录），完整程序的打包脚本在 `deploy/standalone`（独立发行包目录）；打包完整程序前请先构建网页。
 
-桌面安装包可在 `desktop`（桌面应用目录）执行 `pnpm install --frozen-lockfile`（安装构建依赖），
-再执行 `pnpm run dist`（构建安装包）。会一并包含后端和素材，具体准备方式见该目录说明。
+### 构建桌面安装包
 
-我们会在github issue和开发文档中发布一些需求,如果您有兴趣可以参与开发, 欢迎向**BAAS**提交pull request,我们会仔细阅读你的每一行代码, 哦对了,别忘了阅读[开发文档](https://blog.lzwi.fun/blue_archive_auto_script/develop_doc/develop_guide)
+目前支持 Windows（视窗系统）64 位环境，使用 Electron（桌面应用框架）构建。先准备好上面提到的后端和前端工具；首次构建前，按“使用源码”启动一次，等左下角 OCR（文字识别）指示灯变绿，再回到终端按 Ctrl+C（中断运行）退出服务。
 
-1. **BAAS**自动战斗使用YOLOv8检测游戏内角色, 如果你愿意帮助开发者分担压力, 参与数据标注, 欢迎联系作者
-2. 欢迎将gui适配其他语言(目前有English,简体中文,日本語, 한국말)
-3. 如果你愿意帮助推广**BAAS**, 也欢迎联系作者, 推广方式包括但不限于
-    - 在BiliBili使用**BAAS**自动战斗直播帮别人凹分
-    - 做使用教学视频在不同视频平台推广
+随后从项目根目录运行：
 
-## 已知问题 Known Issues
-- **在使用本软件时请勿游玩游戏瓦洛兰特(可能会受到若干小时的封号处罚)**
-- 本项目尝试支持Docker部署，但目前仍无法运行，目前在`deploy/docker`文件夹中，如有解决方案，请提交PR
+```powershell
+uv sync --python 3.11
+cd desktop
+pnpm install --frozen-lockfile
+pnpm run dist
+```
 
-## 联系我们 Contact Us
-- QQ 
-  - 1群: 658302636
-  - 2群: 1027430247
-- 有开发意向请加作者（Email pur1fying at 2274916027@qq.com）
- 
-## 未来目标 Future Goals
-- **学生党，痛苦喵，大家一起来开源喵**
-- **使用C++重构一部分功能(正在进行中https://github.com/pur1fying/BAAS_Cpp)**
-- **为自动战斗开发一个普通用户可用的GUI**
-- **完善体力规划模块,使脚本可以在二/三倍活动掉落期间刷不同图，购买体力等，使刷体力更灵活可变**
-- **增加竞技场新赛季碎石挖矿功能**
+这些命令会准备网页，将锁定的依赖构建成离线安装包，再复制源码、素材、独立解释器和 uv（环境管理工具），最后生成桌面安装包和完整压缩包，不再冻结后端。产物位于 `desktop/release/<构建时间>/`（发行目录），文件分别为 `YAB-<版本>-x64-setup.exe`（安装包）和 `YAB-<版本>-x64.zip`（完整压缩包）。
 
-## [致谢名单](https://baas.wiki/thanks)
-
-![Contributors](https://contrib.rocks/image?repo=pur1fying/blue_archive_auto_script)
+只需要解压运行目录时，将最后一条命令换成 `pnpm run pack`（构建应用目录）。构建中间文件保留在 `desktop/build`（构建缓存目录），每次发行产物放在新的时间目录中。更多运行与打包说明见 [desktop/README.md（桌面应用说明）](desktop/README.md)。
