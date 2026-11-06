@@ -4,6 +4,18 @@
 
 export default {
   en_US: {
+    '网页访问': 'Web Access',
+    '适用于所有配置，保存后重启应用生效。': 'Applies to all profiles. Restart the application after saving.',
+    '当前访问地址：': 'Current URL: ',
+    '当前监听：': 'Listening on: ',
+    '监听地址': 'Listen address',
+    '网页端口': 'Web port',
+    '127.0.0.1 仅允许本机访问；0.0.0.0 允许局域网访问。': '127.0.0.1 allows local access only; 0.0.0.0 allows LAN access.',
+    '局域网访问需要先通过 BAAS_WEBUI_TOKEN 环境变量设置访问密码。': 'Set an access password using the BAAS_WEBUI_TOKEN environment variable before enabling LAN access.',
+    '当前端口由 BAAS_DESKTOP_PORT 环境变量覆盖，移除后才使用此设置。': 'BAAS_DESKTOP_PORT overrides the port. Remove that environment variable to use this setting.',
+    '设置已更改，重启应用后生效。': 'Settings changed. Restart the application to apply them.',
+    '端口需要填写 1 至 65535 的整数': 'The port must be an integer from 1 to 65535.',
+    '网页服务设置已保存，重启应用后生效': 'Web settings saved. Restart the application to apply them.',
     // —— 既有补充 ——
     '关闭游戏': 'Close Game',
     '请填写您的截图间隔': 'Screenshot interval:',
@@ -193,6 +205,18 @@ export default {
     'RPC 超时：{0}': 'RPC timeout: {0}',
   },
   ja_JP: {
+    '网页访问': 'ブラウザーアクセス',
+    '适用于所有配置，保存后重启应用生效。': 'すべての設定に適用されます。保存後にアプリを再起動してください。',
+    '当前访问地址：': '現在のURL：',
+    '当前监听：': '現在の待受先：',
+    '监听地址': '待受アドレス',
+    '网页端口': 'Webポート',
+    '127.0.0.1 仅允许本机访问；0.0.0.0 允许局域网访问。': '127.0.0.1 はこのPCのみ、0.0.0.0 はLANからのアクセスを許可します。',
+    '局域网访问需要先通过 BAAS_WEBUI_TOKEN 环境变量设置访问密码。': 'LANアクセスを有効にする前に、環境変数 BAAS_WEBUI_TOKEN でパスワードを設定してください。',
+    '当前端口由 BAAS_DESKTOP_PORT 环境变量覆盖，移除后才使用此设置。': 'ポートは環境変数 BAAS_DESKTOP_PORT が優先されます。この設定を使うには環境変数を解除してください。',
+    '设置已更改，重启应用后生效。': '設定が変更されました。再起動後に反映されます。',
+    '端口需要填写 1 至 65535 的整数': 'ポートには1から65535までの整数を入力してください。',
+    '网页服务设置已保存，重启应用后生效': 'Web設定を保存しました。再起動後に反映されます。',
     // —— 既有补充 ——
     '关闭游戏': 'ゲームを閉じる',
     '请填写您的截图间隔': 'スクリーンショット間隔：',
@@ -380,6 +404,18 @@ export default {
     'RPC 超时：{0}': 'RPC タイムアウト：{0}',
   },
   ko_KR: {
+    '网页访问': '웹 접속',
+    '适用于所有配置，保存后重启应用生效。': '모든 설정에 적용됩니다. 저장 후 앱을 다시 시작하세요.',
+    '当前访问地址：': '현재 접속 주소: ',
+    '当前监听：': '현재 수신 주소: ',
+    '监听地址': '수신 주소',
+    '网页端口': '웹 포트',
+    '127.0.0.1 仅允许本机访问；0.0.0.0 允许局域网访问。': '127.0.0.1은 이 PC만, 0.0.0.0은 LAN 접속을 허용합니다.',
+    '局域网访问需要先通过 BAAS_WEBUI_TOKEN 环境变量设置访问密码。': 'LAN 접속 전에 BAAS_WEBUI_TOKEN 환경 변수로 접속 비밀번호를 설정하세요.',
+    '当前端口由 BAAS_DESKTOP_PORT 环境变量覆盖，移除后才使用此设置。': 'BAAS_DESKTOP_PORT 환경 변수가 포트보다 우선합니다. 이 설정을 사용하려면 해당 환경 변수를 해제하세요.',
+    '设置已更改，重启应用后生效。': '설정이 변경되었습니다. 앱을 다시 시작하면 적용됩니다.',
+    '端口需要填写 1 至 65535 的整数': '포트는 1부터 65535까지의 정수여야 합니다.',
+    '网页服务设置已保存，重启应用后生效': '웹 설정을 저장했습니다. 앱을 다시 시작하면 적용됩니다.',
     // —— 既有补充 ——
     '关闭游戏': '게임 종료',
     '请填写您的截图间隔': '스크린샷 간격:',

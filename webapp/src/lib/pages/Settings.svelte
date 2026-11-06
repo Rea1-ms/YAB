@@ -5,6 +5,7 @@
   import Switch from '../components/Switch.svelte';
   import TextField from '../components/TextField.svelte';
   import PanelAccordion from '../components/fields/PanelAccordion.svelte';
+  import WebServerSettings from '../components/WebServerSettings.svelte';
   import type { Meta } from '../types';
 
   let { dir }: { dir: string } = $props();
@@ -159,6 +160,7 @@
 
 <div class="page">
   <div class="cards">
+    <WebServerSettings />
     {#each SECTIONS as sec (sec.title)}
       <div class="card sec">
         <h2>{$t(sec.title)}</h2>

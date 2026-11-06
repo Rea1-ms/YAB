@@ -86,6 +86,17 @@ class BaasService:
         self.states = {}  # config -> dict(running, button, current, waiting)
         self._control_lock = threading.RLock()
         self._stop_events = {}
+        self.listener = None
+
+    def webui_get(self):
+        from server.webui_settings import load_settings
+        return {'saved': load_settings(), 'active': self.listener,
+                'port_override': bool(os.environ.get('YAB_DESKTOP_PORT_OVERRIDE'))}
+
+    def webui_save(self, params):
+        from server.webui_settings import save_settings
+        save_settings(params)
+        return self.webui_get()
 
     # ---------- state helpers ----------
 

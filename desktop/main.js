@@ -27,7 +27,7 @@
 
 // YAB 桌面壳（Electron 主进程）：
 //   1. 单实例锁；二次启动聚焦已有窗口
-//   2. 选端口（BAAS_DESKTOP_PORT 或 net.listen(0) 拿空闲端口）
+//   2. 读取网页监听设置并检查端口（默认 127.0.0.1:22267）
 //   3. 按优先级找 python / 打包产物，以仓库根为 cwd 拉起 `python -m server`
 //   4. 轮询 GET /api/health，成功后加载主窗口（此前显示 loading 页）
 //   5. 托盘：显示主窗口 / 重新载入页面 / 退出；关窗 = 隐藏到托盘
@@ -40,7 +40,7 @@ const { app, BrowserWindow, Tray, Menu, dialog, shell, Notification } = require(
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const net = require('net');
+const { readWebSettings, probePort } = require('./webui.cjs');
 const { spawn } = require('child_process');
 const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings } = require('./runtime.cjs');
 
@@ -49,7 +49,8 @@ fs.mkdirSync(dataPath, { recursive: true });
 app.setPath('userData', dataPath);
 
 const SMOKE_MODE = process.argv.includes('--smoke');
-const HOST = '127.0.0.1';
+let serverHost = '127.0.0.1';
+let connectHost = '127.0.0.1';
 const HEALTH_PATH = '/api/health';
 const READY_TIMEOUT_MS = 90 * 1000; // 后端就绪总预算（首次启动含前端构建时会紧张，见 README）
 const POLL_INTERVAL_MS = 500;
@@ -153,24 +154,13 @@ async function resolveRepoRoot() {
   return path.resolve(__dirname, '..');
 }
 
-// 端口：BAAS_DESKTOP_PORT 优先，否则向系统要一个空闲端口
+// The shell and external browsers use the same persisted HTTP listener.
 async function acquirePort() {
-  const raw = (process.env.BAAS_DESKTOP_PORT || '').trim();
-  if (raw) {
-    const port = Number.parseInt(raw, 10);
-    if (Number.isInteger(port) && port > 0 && port < 65536) {
-      return port;
-    }
-    log(`BAAS_DESKTOP_PORT="${raw}" 不是有效端口，改为自动选择空闲端口`);
-  }
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', (err) => reject(new StartupError(`探测空闲端口失败：${err.message}`)));
-    probe.listen(0, HOST, () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
+  const settings = readWebSettings(repoRoot, packagedRuntime?.configRoot);
+  serverHost = settings.host;
+  connectHost = serverHost === '0.0.0.0' ? '127.0.0.1' : serverHost === '::' ? '::1' : serverHost;
+  await probePort(settings);
+  return settings.port;
 }
 
 // ------------------------------ 后端可执行文件候选 ------------------------------
@@ -206,7 +196,10 @@ function trySpawnCandidate(candidate, listenArgs, root) {
     try {
       child = spawn(candidate.cmd, args, {
         cwd: root, // server 以仓库根为 cwd（读 config/、src/ 等相对路径）
-        env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env,
+          ...(packagedRuntime?.configRoot ? { YAB_CONFIG_DIR: packagedRuntime.configRoot } : {}),
+          YAB_DESKTOP_PORT_OVERRIDE: process.env.BAAS_DESKTOP_PORT ? '1' : '',
+          PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -243,7 +236,7 @@ function trySpawnCandidate(candidate, listenArgs, root) {
 
 // 拉起后端并等待就绪：健康检查通过 / 进程提前退出 / 90s 超时
 async function launchBackend(root, port) {
-  const listenArgs = ['--host', HOST, '--port', String(port)];
+  const listenArgs = ['--host', serverHost, '--port', String(port)];
   const attempted = [];
   for (const candidate of backendCandidates(root)) {
     attempted.push(candidate.cmd);
@@ -270,13 +263,13 @@ async function launchBackend(root, port) {
     }
     if (await healthCheck(port)) {
       backend.healthy = true;
-      log(`后端就绪: http://${HOST}:${port}/`);
+      log(`后端就绪: ${mainPageUrl()}`);
       return;
     }
     await sleep(POLL_INTERVAL_MS);
   }
   throw new StartupError(
-    `等待后端就绪超时（${READY_TIMEOUT_MS / 1000}s，http://${HOST}:${port}${HEALTH_PATH}）。后端输出尾部：\n${logTail()}`,
+    `等待后端就绪超时（${READY_TIMEOUT_MS / 1000}s，${mainPageUrl()}api/health）。后端输出尾部：\n${logTail()}`,
   );
 }
 
@@ -284,7 +277,7 @@ function healthCheck(port) {
   return new Promise((resolve, reject) => {
     const token = process.env.BAAS_WEBUI_TOKEN;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const req = http.get({ host: HOST, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
+    const req = http.get({ host: connectHost, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
       if (!packagedRuntime) { res.resume(); resolve(res.statusCode === 200); return; }
       let body = '';
       res.setEncoding('utf8');
@@ -420,7 +413,7 @@ function loadingPageUrl() {
 }
 
 function mainPageUrl() {
-  return `http://${HOST}:${serverPort}/`;
+  return `http://${connectHost.includes(':') ? `[${connectHost}]` : connectHost}:${serverPort}/`;
 }
 
 // 是否是本壳自己的页面（loading data: 页 / 后端本机地址）
@@ -428,11 +421,7 @@ function isAppUrl(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true; // data:, about: 等
-    const host = parsed.hostname;
-    if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && parsed.port === String(serverPort)) {
-      return true;
-    }
-    return false;
+    return parsed.origin === new URL(mainPageUrl()).origin;
   } catch {
     return true;
   }
@@ -513,6 +502,7 @@ function createTray() {
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
       { label: '重新载入页面', click: () => mainWindow && mainWindow.webContents.reload() },
+      { label: '在浏览器中打开', click: () => backend?.healthy && shell.openExternal(mainPageUrl()) },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
     ]),
@@ -548,7 +538,7 @@ async function runSmoke() {
     console.log(`[smoke] repoRoot=${repoRoot}`);
     console.log(`[smoke] port=${serverPort}`);
     await launchPreparedBackend();
-    console.log(`[smoke] health OK: http://${HOST}:${serverPort}${HEALTH_PATH}`);
+    console.log(`[smoke] health OK: ${mainPageUrl()}api/health`);
     console.log('SMOKE OK');
     await killBackendTree();
     app.exit(0);

@@ -458,7 +458,7 @@ class CliTests(unittest.TestCase):
                 patch('server.__main__.uvicorn.run'):
             main()
         build.assert_not_called()
-        app.assert_called_once_with(serve_webapp=False)
+        app.assert_called_once_with(serve_webapp=False, listener={'host': '127.0.0.1', 'port': 22267})
 
     def test_remote_binding_requires_environment_password(self):
         from server.__main__ import main

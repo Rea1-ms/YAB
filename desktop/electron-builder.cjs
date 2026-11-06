@@ -51,7 +51,7 @@ module.exports = {
     fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));
     fs.writeFileSync(path.join(release, 'installer-generated.nsh'), lines.join('\r\n'));
   },
-  files: ['main.js', 'preload.js', 'runtime.cjs', 'assets/**', 'package.json'],
+  files: ['main.js', 'preload.js', 'runtime.cjs', 'webui.cjs', 'assets/**', 'package.json'],
   extraResources: [{ from: backend, to: 'backend' }],
   artifactName: 'YAB-${version}-${arch}.${ext}',
   win: {

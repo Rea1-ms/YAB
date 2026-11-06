@@ -127,6 +127,8 @@ def register_topics(hub: Hub, service: BaasService):
     hub.register_rpc('Meta', 'sha_test', lambda _config, params: service.sha_test(params))
     hub.register_rpc('Meta', 'help_list', lambda _config, params: service.help_list(params))
     hub.register_rpc('Meta', 'help_content', lambda _config, params: service.help_content(params))
+    hub.register_rpc('Meta', 'webui_get', lambda _config, _params: service.webui_get())
+    hub.register_rpc('Meta', 'webui_save', lambda _config, params: service.webui_save(params))
 
 
 def _autosearch_adb():
@@ -157,9 +159,10 @@ class SPAStaticFiles(StaticFiles):
         return response
 
 
-def create_app(serve_webapp=True, access_token=None) -> Starlette:
+def create_app(serve_webapp=True, access_token=None, listener=None) -> Starlette:
     hub = Hub()
     service = BaasService(hub)
+    service.listener = listener
     register_topics(hub, service)
     ws_server = WebsocketServer(hub)
 
