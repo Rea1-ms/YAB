@@ -80,9 +80,19 @@
     ${if} $2 == "Button"
       System::Call 'user32::GetWindowLongW(p r0, i -16) i.r1'
       IntOp $1 $1 & 0xF
-      ${if} $1 == 7
-        ; The themed group-box caption ignores the foreground color.
-        System::Call 'uxtheme::SetWindowTheme(p r0, w "", w "")'
+      ${if} $1 = ${BS_CHECKBOX}
+      ${orIf} $1 = ${BS_AUTOCHECKBOX}
+      ${orIf} $1 = ${BS_RADIOBUTTON}
+      ${orIf} $1 = ${BS_3STATE}
+      ${orIf} $1 = ${BS_AUTO3STATE}
+      ${orIf} $1 = ${BS_GROUPBOX}
+      ${orIf} $1 = ${BS_AUTORADIOBUTTON}
+        ; Themed choice controls and group captions ignore SetCtlColors.
+        ; Let the native unthemed controls use our readable foreground color;
+        ; their checked state, keyboard input and accessibility stay native.
+        ; System marshals an empty string as NULL (restore default theme).
+        ; A space selects a nonexistent theme, as MUI's finish page does.
+        System::Call 'uxtheme::SetWindowTheme(p r0, w " ", w " ")'
       ${endif}
     ${elseIf} $2 == "RichEdit20W"
     ${orIf} $2 == "RichEdit20A"
