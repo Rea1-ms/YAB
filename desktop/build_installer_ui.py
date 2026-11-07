@@ -26,7 +26,7 @@ def main():
     arguments = ['/nologo', '/LD', '/MT', '/O2', '/W4', '/WX', '/utf-8', '/DUNICODE', '/D_UNICODE',
         '/D_WIN32_WINNT=0x0A00', '"' + str(desktop / 'native/installer-ui.cpp') + '"', '/link',
         '/DEF:"' + str(exports) + '"', '/OUT:"' + str(desktop / 'assets/YabInstallUI.dll') + '"',
-        'user32.lib', 'gdi32.lib', 'gdiplus.lib', 'comctl32.lib', 'uxtheme.lib', 'shell32.lib']
+        'user32.lib', 'gdi32.lib', 'gdiplus.lib', 'comctl32.lib', 'uxtheme.lib', 'shell32.lib', 'dwmapi.lib']
     response.write_text(' '.join(arguments), encoding='utf-8')
     setup = Path(installation) / 'VC/Auxiliary/Build/vcvarsall.bat'
     command = scratch / 'build.cmd'

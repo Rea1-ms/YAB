@@ -1,10 +1,11 @@
-// Native NSIS control painting. Windows retains all input, focus, radio-group,
-// default-button and accessibility behavior; only NM_CUSTOMDRAW is replaced.
+// Native NSIS control and message-box painting. Windows retains all input,
+// focus, radio-group, default-button and accessibility behavior.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
 #include <uxtheme.h>
+#include <dwmapi.h>
 #include <richedit.h>
 #include <gdiplus.h>
 #include <string>
@@ -17,6 +18,8 @@ static ULONG_PTR graphicsToken = 0;
 static HWND statusLabel = nullptr, progressBar = nullptr;
 static std::wstring progressText;
 static HBRUSH statusBrush = nullptr;
+static HWND wizardWindow = nullptr;
+static HHOOK messageBoxHook = nullptr;
 static constexpr UINT_PTR subclassId = 0x594142;
 
 struct RichStream { const char* text; size_t length; size_t position; };
@@ -284,6 +287,29 @@ static LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam, LP
 }
 
 static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
+    // Keep the real MessageBox layout, text, buttons and return values. Only
+    // paint its surface; system message boxes do not inherit the wizard theme.
+    if (GetProp(window, L"YAB.MessageBox") && dark && !highContrast) {
+        if (message == WM_ERASEBKGND) {
+            RECT rect;
+            GetClientRect(window, &rect);
+            FillRect(reinterpret_cast<HDC>(wparam), &rect, statusBrush);
+            return TRUE;
+        }
+        if (message == WM_PAINT) {
+            PAINTSTRUCT paint;
+            const HDC dc = BeginPaint(window, &paint);
+            FillRect(dc, &paint.rcPaint, statusBrush);
+            EndPaint(window, &paint);
+            return 0;
+        }
+        if (message == WM_CTLCOLORDLG || message == WM_CTLCOLORSTATIC || message == WM_CTLCOLORBTN) {
+            const HDC dc = reinterpret_cast<HDC>(wparam);
+            SetTextColor(dc, RGB(240, 240, 240));
+            SetBkColor(dc, RGB(32, 32, 32));
+            return reinterpret_cast<LRESULT>(statusBrush);
+        }
+    }
     if (message == WM_NOTIFY && !highContrast && graphicsToken) {
         auto* draw = reinterpret_cast<NMCUSTOMDRAW*>(lparam);
         wchar_t type[32] = {};
@@ -301,7 +327,15 @@ static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPA
         SetBkColor(reinterpret_cast<HDC>(wparam), dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
         return reinterpret_cast<LRESULT>(statusBrush);
     }
-    if (message == WM_NCDESTROY) RemoveWindowSubclass(window, DialogProc, subclassId);
+    if (message == WM_NCDESTROY) {
+        RemoveProp(window, L"YAB.MessageBox");
+        RemoveWindowSubclass(window, DialogProc, subclassId);
+        if (window == wizardWindow) {
+            if (messageBoxHook) UnhookWindowsHookEx(messageBoxHook);
+            messageBoxHook = nullptr;
+            wizardWindow = nullptr;
+        }
+    }
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
@@ -323,6 +357,28 @@ static BOOL CALLBACK AttachControl(HWND window, LPARAM) {
     return TRUE;
 }
 
+static LRESULT CALLBACK ThemeMessageBox(int code, WPARAM wparam, LPARAM lparam) {
+    if (code == HCBT_ACTIVATE && dark && !highContrast) {
+        const HWND window = reinterpret_cast<HWND>(wparam);
+        wchar_t type[32] = {};
+        GetClassName(window, type, 32);
+        // Limit this thread-local hook to our own native Yes/No dialogs.
+        // UAC and other applications' windows are never affected.
+        if (lstrcmp(type, L"#32770") == 0 && GetWindow(window, GW_OWNER) == wizardWindow
+            && GetDlgItem(window, IDYES) && GetDlgItem(window, IDNO)) {
+            SetProp(window, L"YAB.MessageBox", reinterpret_cast<HANDLE>(1));
+            SetWindowSubclass(window, DialogProc, subclassId, 0);
+            EnumChildWindows(window, AttachControl, 0);
+            const BOOL enabled = TRUE;
+            if (FAILED(DwmSetWindowAttribute(window, 20, &enabled, sizeof(enabled)))) {
+                DwmSetWindowAttribute(window, 19, &enabled, sizeof(enabled));
+            }
+            RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        }
+    }
+    return CallNextHookEx(messageBoxHook, code, wparam, lparam);
+}
+
 extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
     dark = Pop(stack) == L"1";
     highContrast = Pop(stack) != L"0";
@@ -331,6 +387,8 @@ extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEnt
         GdiplusStartup(&graphicsToken, &input, nullptr);
     }
     if (!statusBrush) statusBrush = CreateSolidBrush(dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
+    wizardWindow = parent;
+    if (!messageBoxHook) messageBoxHook = SetWindowsHookEx(WH_CBT, ThemeMessageBox, nullptr, GetCurrentThreadId());
     SetWindowSubclass(parent, DialogProc, subclassId, 0);
     EnumChildWindows(parent, AttachControl, 0);
     // MUI draws a second, offset branding label as an embossed shadow. Giving

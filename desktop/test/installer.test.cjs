@@ -832,6 +832,137 @@ SectionEnd
   }
 });
 
+test('native cancel confirmation keeps its result and follows the wizard theme', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/cancel-dialog-'));
+  for (const theme of [0, 1]) {
+    const source = path.join(scratch, `cancel-${theme}.nsi`);
+    const executable = path.join(scratch, `cancel-${theme}.exe`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!define MUI_CUSTOMFUNCTION_ABORT recordExit
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} ${theme}
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB cancel test"
+OutFile "${executable}"
+RequestExecutionLevel user
+XPStyle on
+Var phase
+Var report
+Var description
+Page custom testPage
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  StrCpy $phase 0
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+  FileOpen $report "$EXEDIR\result-${theme}.txt" w
+FunctionEnd
+Function testPage
+  nsDialogs::Create 1018
+  Pop $0
+  @{NSD_CreateLabel} 0 0 100% 20u "Keep this page"
+  Pop $description
+  Call yabApplyTheme
+  @{NSD_CreateTimer} inspectModal 100
+  nsDialogs::Show
+FunctionEnd
+Function inspectModal
+  System::Call 'user32::GetLastActivePopup(p $HWNDPARENT) p.r0'
+  @{if} $0 == $HWNDPARENT
+    @{if} $phase == 0
+      StrCpy $phase 1
+      ; Exercise the real Cancel callback and the real native MessageBox.
+      System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 2, p 0)'
+    @{elseIf} $phase == 2
+      System::Call 'user32::IsWindowEnabled(p $HWNDPARENT) i.r1'
+      FileWriteUTF16LE $report "resumed=$1$\r$\n"
+      System::Call 'user32::GetWindowTextW(p $description, w.r1, i @{NSIS_MAX_STRLEN})'
+      FileWriteUTF16LE $report "page=$1$\r$\n"
+      StrCpy $phase 3
+      ; The title-bar close button must use the same confirmation.
+      System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_CLOSE}, p 0, p 0)'
+    @{endif}
+    Return
+  @{endif}
+  GetDlgItem $1 $0 6
+  GetDlgItem $2 $0 7
+  @{if} $1 P= 0
+  @{orIf} $2 P= 0
+    Return
+  @{endif}
+  @{if} $phase == 1
+    System::Call 'user32::GetPropW(p r0, w "YAB.MessageBox") p.r3'
+    FileWriteUTF16LE $report "themed=$3$\r$\n"
+    GetDlgItem $3 $0 65535
+    System::Call 'user32::GetWindowTextW(p r3, w.r4, i @{NSIS_MAX_STRLEN})'
+    FileWriteUTF16LE $report "prompt=$4$\r$\n"
+    System::Call 'user32::GetClientRect(p r0, @r3)'
+    System::Call '*$3(i, i, i, i.r4)'
+    System::Call 'user32::GetDC(p r0) p.r5'
+    System::Call 'gdi32::GetPixel(p r5, i 5, i 5) i.r6'
+    FileWriteUTF16LE $report "body=$6$\r$\n"
+    IntOp $4 $4 - 5
+    System::Call 'gdi32::GetPixel(p r5, i 5, i r4) i.r6'
+    FileWriteUTF16LE $report "footer=$6$\r$\n"
+    System::Call 'user32::ReleaseDC(p r0, p r5)'
+    System::Call 'user32::GetDC(p r1) p.r5'
+    System::Call 'gdi32::GetPixel(p r5, i 8, i 7) i.r6'
+    FileWriteUTF16LE $report "button=$6$\r$\n"
+    System::Call 'user32::ReleaseDC(p r1, p r5)'
+    StrCpy $phase 2
+    System::Call 'user32::PostMessageW(p r0, i @{WM_COMMAND}, p 7, p r2)'
+  @{elseIf} $phase == 3
+    FileWriteUTF16LE $report "close-prompt=1$\r$\n"
+    @{NSD_KillTimer} inspectModal
+    System::Call 'user32::PostMessageW(p r0, i @{WM_COMMAND}, p 6, p r1)'
+  @{endif}
+FunctionEnd
+Function recordExit
+  FileWriteUTF16LE $report "exit=1$\r$\n"
+  FileClose $report
+FunctionEnd
+Section
+  ; Reaching installation would be a test failure; no files are installed.
+  SetErrorLevel 17
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    const run = spawnSync(executable, [], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    assert.ifError(run.error);
+    assert.equal(run.status, 1, 'Yes exits with the native user-cancel result.');
+    const report = await fs.readFile(path.join(scratch, `result-${theme}.txt`), 'utf16le');
+    assert.match(report, new RegExp(`themed=${theme === 0 ? 1 : 0}\\r?\\n`));
+    assert.match(report, /prompt=你确实要退出 YAB cancel test 安装程序吗？/);
+    assert.match(report, /resumed=1\r?\npage=Keep this page/);
+    assert.match(report, /close-prompt=1\r?\nexit=1/);
+    const body = Number(report.match(/body=(\d+)/)[1]);
+    const footer = Number(report.match(/footer=(\d+)/)[1]);
+    if (theme === 0) {
+      assert.equal(body, 0x202020, 'The actual native dialog body uses the dark canvas.');
+      assert.equal(footer, 0x202020, 'The native button footer must also be dark.');
+      assert.match(report, new RegExp(`button=${0xFFCD60}\\r?\\n`), 'Reuse the wizard button renderer.');
+    } else {
+      assert.notEqual(body, 0x202020, 'Keep the standard light dialog appearance.');
+    }
+    t.diagnostic(`theme=${theme}: body=${body}, footer=${footer}`);
+  }
+});
+
 test('real install-mode navigation clears elevation shields and paints the icon with its caption', {
   skip: process.platform !== 'win32',
 }, async t => {

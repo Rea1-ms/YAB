@@ -1,6 +1,9 @@
 !include MUI2.nsh
 !include FileFunc.nsh
 !include nsDialogs.nsh
+; Use MUI's native Yes/No confirmation for both Cancel and window-close.
+!define /ifndef MUI_ABORTWARNING
+!define /ifndef MUI_UNABORTWARNING
 !include "${__FILEDIR__}\installer-i18n.nsh"
 !include "${__FILEDIR__}\installer-controls.nsh"
 !include "${__FILEDIR__}\installer-pages.nsh"
@@ -346,16 +349,20 @@ Var yabSidebarBitmap
       Call yabFinalizeDirectory
       StrCpy $yabDirectoryVisited 1
     ${endif}
-    !insertmacro MUI_HEADER_TEXT "$(yabDirectoryTitle)" ""
+    !insertmacro MUI_HEADER_TEXT "$(yabDirectoryTitle)" "$(yabDirectorySubtitle)"
     nsDialogs::Create 1018
     Pop $yabDirectoryDialog
     ${if} $yabDirectoryDialog == error
       Abort
     ${endif}
-    ${NSD_CreateDirRequest} 0 12u 76% 14u "$INSTDIR"
+    ${NSD_CreateLabel} 0 0 100% 58u "$(yabDirectoryText)"
+    Pop $0
+    ${NSD_CreateGroupBox} 0 75u 100% 44u "$(yabDirectoryGroup)"
+    Pop $0
+    ${NSD_CreateDirRequest} 3% 92u 72% 14u "$INSTDIR"
     Pop $yabDirectoryInput
     ${NSD_OnChange} $yabDirectoryInput yabDirectoryChanged
-    ${NSD_CreateBrowseButton} 78% 11u 22% 16u "$(^BrowseBtn)"
+    ${NSD_CreateBrowseButton} 77% 91u 20% 16u "$(^BrowseBtn)"
     Pop $0
     ${NSD_OnClick} $0 yabBrowseDirectory
     Call yabApplyTheme
