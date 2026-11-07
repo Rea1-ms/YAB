@@ -4,38 +4,23 @@
 ; live status line, keeping its application-running checks and file operations.
 !macro customCheckAppRunning
   SetDetailsPrint textonly
-  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-    DetailPrint "正在检查 YAB 运行状态…"
-    YabInstallUI::Stage /NOUNLOAD "正在检查 YAB 运行状态…"
-  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
-    DetailPrint "正在檢查 YAB 執行狀態…"
-    YabInstallUI::Stage /NOUNLOAD "正在檢查 YAB 執行狀態…"
-  ${else}
-    DetailPrint "Checking whether YAB is running..."
-    YabInstallUI::Stage /NOUNLOAD "Checking whether YAB is running..."
-  ${endif}
+  DetailPrint "$(yabChecking)"
+  YabInstallUI::Stage /NOUNLOAD "$(yabChecking)"
   !insertmacro IS_POWERSHELL_AVAILABLE
   !insertmacro _CHECK_APP_RUNNING
-  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-    DetailPrint "正在准备程序文件…"
-    YabInstallUI::Stage /NOUNLOAD "正在安装程序文件…"
-  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
-    DetailPrint "正在準備程式檔案…"
-    YabInstallUI::Stage /NOUNLOAD "正在安裝程式檔案…"
-  ${else}
-    DetailPrint "Preparing application files..."
-    YabInstallUI::Stage /NOUNLOAD "Installing application files..."
-  ${endif}
+  ; This hook also runs inside un.checkAppRunning. Select by the real
+  ; function context, not MUI's mutable page prefix.
+  !ifdef __UNINSTALL__
+    DetailPrint "$(yabRemoving)"
+    YabInstallUI::Stage /NOUNLOAD "$(yabRemoving)"
+  !else
+    DetailPrint "$(yabInstalling)"
+    YabInstallUI::Stage /NOUNLOAD "$(yabInstalling)"
+  !endif
 !macroend
 
 !macro customInstall
-  ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-    YabInstallUI::Stage /NOUNLOAD "正在完成安装…"
-  ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
-    YabInstallUI::Stage /NOUNLOAD "正在完成安裝…"
-  ${else}
-    YabInstallUI::Stage /NOUNLOAD "Finishing installation..."
-  ${endif}
+  YabInstallUI::Stage /NOUNLOAD "$(yabFinishing)"
 !macroend
 
 ; Use native dialog scaling at the display's startup DPI instead of bitmap scaling.
@@ -57,41 +42,19 @@
     Var yabKeepAppDataCheckbox
     Var yabDataDialog
 
-    Function un.yabWelcomeText
-      ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:这个向导将指引你完成 YAB 的卸载。$\r$\n$\r$\n开始前，请退出 YAB，并确认没有正在运行的 YAB 进程。$\r$\n$\r$\n点击「下一步」继续。"
-      ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
-        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:此精靈將引導你移除 YAB。$\r$\n$\r$\n開始前，請結束 YAB，並確認沒有正在執行的 YAB 處理程序。$\r$\n$\r$\n按「下一步」繼續。"
-      ${else}
-        SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:This wizard will guide you through removing YAB.$\r$\n$\r$\nBefore continuing, close YAB and make sure no YAB processes are running.$\r$\n$\r$\nClick Next to continue."
-      ${endif}
-    FunctionEnd
-
     Function un.yabDataPageCreate
       ${if} ${isUpdated}
         Abort
       ${endif}
-      ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-      ${orIf} $LANGUAGE == ${LANG_TRADCHINESE}
-        !insertmacro MUI_HEADER_TEXT "应用数据" "选择卸载后是否保留配置和运行数据。"
-      ${else}
-        !insertmacro MUI_HEADER_TEXT "Application data" "Choose whether to keep your settings and runtime data."
-      ${endif}
+      !insertmacro MUI_HEADER_TEXT "$(yabDataTitle)" "$(yabDataSubtitle)"
       nsDialogs::Create 1018
       Pop $yabDataDialog
       ${if} $yabDataDialog == error
         Abort
       ${endif}
-      ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-      ${orIf} $LANGUAGE == ${LANG_TRADCHINESE}
-        ${NSD_CreateCheckbox} 0 12u 100% 16u "保留应用数据（推荐）"
-        Pop $yabKeepAppDataCheckbox
-        ${NSD_CreateLabel} 0 40u 100% 90u "保留配置、日志、运行环境和备份，重新安装后可继续使用。$\r$\n$\r$\n取消勾选将删除本安装目录中的 config 配置目录，以及当前用户默认应用数据目录中的 YAB 数据（含原 BAAS 数据）。$\r$\n$\r$\n通过环境变量指定到其他位置的数据不在清理范围内。"
-      ${else}
-        ${NSD_CreateCheckbox} 0 12u 100% 16u "Keep application data (recommended)"
-        Pop $yabKeepAppDataCheckbox
-        ${NSD_CreateLabel} 0 40u 100% 90u "Keep settings, logs, runtimes and backups for a future installation.$\r$\n$\r$\nUnchecking this option deletes config in this installation and the current user's default YAB application data (including legacy BAAS data).$\r$\n$\r$\nCustom locations selected through environment variables are kept."
-      ${endif}
+      ${NSD_CreateCheckbox} 0 12u 100% 16u "$(yabKeepData)"
+      Pop $yabKeepAppDataCheckbox
+      ${NSD_CreateLabel} 0 40u 100% 90u "$(yabKeepDataText)"
       Pop $0
       ${NSD_SetState} $yabKeepAppDataCheckbox $yabKeepAppData
       Call un.yabApplyTheme
@@ -115,16 +78,41 @@
       SetShellVarContext current
       !insertmacro yabRemoveDataDirectory "$INSTDIR\config"
       !insertmacro yabRemoveDataDirectory "$APPDATA\yab-desktop"
-      !insertmacro yabRemoveDataDirectory "$APPDATA\baas-desktop"
       ${if} $installMode == "all"
         SetShellVarContext all
       ${endif}
+    FunctionEnd
+
+    ; The builder removes shortcuts and registry entries after customRemoveFiles.
+    ; Retry at successful completion, outside the installation directory. RMDir
+    ; without /r removes an empty directory only (as in qBittorrent and Npp).
+    Function un.onUninstSuccess
+      ${if} ${isUpdated}
+        Return
+      ${endif}
+      SetOutPath "$TEMP"
+      Push $0
+      StrCpy $0 0
+      ${do}
+        ClearErrors
+        !insertmacro yabRemoveEmptyInstallDirectory
+        ${ifNot} ${Errors}
+          ${break}
+        ${endif}
+        IntOp $0 $0 + 1
+        ${if} $0 >= 3
+          ${break}
+        ${endif}
+        Sleep 150
+      ${loop}
+      Pop $0
+      ClearErrors
     FunctionEnd
   !endif
 !macroend
 
 !macro customUnWelcomePage
-  !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.yabWelcomeText
+  !define MUI_WELCOMEPAGE_TITLE "$(yabUnWelcomeTitle)"
   !insertmacro MUI_UNPAGE_WELCOME
   UninstPage custom un.yabDataPageCreate un.yabDataPageLeave
 !macroend
@@ -140,10 +128,10 @@
     ; The builder's default uninstaller also interprets this flag after our
     ; callbacks. Reject combinations that could bypass the user's choice.
     ${if} ${isUpdated}
-      Abort "Application data cannot be deleted during an update."
+      Abort "$(yabCannotDeleteOnUpdate)"
     ${endif}
     ${ifNot} ${Silent}
-      Abort "Use --delete-app-data only with /S, or choose the option in the uninstaller."
+      Abort "$(yabDeleteRequiresSilent)"
     ${endif}
     StrCpy $yabKeepAppData ${BST_UNCHECKED}
   ${endif}
@@ -157,5 +145,11 @@
 !ifmacrondef yabRemoveDataDirectory
   !macro yabRemoveDataDirectory DIRECTORY
     RMDir /r "${DIRECTORY}"
+  !macroend
+!endif
+
+!ifmacrondef yabRemoveEmptyInstallDirectory
+  !macro yabRemoveEmptyInstallDirectory
+    RMDir "$INSTDIR"
   !macroend
 !endif

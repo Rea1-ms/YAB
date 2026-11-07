@@ -57,12 +57,22 @@ Unicode true
 Var installMode
 Var testUpdated
 Var testLog
+Var testEmptyBusy
 !macro _isUpdated _a _b _t _f
   StrCmp $testUpdated "1" "@{_t}" "@{_f}"
 !macroend
 !define isUpdated '"" isUpdated ""'
 !macro yabRemoveDataDirectory DIRECTORY
   FileWrite $testLog "@{DIRECTORY}$\r$\n"
+!macroend
+!macro yabRemoveEmptyInstallDirectory
+  FileOpen $R9 "$EXEDIR\empty-cleanup.txt" a
+  FileSeek $R9 0 END
+  FileWrite $R9 "$INSTDIR|$OUTDIR$\r$\n"
+  FileClose $R9
+  @{if} $testEmptyBusy == "1"
+    SetErrors
+  @{endif}
 !macroend
 !include "${path.resolve(__dirname, '../installer.nsh')}"
 Name "YAB uninstall policy test"
@@ -86,6 +96,7 @@ Function un.onInit
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
   StrCpy $installMode "current"
   StrCpy $testUpdated "0"
+  ReadEnvStr $testEmptyBusy "YAB_PREVIEW_EMPTY_BUSY"
   @{GetParameters} $R0
   @{GetOptions} $R0 "--updated" $R1
   @{ifNot} @{Errors}
@@ -102,6 +113,8 @@ Section
   WriteUninstaller "${uninstaller}"
 SectionEnd
 Section Uninstall
+  FileOpen $testLog "$EXEDIR\empty-cleanup.txt" w
+  FileClose $testLog
   FileOpen $testLog "$EXEDIR\result.txt" w
   FileWrite $testLog "state=$yabKeepAppData$\r$\n"
   !insertmacro customUnInstall
@@ -116,14 +129,26 @@ SectionEnd
       { name: 'explicit silent cleanup', args: ['--delete-app-data'], state: 0, remove: true },
       { name: 'upgrade', args: ['--updated'], state: 1, remove: false },
       { name: 'upgrade after uncheck', args: ['--updated', '--uncheck'], state: 0, remove: false },
+      { name: 'nonempty or busy folder', args: [], state: 1, remove: false, busy: true },
     ];
     for (const scenario of cases) {
-      execute(uninstaller, ['/S', ...scenario.args, `_?=${installDir}`]);
+      execute(uninstaller, ['/S', ...scenario.args, `_?=${installDir}`], {
+        env: { ...process.env, YAB_PREVIEW_EMPTY_BUSY: scenario.busy ? '1' : '0' },
+      });
       const lines = (await fs.readFile(path.join(scratch, 'result.txt'), 'utf8')).trim().split(/\r?\n/);
       assert.equal(lines[0], `state=${scenario.state}`, scenario.name);
       const appData = process.env.APPDATA;
       assert.deepEqual(lines.slice(1), scenario.remove ? [path.join(installDir, 'config'),
-        path.join(appData, 'yab-desktop'), path.join(appData, 'baas-desktop')] : [], scenario.name);
+        path.join(appData, 'yab-desktop')] : [], scenario.name);
+      const cleanup = (await fs.readFile(path.join(scratch, 'empty-cleanup.txt'), 'utf8')).trim();
+      if (scenario.args.includes('--updated')) {
+        assert.equal(cleanup, '', 'Updates must leave the installation directory available.');
+      } else {
+        const attempts = cleanup.split(/\r?\n/);
+        assert.equal(attempts.length, scenario.busy ? 3 : 1, 'Empty-directory cleanup has bounded retries.');
+        assert.ok(attempts.every(line => line.toLowerCase() === `${installDir}|${process.env.TEMP}`.toLowerCase()),
+          'Final cleanup runs outside the installation directory.');
+      }
     }
     const before = await fs.readFile(path.join(scratch, 'result.txt'), 'utf8');
     for (const args of [['/S', '--updated', '--delete-app-data'], ['--delete-app-data']]) {
@@ -172,6 +197,7 @@ Name "YAB 安装界面预览"
 OutFile "${executable}"
 RequestExecutionLevel user
 InstallDir "${scratch}\preview-target"
+!insertmacro customWelcomePage
 !insertmacro MUI_PAGE_LICENSE "${path.resolve(__dirname, '../../LICENSE')}"
 ; Match electron-builder's multi-user page controls without elevation or
 ; registry writes, so visual checks cover selected and unselected radio text.
@@ -436,8 +462,12 @@ Unicode true
 !define APP_FILENAME "YAB"
 !define isUpdated '0 = 1'
 Var testInner
+Var testAccepted
 Var report
 !define UAC_IsInnerInstance '$testInner = 1'
+!macro UAC_AsUser_GetGlobalVar OUTPUT
+  StrCpy @{OUTPUT} $testAccepted
+!macroend
 !macro skipPageIfUpdated
 !macroend
 !macro yabReadThemePreference OUTPUT
@@ -461,6 +491,7 @@ Page custom afterLicense
 Function .onInit
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
   ReadEnvStr $testInner "YAB_PREVIEW_INNER"
+  ReadEnvStr $testAccepted "YAB_PREVIEW_ACCEPTED"
   FileOpen $report "$EXEDIR\layout.txt" w
   !insertmacro customInit
   StrCpy $yabSidebarBitmap 0
@@ -516,9 +547,102 @@ SectionEnd
   assert.match(normal, /content=GNU GENERAL PUBLIC LICENSE\r?\nVersion 3, 29 June 2007/);
   assert.match(normal, /Copyright \(C\) 2007 Free Software Foundation, Inc\./);
   assert.match(normal, /after-license/);
-  execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: '1' } });
+  execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: '1', YAB_PREVIEW_ACCEPTED: '1' } });
   assert.equal((await fs.readFile(path.join(scratch, 'layout.txt'), 'utf16le')).trim(), 'after-license',
     'A resumed UAC inner instance must proceed directly, without requesting license acceptance again.');
+  execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: '1', YAB_PREVIEW_ACCEPTED: '0' } });
+  assert.match(await fs.readFile(path.join(scratch, 'layout.txt'), 'utf16le'), /^title=3\r?\n/,
+    'Elevation before acceptance must still display the license.');
+});
+
+test('welcome and license pages survive Back navigation after elevated resume', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-navigation-'));
+  const executable = path.join(scratch, 'navigation-check.exe');
+  const source = path.join(scratch, 'navigation-check.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!define UAC_IsInnerInstance '$testInner = 1'
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+Var testInner
+Var testAccepted
+Var testBack
+Var testBackToWelcome
+Var report
+!macro UAC_AsUser_GetGlobalVar OUTPUT
+  StrCpy @{OUTPUT} $testAccepted
+!macroend
+!macro skipPageIfUpdated
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB page navigation test"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectWelcome
+!insertmacro customWelcomePage
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectLicense
+!insertmacro MUI_PAGE_LICENSE "${path.resolve(__dirname, '../../LICENSE')}"
+Page custom afterLicense
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  ReadEnvStr $testInner "YAB_PREVIEW_INNER"
+  ReadEnvStr $testAccepted "YAB_PREVIEW_ACCEPTED"
+  FileOpen $report "$EXEDIR\navigation.txt" w
+  !insertmacro customInit
+FunctionEnd
+Function inspectWelcome
+  FileWrite $report "welcome$\r$\n"
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+FunctionEnd
+Function inspectLicense
+  FileWrite $report "license$\r$\n"
+  @{if} $testBack == "1"
+  @{andIf} $testBackToWelcome != "1"
+    StrCpy $testBackToWelcome "1"
+    System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 3, p 0)'
+  @{else}
+    System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+  @{endif}
+FunctionEnd
+Function afterLicense
+  FileWrite $report "after-license$\r$\n"
+  @{if} $testBack == "1"
+    FileClose $report
+    SetErrorLevel 0
+    Quit
+  @{endif}
+  StrCpy $testBack "1"
+  nsDialogs::Create 1018
+  Pop $0
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 3, p 0)'
+  nsDialogs::Show
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  for (const [inner, accepted, expected] of [
+    ['0', '0', ['welcome', 'license', 'after-license', 'license', 'welcome', 'license', 'after-license']],
+    ['1', '1', ['after-license', 'license', 'welcome', 'license', 'after-license']],
+    ['1', '0', ['license', 'after-license', 'license', 'welcome', 'license', 'after-license']],
+  ]) {
+    execute(executable, [], { env: { ...process.env, YAB_PREVIEW_INNER: inner, YAB_PREVIEW_ACCEPTED: accepted } });
+    const actual = (await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf8')).trim().split(/\r?\n/);
+    assert.deepEqual(actual, expected, `inner=${inner}, accepted=${accepted}`);
+  }
 });
 
 test('installation status remains visible and updates when the builder suppresses details', {
@@ -597,6 +721,113 @@ SectionEnd
   execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
   execute(executable, []);
   const lines = (await fs.readFile(path.join(scratch, 'status.txt'), 'utf16le')).trim().split(/\r?\n/);
-  assert.deepEqual(lines.slice(0, 2), ['正在安装程序文件…  50%', '正在安装程序文件…  75%']);
-  assert.match(lines[2], /^actual-page=正在安装程序文件…  \d+%$/);
+  assert.deepEqual(lines.slice(0, 2), ['正在安装  50%', '正在安装  75%']);
+  assert.match(lines[2], /^actual-page=正在安装  \d+%$/);
+});
+
+test('uninstall pages keep localized version text and removal status after the shared running check', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/uninstall-status-'));
+  const installer = path.join(scratch, 'create-uninstaller.exe');
+  const uninstaller = path.join(scratch, 'status-uninstaller.exe');
+  const source = path.join(scratch, 'status.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define BUILD_UNINSTALLER
+!define APP_FILENAME "YAB"
+!define VERSION "9.8.7"
+!define isUpdated '0 = 1'
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+; No file removal occurs in this preview, including the success callback.
+!macro yabRemoveDataDirectory DIRECTORY
+  ClearErrors
+!macroend
+!macro yabRemoveEmptyInstallDirectory
+  ClearErrors
+!macroend
+Var installMode
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB"
+OutFile "${installer}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.inspectWelcome
+!insertmacro customUnWelcomePage
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE English
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE Japanese
+!insertmacro customHeader
+; Run the actual shared UI hook without querying or stopping any real process.
+!macro IS_POWERSHELL_AVAILABLE
+!macroend
+!macro _CHECK_APP_RUNNING
+!macroend
+Function un.onInit
+  ReadEnvStr $LANGUAGE "YAB_PREVIEW_LANGUAGE"
+  StrCpy $installMode "current"
+  !insertmacro customUnInit
+FunctionEnd
+Function un.inspectWelcome
+  FileOpen $R8 "$EXEDIR\welcome.txt" w
+  System::Call 'user32::GetWindowTextW(p $mui.WelcomePage.Title, w.r1, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $R8 "$1$\r$\n"
+  System::Call 'user32::GetWindowTextW(p $mui.WelcomePage.Text, w.r1, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $R8 "$1$\r$\n"
+  FileClose $R8
+  ; Continue through the welcome and data pages to the real uninstall section.
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+FunctionEnd
+Section
+  WriteUninstaller "${uninstaller}"
+SectionEnd
+Section Uninstall
+  SetDetailsPrint none
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $3 $0 0x7F10
+  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+  FileOpen $4 "$EXEDIR\status.txt" w
+  FileWriteUTF16LE $4 "$5$\r$\n"
+  !insertmacro customCheckAppRunning
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $1 $0 1004
+  GetDlgItem $3 $0 0x7F10
+  SendMessage $1 0x406 0 100
+  SendMessage $1 0x402 75 0
+  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+  FileWriteUTF16LE $4 "$5$\r$\n"
+  FileClose $4
+  !insertmacro customUnInstall
+  SetErrorLevel 0
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  execute(installer, ['/S']);
+  for (const [language, title, status] of [
+    [2052, '欢迎使用 YAB v9.8.7 解除安装向导', '删除文件'],
+    [1028, '歡迎使用 YAB v9.8.7 解除安裝程式', '移除檔案'],
+    [1033, 'Welcome to YAB v9.8.7 Uninstall', 'Remove files'],
+    [1041, 'Welcome to YAB v9.8.7 Uninstall', 'Remove files'],
+  ]) {
+    execute(uninstaller, [`_?=${scratch}`], {
+      env: { ...process.env, YAB_PREVIEW_LANGUAGE: String(language) },
+    });
+    const welcome = await fs.readFile(path.join(scratch, 'welcome.txt'), 'utf16le');
+    assert.equal(welcome.split(/\r?\n/)[0], title);
+    if (language === 2052) {
+      assert.match(welcome, /这个向导将全程指引你 YAB 的解除安装进程。/,
+        'Keep the standard MUI wording instead of adding our own welcome copy.');
+    }
+    const lines = (await fs.readFile(path.join(scratch, 'status.txt'), 'utf16le')).trim().split(/\r?\n/);
+    assert.ok(lines[0].startsWith(`${status}  `), 'The real uninstall page must start in the removal stage.');
+    assert.ok(lines[1].startsWith(`${status}  `) && /\d+%$/.test(lines[1]),
+      'The shared process check must not switch back to installation.');
+  }
 });

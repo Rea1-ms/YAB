@@ -1,7 +1,9 @@
 !include MUI2.nsh
 !include FileFunc.nsh
 !include nsDialogs.nsh
+!include "${__FILEDIR__}\installer-i18n.nsh"
 !include "${__FILEDIR__}\installer-controls.nsh"
+!include "${__FILEDIR__}\installer-pages.nsh"
 Var yabSidebarBitmap
 
 ; Load the high-resolution sidebar at its original size, then downsample to
@@ -99,24 +101,25 @@ Var yabSidebarBitmap
 ; multi-user page has created its controls. Custom pages call it explicitly.
 !macroundef MUI_PAGE_FUNCTION_CUSTOM
 !macro MUI_PAGE_FUNCTION_CUSTOM TYPE
-  !if "${TYPE}" == "PRE"
-    !ifndef BUILD_UNINSTALLER
-      ; UAC restarts the wizard after acceptance. Skip only the license in
-      ; that trusted inner instance, keeping normal first-run acceptance.
-      !searchreplace YAB_LICENSE_PRE "${__FUNCTION__}" "mui.LicensePre_" ""
-      !if "${YAB_LICENSE_PRE}" != "${__FUNCTION__}"
-        !ifdef UAC_IsInnerInstance
-          ${if} ${UAC_IsInnerInstance}
-            Abort
-          ${endif}
-        !endif
-      !endif
-      !undef YAB_LICENSE_PRE
-    !endif
-  !endif
   !ifdef MUI_PAGE_CUSTOMFUNCTION_${TYPE}
     Call "${MUI_PAGE_CUSTOMFUNCTION_${TYPE}}"
     !undef MUI_PAGE_CUSTOMFUNCTION_${TYPE}
+  !endif
+  !ifndef BUILD_UNINSTALLER
+    ; Retain the builder's update callback before adding license resume rules.
+    !if "${TYPE}" == "PRE"
+      !searchreplace YAB_LICENSE_CALLBACK "${__FUNCTION__}" "mui.LicensePre_" ""
+      !if "${YAB_LICENSE_CALLBACK}" != "${__FUNCTION__}"
+        !insertmacro yabLicensePre
+      !endif
+      !undef YAB_LICENSE_CALLBACK
+    !else if "${TYPE}" == "LEAVE"
+      !searchreplace YAB_LICENSE_CALLBACK "${__FUNCTION__}" "mui.LicenseLeave_" ""
+      !if "${YAB_LICENSE_CALLBACK}" != "${__FUNCTION__}"
+        !insertmacro yabLicenseLeave
+      !endif
+      !undef YAB_LICENSE_CALLBACK
+    !endif
   !endif
   !if "${TYPE}" == "SHOW"
     ; The builder's multi-user page resets MUI's prefix even in the
@@ -245,25 +248,11 @@ Var yabSidebarBitmap
   FunctionEnd
 
   Function ${PREFIX}yabStartProgress
-    ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-      !if "${PREFIX}" == "un."
-        YabInstallUI::Progress /NOUNLOAD "正在卸载程序文件…"
-      !else
-        YabInstallUI::Progress /NOUNLOAD "正在安装程序文件…"
-      !endif
-    ${elseIf} $LANGUAGE == ${LANG_TRADCHINESE}
-      !if "${PREFIX}" == "un."
-        YabInstallUI::Progress /NOUNLOAD "正在移除程式檔案…"
-      !else
-        YabInstallUI::Progress /NOUNLOAD "正在安裝程式檔案…"
-      !endif
-    ${else}
-      !if "${PREFIX}" == "un."
-        YabInstallUI::Progress /NOUNLOAD "Removing application files..."
-      !else
-        YabInstallUI::Progress /NOUNLOAD "Installing application files..."
-      !endif
-    ${endif}
+    !if "${PREFIX}" == "un."
+      YabInstallUI::Progress /NOUNLOAD "$(yabRemoving)"
+    !else
+      YabInstallUI::Progress /NOUNLOAD "$(yabInstalling)"
+    !endif
   FunctionEnd
 !macroend
 
@@ -348,28 +337,16 @@ Var yabSidebarBitmap
       Call yabFinalizeDirectory
       StrCpy $yabDirectoryVisited 1
     ${endif}
-    ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-    ${orIf} $LANGUAGE == ${LANG_TRADCHINESE}
-      !insertmacro MUI_HEADER_TEXT "选择安装位置" "下方显示的就是实际安装目录。"
-    ${else}
-      !insertmacro MUI_HEADER_TEXT "Installation folder" "The path below is the exact installation folder."
-    ${endif}
+    !insertmacro MUI_HEADER_TEXT "$(yabDirectoryTitle)" ""
     nsDialogs::Create 1018
     Pop $yabDirectoryDialog
     ${if} $yabDirectoryDialog == error
       Abort
     ${endif}
-    ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-    ${orIf} $LANGUAGE == ${LANG_TRADCHINESE}
-      ${NSD_CreateLabel} 0 6u 100% 40u "浏览选好文件夹后，会自动补上 YAB 子目录；已有 YAB 文件夹时直接使用。$\r$\n也可以直接编辑完整安装路径。"
-    ${else}
-      ${NSD_CreateLabel} 0 6u 100% 40u "Browsing adds the YAB subfolder immediately. An existing YAB folder is used directly.$\r$\nYou can also edit the complete installation path."
-    ${endif}
-    Pop $0
-    ${NSD_CreateDirRequest} 0 52u 76% 14u "$INSTDIR"
+    ${NSD_CreateDirRequest} 0 12u 76% 14u "$INSTDIR"
     Pop $yabDirectoryInput
     ${NSD_OnChange} $yabDirectoryInput yabDirectoryChanged
-    ${NSD_CreateBrowseButton} 78% 51u 22% 16u "$(^BrowseBtn)"
+    ${NSD_CreateBrowseButton} 78% 11u 22% 16u "$(^BrowseBtn)"
     Pop $0
     ${NSD_OnClick} $0 yabBrowseDirectory
     Call yabApplyTheme
@@ -381,12 +358,7 @@ Var yabSidebarBitmap
     System::Call 'shlwapi::PathIsRelativeW(w r0) i.r1'
     ${if} $0 == ""
     ${orIf} $1 != 0
-      ${if} $LANGUAGE == ${LANG_SIMPCHINESE}
-      ${orIf} $LANGUAGE == ${LANG_TRADCHINESE}
-        MessageBox MB_OK|MB_ICONEXCLAMATION "请填写完整的安装目录。"
-      ${else}
-        MessageBox MB_OK|MB_ICONEXCLAMATION "Enter a complete installation folder path."
-      ${endif}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(yabDirectoryInvalid)"
       Abort
     ${endif}
     StrCpy $INSTDIR $0

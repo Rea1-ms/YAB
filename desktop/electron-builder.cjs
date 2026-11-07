@@ -48,6 +48,9 @@ module.exports = {
     lines.push('  Delete "$INSTDIR\\${UNINSTALL_FILENAME}"', '  RMDir "$INSTDIR"', '  ClearErrors', '!macroend', '');
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-pages.nsh'), path.join(release, 'installer-pages.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-i18n.nsh'), path.join(release, 'installer-i18n.nsh'));
+    fs.cpSync(path.join(__dirname, 'installer-translations'), path.join(release, 'installer-translations'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));
     fs.mkdirSync(path.join(release, 'assets'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'assets/YabInstallUI.dll'), path.join(release, 'assets/YabInstallUI.dll'));
