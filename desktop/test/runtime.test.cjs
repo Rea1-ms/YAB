@@ -81,14 +81,14 @@ test('upgrade isolates source versions, reuses dependencies and preserves legacy
   assert.equal((await fs.readdir(path.join(f.data, 'versions'))).length, 2);
 });
 
-test('renaming keeps legacy desktop data and honors explicit overrides', async () => {
+test('desktop data uses the YAB directory and honors explicit overrides', async () => {
   const f = await fixture();
   assert.equal(desktopDataPath(f.data), path.join(f.data, 'yab-desktop'));
   const legacy = path.join(f.data, 'baas-desktop');
   await fs.mkdir(legacy, { recursive: true });
   await fs.writeFile(path.join(legacy, 'Preferences'), 'saved preferences');
-  assert.equal(desktopDataPath(f.data), legacy);
-  assert.equal(await fs.readFile(path.join(desktopDataPath(f.data), 'Preferences'), 'utf8'), 'saved preferences');
+  assert.equal(desktopDataPath(f.data), path.join(f.data, 'yab-desktop'));
+  assert.equal(await fs.readFile(path.join(legacy, 'Preferences'), 'utf8'), 'saved preferences');
   const custom = path.join(f.data, 'custom');
   assert.equal(desktopDataPath(f.data, custom), custom);
 });

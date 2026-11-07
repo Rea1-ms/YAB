@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('fs/promises');
-const { existsSync } = require('fs');
 const path = require('path');
 const { createHash, randomUUID } = require('crypto');
 const { spawn } = require('child_process');
@@ -64,9 +63,7 @@ async function prepareSettings(userData, configRoot, previousConfigRoot) {
 
 function desktopDataPath(appData, override) {
   if (override) return path.resolve(override);
-  // Reuse the whole legacy directory, including settings, runtime and browser state.
-  const legacy = path.join(appData, 'baas-desktop');
-  return existsSync(legacy) ? legacy : path.join(appData, 'yab-desktop');
+  return path.join(appData, 'yab-desktop');
 }
 
 async function readJson(file) {
