@@ -101,6 +101,15 @@ Var yabSidebarBitmap
 ; multi-user page has created its controls. Custom pages call it explicitly.
 !macroundef MUI_PAGE_FUNCTION_CUSTOM
 !macro MUI_PAGE_FUNCTION_CUSTOM TYPE
+  !if "${TYPE}" == "PRE"
+    ; The same Next button survives page changes. Clear both native and custom
+    ; shield state before entering a page; the install-mode radio callback
+    ; restores it only when continuing would actually request elevation.
+    Push $0
+    GetDlgItem $0 $HWNDPARENT 1
+    SendMessage $0 ${BCM_SETSHIELD} 0 0
+    Pop $0
+  !endif
   !ifdef MUI_PAGE_CUSTOMFUNCTION_${TYPE}
     Call "${MUI_PAGE_CUSTOMFUNCTION_${TYPE}}"
     !undef MUI_PAGE_CUSTOMFUNCTION_${TYPE}

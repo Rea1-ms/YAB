@@ -92,6 +92,45 @@ static int Scale(HWND window, int value) {
     return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96);
 }
 
+static void LayoutShieldButton(HWND window) {
+    if (GetDlgCtrlID(window) != IDOK) return;
+    const HWND parent = GetParent(window);
+    RECT rect;
+    GetWindowRect(window, &rect);
+    MapWindowPoints(nullptr, parent, reinterpret_cast<POINT*>(&rect), 2);
+    const int previous = static_cast<int>(reinterpret_cast<INT_PTR>(GetProp(window, L"YAB.ShieldExpansion")));
+    const int baseWidth = rect.right - rect.left - previous;
+    int expansion = 0;
+    if (GetProp(window, L"YAB.Shield")) {
+        wchar_t title[1024] = {};
+        GetWindowText(window, title, 1024);
+        const HDC dc = GetDC(window);
+        const auto font = reinterpret_cast<HFONT>(SendMessage(window, WM_GETFONT, 0, 0));
+        const auto original = SelectObject(dc, font);
+        RECT extent = {};
+        DrawText(dc, title, -1, &extent, DT_SINGLELINE | DT_CALCRECT);
+        SelectObject(dc, original);
+        ReleaseDC(window, dc);
+        const int required = extent.right + Scale(window, 16) + Scale(window, 5) + 2 * Scale(window, 6);
+        if (required > baseWidth) expansion = required - baseWidth;
+    }
+    const int change = expansion - previous;
+    if (!change) return;
+    if (expansion) SetProp(window, L"YAB.ShieldExpansion", reinterpret_cast<HANDLE>(static_cast<INT_PTR>(expansion)));
+    else RemoveProp(window, L"YAB.ShieldExpansion");
+    // Keep the right edge and Cancel fixed, moving Back by the same amount.
+    // Restore both controls as soon as the next action no longer elevates.
+    SetWindowPos(window, nullptr, rect.left - change, rect.top, baseWidth + expansion,
+        rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    const HWND back = GetDlgItem(parent, 3);
+    if (back) {
+        GetWindowRect(back, &rect);
+        MapWindowPoints(nullptr, parent, reinterpret_cast<POINT*>(&rect), 2);
+        SetWindowPos(back, nullptr, rect.left - change, rect.top, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
 static void Rounded(Graphics& graphics, const RectF& rect, float radius, Color fill, Color border) {
     GraphicsPath path;
     const float arc = radius * 2;
@@ -181,22 +220,29 @@ static void DrawButton(HWND window, NMCUSTOMDRAW* draw) {
     SetTextColor(draw->hdc, text);
     wchar_t title[1024] = {};
     GetWindowText(window, title, 1024);
+    RECT textRect = rect;
+    UINT flags = DT_SINGLELINE | DT_VCENTER | (choice ? DT_LEFT : DT_CENTER);
+    if (SendMessage(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL) flags |= DT_HIDEPREFIX;
     if (!choice && GetProp(window, L"YAB.Shield")) {
         SHSTOCKICONINFO icon = {sizeof(icon)};
         if (SUCCEEDED(SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON | SHGSI_SMALLICON, &icon))) {
             const int size = Scale(window, 16);
-            SIZE extent = {};
-            GetTextExtentPoint32(draw->hdc, title, lstrlen(title), &extent);
+            // Measure with the same accelerator-prefix handling as DrawText.
+            // Center the complete icon/caption group, then draw the caption
+            // immediately after the icon instead of re-centering it again.
+            RECT extent = {};
+            DrawText(draw->hdc, title, -1, &extent, flags | DT_CALCRECT);
             const int gap = Scale(window, 5);
-            const int x = (rect.right - extent.cx - size - gap) / 2;
-            DrawIconEx(draw->hdc, x, (rect.bottom - size) / 2, icon.hIcon, size, size, 0, nullptr, DI_NORMAL);
+            const int x = rect.left + (rect.right - rect.left - extent.right - size - gap) / 2;
+            const int y = rect.top + (rect.bottom - rect.top - size) / 2;
+            DrawIconEx(draw->hdc, x, y, icon.hIcon, size, size, 0, nullptr, DI_NORMAL);
             DestroyIcon(icon.hIcon);
-            rect.left += size + gap;
+            textRect.left = x + size + gap;
+            textRect.right = textRect.left + extent.right;
+            flags = (flags & ~DT_CENTER) | DT_LEFT;
         }
     }
-    UINT flags = DT_SINGLELINE | DT_VCENTER | (choice ? DT_LEFT : DT_CENTER);
-    if (SendMessage(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL) flags |= DT_HIDEPREFIX;
-    DrawText(draw->hdc, title, -1, &rect, flags);
+    DrawText(draw->hdc, title, -1, &textRect, flags);
     if ((draw->uItemState & CDIS_FOCUS) && !(SendMessage(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS)) {
         InflateRect(&rect, -Scale(window, 3), -Scale(window, 3));
         DrawFocusRect(draw->hdc, &rect);
@@ -223,10 +269,14 @@ static LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam, LP
         else RemoveProp(window, L"YAB.Shield");
     }
     const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+    if (message == BCM_SETSHIELD || (message == WM_SETTEXT && GetProp(window, L"YAB.Shield"))) {
+        LayoutShieldButton(window);
+    }
     if (window == progressBar && (message == PBM_SETPOS || message == PBM_DELTAPOS || message == PBM_STEPIT
         || message == PBM_SETRANGE || message == PBM_SETRANGE32)) UpdateProgress();
     if (message == WM_NCDESTROY) {
         RemoveProp(window, L"YAB.Shield");
+        RemoveProp(window, L"YAB.ShieldExpansion");
         RemoveWindowSubclass(window, ControlProc, subclassId);
         if (window == progressBar) { progressBar = nullptr; statusLabel = nullptr; }
     }

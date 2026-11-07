@@ -831,3 +831,206 @@ SectionEnd
       'The shared process check must not switch back to installation.');
   }
 });
+
+test('real install-mode navigation clears elevation shields and paints the icon with its caption', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const builder = path.dirname(require.resolve('app-builder-lib/package.json', {
+    paths: [path.dirname(require.resolve('electron-builder/package.json'))],
+  }));
+  const modePage = path.join(builder, 'templates/nsis/multiUserUi.nsh');
+  const messages = [...new Set([...((await fs.readFile(modePage, 'utf8')).matchAll(/\$\((\w+)\)/g))]
+    .map(match => match[1]))];
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/shield-navigation-'));
+  const executable = path.join(scratch, 'shield-check.exe');
+  const source = path.join(scratch, 'shield-check.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!define UAC_IsInnerInstance '0 = 1'
+!define UAC_IsAdmin '0 = 1'
+!define isForAllUsers '0 = 1'
+!define isForCurrentUser '0 = 1'
+!define MULTIUSER_INSTALLMODE_ALLOW_ELEVATION
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+Var installMode
+Var hasPerMachineInstallation
+Var hasPerUserInstallation
+Var perMachineInstallationFolder
+Var perUserInstallationFolder
+Var report
+Var testStep
+Var testTheme
+!macro UAC_AsUser_GetGlobalVar OUTPUT
+  StrCpy @{OUTPUT} 0
+!macroend
+!macro UAC_RunElevated
+  ; No test path may perform real elevation.
+  SetErrorLevel 1
+  Quit
+!macroend
+!macro setInstallModePerAllUsers
+  StrCpy $installMode "all"
+!macroend
+!macro setInstallModePerUser
+  StrCpy $installMode "current"
+!macroend
+!macro skipPageIfUpdated
+!macroend
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} $testTheme
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+!include "${modePage}"
+Name "YAB shield navigation check"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectWelcomeShield
+!insertmacro customWelcomePage
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectLicenseShield
+!insertmacro MUI_PAGE_LICENSE "${path.resolve(__dirname, '../../LICENSE')}"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectModeShield
+!insertmacro PAGE_INSTALL_MODE
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+${messages.map(name => `LangString ${name} @{LANG_SIMPCHINESE} "${name}"`).join('\n')}
+!insertmacro customHeader
+Function .onInit
+  ReadEnvStr $testTheme "YAB_PREVIEW_THEME"
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  StrCpy $installMode "all"
+  StrCpy $hasPerMachineInstallation "0"
+  StrCpy $hasPerUserInstallation "0"
+  StrCpy $perMachineInstallationFolder ""
+  StrCpy $perUserInstallationFolder ""
+  StrCpy $testStep 0
+  FileOpen $report "$EXEDIR\navigation.txt" w
+  !insertmacro customInit
+FunctionEnd
+Function readShield
+  GetDlgItem $0 $HWNDPARENT 1
+  System::Call 'user32::GetPropW(p r0, w "YAB.Shield") p.r1'
+  System::Call 'user32::GetWindowRect(p r0, @r2)'
+  System::Call '*$2(i.r3, i, i.r4, i)'
+  IntOp $4 $4 - $3
+  GetDlgItem $0 $HWNDPARENT 3
+  System::Call 'user32::GetWindowRect(p r0, @r2)'
+  System::Call '*$2(i.r5, i, i, i)'
+  FileWrite $report "layout=$1,$3,$4,$5$\r$\n"
+FunctionEnd
+Function inspectWelcomeShield
+  Call readShield
+  FileWrite $report "welcome=$1$\r$\n"
+  @{if} $testStep == 1
+    StrCpy $testStep 2
+  @{endif}
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+FunctionEnd
+Function inspectLicenseShield
+  Call readShield
+  FileWrite $report "license=$1$\r$\n"
+  @{if} $testStep == 1
+    System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 3, p 0)'
+  @{else}
+    System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+  @{endif}
+FunctionEnd
+Function inspectModeShield
+  Call readShield
+  FileWrite $report "mode=$1$\r$\n"
+  @{if} $testStep == 2
+    FileClose $report
+    SetErrorLevel 0
+    Quit
+  @{endif}
+  SendMessage $MultiUser.InstallModePage.CurrentUser @{BM_CLICK} 0 0
+  Call readShield
+  FileWrite $report "current=$1$\r$\n"
+  SendMessage $MultiUser.InstallModePage.AllUsers @{BM_CLICK} 0 0
+  Call readShield
+  FileWrite $report "all=$1$\r$\n"
+  Call captureNextButton
+  StrCpy $testStep 1
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 3, p 0)'
+FunctionEnd
+Function captureNextButton
+  GetDlgItem $0 $HWNDPARENT 1
+  ; Hide the focus rectangle so pixel checks measure the icon and caption.
+  SendMessage $0 0x128 0x10001 0
+  System::Call 'user32::GetDpiForWindow(p r0) i.r2'
+  FileWrite $report "dpi=$2$\r$\n"
+  System::Call 'user32::GetClientRect(p r0, @r3)'
+  System::Call '*$3(i, i, i.R6, i.R7)'
+  FileWrite $report "bitmap=$R6,$R7$\r$\n"
+  System::Call 'user32::GetDC(p r0) p.r1'
+  System::Call 'gdi32::CreateCompatibleDC(p r1) p.R0'
+  System::Call '*(i 40, i R6, i R7, &i2 1, &i2 32, i 0, i 0, i 0, i 0, i 0, i 0) p.R8'
+  System::Call 'gdi32::CreateDIBSection(p r1, p R8, i 0, *p.R9, p 0, i 0) p.R1'
+  System::Free $R8
+  System::Call 'gdi32::SelectObject(p R0, p R1) p.R2'
+  SendMessage $0 0x318 $R0 4
+  System::Call 'kernel32::CreateFileW(w "$EXEDIR\shield.raw", i 0x40000000, i 0, p 0, i 2, i 0x80, p 0) p.r2'
+  IntOp $R8 $R6 * $R7
+  IntOp $R8 $R8 * 4
+  System::Call 'kernel32::WriteFile(p r2, p R9, i R8, *i.r3, p 0)'
+  System::Call 'kernel32::CloseHandle(p r2)'
+  System::Call 'gdi32::SelectObject(p R0, p R2)'
+  System::Call 'gdi32::DeleteObject(p R1)'
+  System::Call 'gdi32::DeleteDC(p R0)'
+  System::Call 'user32::ReleaseDC(p r0, p r1)'
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  for (const theme of [0, 1]) {
+    execute(executable, [], { env: { ...process.env, YAB_PREVIEW_THEME: String(theme) } });
+    const lines = (await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf8')).trim().split(/\r?\n/);
+    assert.deepEqual(lines.filter(line => !/^(bitmap|dpi|layout)=/.test(line)), [
+      'welcome=0', 'license=0', 'mode=1', 'current=0', 'all=1',
+      'license=0', 'welcome=0', 'license=0', 'mode=1',
+    ], 'The real install-mode callback owns the shield only while its page is visible.');
+    const layouts = lines.filter(line => line.startsWith('layout=')).map(line => line.slice(7).split(',').map(Number));
+    const baseline = layouts[0].slice(1);
+    for (const [shield, left, width, back] of layouts) {
+      if (!shield) {
+        assert.deepEqual([left, width, back], baseline, 'Clearing the shield restores the original button row.');
+      } else {
+        const extra = width - baseline[1];
+        assert.ok(extra > 0);
+        assert.equal(left, baseline[0] - extra);
+        assert.equal(back, baseline[2] - extra, 'The wider Next button must not overlap Back.');
+      }
+    }
+    const dpi = Number(lines.find(line => line.startsWith('dpi=')).slice(4));
+    const [width, height] = lines.find(line => line.startsWith('bitmap=')).slice(7).split(',').map(Number);
+    const pixels = await fs.readFile(path.join(scratch, 'shield.raw'));
+    assert.equal(pixels.length, width * height * 4);
+    const yellow = [], ink = [];
+    for (let y = 2; y < height - 2; y++) {
+      for (let x = 2; x < width - 2; x++) {
+        const offset = ((height - 1 - y) * width + x) * 4;
+        const [blue, green, red] = pixels.subarray(offset, offset + 3);
+        if (red > 160 && green > 140 && blue < 130) yellow.push(x);
+        if (theme === 0 ? red < 60 && green < 70 && blue < 80 : red > 230 && green > 230 && blue > 230) ink.push(x);
+      }
+    }
+    assert.ok(yellow.length > 0 && ink.length > 0, 'Render both the stock shield and caption.');
+    const iconLeft = Math.min(...yellow), iconRight = Math.max(...yellow);
+    const text = ink.filter(x => x > iconRight + Math.round(3 * dpi / 96));
+    assert.ok(text.length > 0);
+    const textLeft = Math.min(...text), textRight = Math.max(...text);
+    assert.ok(iconLeft >= Math.round(4 * dpi / 96), 'The shield must have an inset from the button edge.');
+    assert.ok(textLeft - iconRight >= Math.round(4 * dpi / 96), 'Leave a visible icon/caption gap.');
+    assert.ok(Math.abs(iconLeft - (width - 1 - textRight)) <= Math.round(4 * dpi / 96),
+      `Center the rendered group: icon=${iconLeft}..${iconRight}, caption=${textLeft}..${textRight}, width=${width}.`);
+    t.diagnostic(`theme=${theme}, dpi=${dpi}: shield=${iconLeft}..${iconRight}, caption=${textLeft}..${textRight}, width=${width}`);
+  }
+});
