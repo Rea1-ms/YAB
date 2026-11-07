@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { extractionWithProgress, prepareInstallerProgress } = require('../installer-progress.cjs');
 
 async function nsisCompiler() {
   const cache = path.resolve(__dirname, '../build/cache/electron-builder');
@@ -691,15 +692,57 @@ Function testProgress
   SetDetailsPrint none
   FindWindow $0 "#32770" "" $HWNDPARENT
   GetDlgItem $3 $0 0x7F10
-  SendMessage $1 0x406 0 100 ; PBM_SETRANGE32
+  GetDlgItem $6 $0 0x7F11
   FileOpen $4 "$EXEDIR\status.txt" w
   SendMessage $2 @{WM_SETTEXT} 0 "STR:"
+  !macro recordProgress
+    System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
+    SendMessage $6 0x408 0 0 $7 ; PBM_GETPOS: visible total
+    SendMessage $1 0x408 0 0 $8 ; raw control remains owned by NSIS/plugins
+    FileWriteUTF16LE $4 "$5|$7|$8$\r$\n"
+  !macroend
+  YabInstallUI::Phase /NOUNLOAD "$(yabUnpacking)" 5 15
+  SendMessage $1 0x406 0 1000 ; PBM_SETRANGE32
+  SendMessage $1 0x402 500 0 ; PBM_SETPOS
+  !insertmacro recordProgress
+  SendMessage $1 0x402 1000 0
+  !insertmacro recordProgress
+  SendMessage $1 0x402 690 0 ; reported 100% -> 69% handoff
+  !insertmacro recordProgress
+  YabInstallUI::Phase /NOUNLOAD "$(yabExtracting)" 15 65
+  SendMessage $1 0x406 0 100
+  !insertmacro recordProgress ; changing ranges must not sample stale positions
+  SendMessage $1 0x402 0 0
+  !insertmacro recordProgress
   SendMessage $1 0x402 50 0 ; PBM_SETPOS
-  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
-  FileWriteUTF16LE $4 "$5$\r$\n"
-  SendMessage $1 0x402 75 0
-  System::Call 'user32::GetWindowTextW(p r3, w.r5, i @{NSIS_MAX_STRLEN})'
-  FileWriteUTF16LE $4 "$5$\r$\n"
+  !insertmacro recordProgress
+  SendMessage $1 0x402 100 0
+  !insertmacro recordProgress
+  SendMessage $1 0x406 0 1000
+  SendMessage $1 0x402 690 0 ; restore the installer instruction counter
+  !insertmacro recordProgress
+  YabInstallUI::Phase /NOUNLOAD "$(yabCopying)" 65 90
+  SendMessage $1 0x402 500 0
+  !insertmacro recordProgress
+  SendMessage $1 0x402 1000 0
+  !insertmacro recordProgress
+  YabInstallUI::Phase /NOUNLOAD "$(yabCopying)" 65 90 ; copy retry
+  SendMessage $1 0x402 10 0
+  !insertmacro recordProgress
+  YabInstallUI::Phase /NOUNLOAD "$(yabRegistering)" 90 98
+  SendMessage $1 0x406 0 100
+  SendMessage $1 0x402 50 0
+  !insertmacro recordProgress
+  SendMessage $1 0x403 25 0 ; PBM_DELTAPOS
+  !insertmacro recordProgress
+  SendMessage $1 0x404 25 0 ; PBM_SETSTEP
+  SendMessage $1 0x405 0 0 ; PBM_STEPIT
+  !insertmacro recordProgress
+  !insertmacro customInstall
+  SendMessage $1 0x402 100 0
+  !insertmacro recordProgress ; raw 100 must never imply successful completion
+  Call .onInstSuccess
+  !insertmacro recordProgress
   FileClose $4
   System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
   nsDialogs::Show
@@ -721,8 +764,106 @@ SectionEnd
   execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
   execute(executable, []);
   const lines = (await fs.readFile(path.join(scratch, 'status.txt'), 'utf16le')).trim().split(/\r?\n/);
-  assert.deepEqual(lines.slice(0, 2), ['正在安装  50%', '正在安装  75%']);
-  assert.match(lines[2], /^actual-page=正在安装  \d+%$/);
+  const readings = lines.slice(0, -1).map(line => {
+    const [text, visible, raw] = line.split('|');
+    return { text, visible: Number(visible), raw: Number(raw) };
+  });
+  assert.deepEqual(readings.map(row => row.visible),
+    [10, 15, 15, 15, 15, 40, 65, 65, 77, 90, 90, 94, 96, 98, 99, 100]);
+  assert.deepEqual(readings.slice(0, 3).map(row => row.raw), [500, 1000, 690],
+    'Do not rewrite the raw counter that NSIS and the extraction plugin still use.');
+  for (const row of readings) assert.ok(row.text.endsWith(`  ${row.visible}%`), row.text);
+  assert.ok(readings[5].text.startsWith('正在解压程序文件'));
+  assert.ok(readings[8].text.startsWith('正在写入程序文件'));
+  assert.equal(readings.at(-1).text, '安装完成  100%');
+  assert.match(lines.at(-1), /^actual-page=正在准备安装…  [0-5]%$/,
+    'A newly created real progress page must reset the total and retain its independent label.');
+});
+
+test('the packaged extraction template keeps builder retries and drives the real staged progress', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const cache = path.resolve(__dirname, '../build/cache/electron-builder');
+  const sevenZipRoot = path.join(cache, '7zip@1.0.0');
+  const sevenZipFolder = (await fs.readdir(sevenZipRoot)).find(name => /^7zip-win-x64-/.test(name) && !name.endsWith('.state'));
+  const sevenZip = path.join(sevenZipRoot, sevenZipFolder, 'bin/7za.exe');
+  const resourceRoot = path.join(cache, 'nsis-resources-3.4.1');
+  const resourceFolder = (await fs.readdir(resourceRoot)).find(name => name.startsWith('nsis-resources-3.4.1-') && !name.endsWith('.state'));
+  const plugins = path.join(resourceRoot, resourceFolder, 'plugins/x86-unicode');
+  const builderRoot = path.dirname(require.resolve('app-builder-lib/package.json', {
+    paths: [path.dirname(require.resolve('electron-builder'))],
+  }));
+  const templateDir = path.join(builderRoot, 'templates/nsis/include');
+  const original = (await fs.readFile(path.join(templateDir, 'extractAppPackage.nsh'), 'utf8')).replaceAll('\r\n', '\n');
+  const patched = extractionWithProgress(original);
+  assert.equal(patched.replace(/^ +YabInstallUI::Phase[^\n]*\n/gm, ''), original,
+    'Retain all upstream file-copy, retry and cancellation instructions unchanged.');
+  assert.throws(() => extractionWithProgress(original.replace('!insertmacro decompress', '!insertmacro new_decompress')),
+    /安装器模板已变化/, 'A builder upgrade must not silently omit progress stages.');
+
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-extraction-'));
+  const includeDir = prepareInstallerProgress(scratch);
+  const payload = path.join(scratch, 'payload.txt');
+  const archive = path.join(scratch, 'payload.7z');
+  await fs.writeFile(payload, 'YAB isolated extraction check\n');
+  execute(sevenZip, ['a', '-t7z', archive, payload]);
+  const source = path.join(scratch, 'extraction.nsi');
+  const executable = path.join(scratch, 'extraction.exe');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define APP_64 "${archive}"
+!define COMPRESSION_METHOD "7z"
+!define RunningX64 '1 = 1'
+!define IsNativeARM64 '0 = 1'
+!define isUpdated '1 = 1'
+!macro skipPageIfUpdated
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+!addincludedir "${templateDir}"
+!addplugindir /x86-unicode "${plugins}"
+; The same command-line include precedence is used by the official build.
+!include extractAppPackage.nsh
+Name "YAB extraction test"
+OutFile "${executable}"
+RequestExecutionLevel user
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+LangString appCannotBeClosed @{LANG_SIMPCHINESE} "Copy failed"
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  StrCpy $yabSidebarBitmap 0
+  !insertmacro customInit
+FunctionEnd
+Section
+  InitPluginsDir
+  SetOutPath "$EXEDIR\target"
+  SetDetailsPrint none
+  !insertmacro extractEmbeddedAppPackage
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $1 $0 0x7F10
+  GetDlgItem $2 $0 0x7F11
+  System::Call 'user32::GetWindowTextW(p r1, w.r3, i @{NSIS_MAX_STRLEN})'
+  SendMessage $2 0x408 0 0 $5
+  FileOpen $4 "$EXEDIR\extraction.txt" w
+  FileWriteUTF16LE $4 "$3|$5"
+  FileClose $4
+  SetErrorLevel 0
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', `/X!addincludedir "${includeDir}"`, source]);
+  execute(executable, []);
+  assert.equal(await fs.readFile(path.join(scratch, 'target/payload.txt'), 'utf8'), await fs.readFile(payload, 'utf8'));
+  const [label, total] = (await fs.readFile(path.join(scratch, 'extraction.txt'), 'utf16le')).split('|');
+  assert.ok(Number(total) >= 90 && Number(total) <= 98, label);
+  assert.equal(label, `正在保存安装信息…  ${total}%`);
 });
 
 test('uninstall pages keep localized version text and removal status after the shared running check', {

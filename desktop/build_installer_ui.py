@@ -21,7 +21,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='installer-native-', dir=output))
     exports = scratch / 'exports.def'
-    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Apply\n Progress\n Stage\n', encoding='ascii')
+    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
     response = scratch / 'compile.rsp'
     arguments = ['/nologo', '/LD', '/MT', '/O2', '/W4', '/WX', '/utf-8', '/DUNICODE', '/D_UNICODE',
         '/D_WIN32_WINNT=0x0A00', '"' + str(desktop / 'native/installer-ui.cpp') + '"', '/link',

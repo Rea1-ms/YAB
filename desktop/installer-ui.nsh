@@ -263,7 +263,8 @@ Var yabSidebarBitmap
     !if "${PREFIX}" == "un."
       YabInstallUI::Progress /NOUNLOAD "$(yabRemoving)"
     !else
-      YabInstallUI::Progress /NOUNLOAD "$(yabInstalling)"
+      YabInstallUI::Progress /NOUNLOAD "$(yabPreparing)"
+      YabInstallUI::Phase /NOUNLOAD "$(yabPreparing)" 0 5
     !endif
   FunctionEnd
 !macroend

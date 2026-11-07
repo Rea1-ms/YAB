@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { build, Platform, Arch } = require('electron-builder');
+const { prepareInstallerProgress } = require('./installer-progress.cjs');
 
 async function main() {
   if (process.platform !== 'win32' || process.arch !== 'x64') {
@@ -36,8 +37,15 @@ async function main() {
   process.env.BAAS_BACKEND_DIR = backend;
   process.env.BAAS_RELEASE_DIR = release;
   const config = require('./electron-builder.cjs');
+  const progressIncludes = prepareInstallerProgress(release);
   const targets = Platform.WINDOWS.createTarget(process.argv.includes('--dir') ? ['dir'] : ['nsis', 'zip'], Arch.x64);
   const artifacts = await build({ targets, config, publish: 'never',
+    // Command-line include paths precede the builder's header include paths.
+    // Use its normal main script and uninstaller generation/signing pipeline.
+    effectiveOptionComputed([, commands]) {
+      commands['!addincludedir'] = `"${progressIncludes}"`;
+      return false;
+    },
     projectDir: __dirname });
   console.log(`\n桌面产物：${release}`);
   for (const artifact of artifacts) console.log(artifact);

@@ -15,8 +15,9 @@ using namespace Gdiplus;
 struct StackEntry { StackEntry* next; wchar_t text[1]; };
 static bool dark = false, highContrast = false;
 static ULONG_PTR graphicsToken = 0;
-static HWND statusLabel = nullptr, progressBar = nullptr;
+static HWND statusLabel = nullptr, progressBar = nullptr, totalProgressBar = nullptr;
 static std::wstring progressText;
+static int progressStart = 0, progressEnd = 99, progressPercent = 0;
 static HBRUSH statusBrush = nullptr;
 static HWND wizardWindow = nullptr;
 static HHOOK messageBoxHook = nullptr;
@@ -253,13 +254,23 @@ static void DrawButton(HWND window, NMCUSTOMDRAW* draw) {
     RestoreDC(draw->hdc, saved);
 }
 
-static void UpdateProgress() {
+static void UpdateProgress(bool sample = true) {
     if (!IsWindow(statusLabel) || !IsWindow(progressBar)) return;
-    PBRANGE range = {};
-    SendMessage(progressBar, PBM_GETRANGE, FALSE, reinterpret_cast<LPARAM>(&range));
-    const int position = static_cast<int>(SendMessage(progressBar, PBM_GETPOS, 0, 0));
-    const int percent = range.iHigh > range.iLow ? MulDiv(position - range.iLow, 100, range.iHigh - range.iLow) : 0;
-    const auto text = progressText + L"  " + std::to_wstring(percent) + L"%";
+    if (sample) {
+        PBRANGE range = {};
+        SendMessage(progressBar, PBM_GETRANGE, FALSE, reinterpret_cast<LPARAM>(&range));
+        const int position = static_cast<int>(SendMessage(progressBar, PBM_GETPOS, 0, 0));
+        const int local = range.iHigh > range.iLow
+            ? MulDiv(position - range.iLow, 100, range.iHigh - range.iLow) : 0;
+        const int bounded = local < 0 ? 0 : local > 100 ? 100 : local;
+        const int mapped = progressStart + bounded * (progressEnd - progressStart) / 100;
+        if (mapped > progressPercent) progressPercent = mapped;
+    }
+    // Keep NSIS and Nsis7z's original range/position intact. They share a raw
+    // progress control and may restore older values when extraction finishes.
+    ShowWindow(progressBar, SW_HIDE);
+    SendMessage(totalProgressBar, PBM_SETPOS, progressPercent, 0);
+    const auto text = progressText + L"  " + std::to_wstring(progressPercent) + L"%";
     SetWindowText(statusLabel, text.c_str());
     ShowWindow(statusLabel, SW_SHOWNA);
     InvalidateRect(statusLabel, nullptr, TRUE);
@@ -275,13 +286,14 @@ static LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam, LP
     if (message == BCM_SETSHIELD || (message == WM_SETTEXT && GetProp(window, L"YAB.Shield"))) {
         LayoutShieldButton(window);
     }
-    if (window == progressBar && (message == PBM_SETPOS || message == PBM_DELTAPOS || message == PBM_STEPIT
-        || message == PBM_SETRANGE || message == PBM_SETRANGE32)) UpdateProgress();
+    if (window == progressBar && (message == PBM_SETPOS || message == PBM_DELTAPOS || message == PBM_STEPIT)) UpdateProgress();
+    // A new range may temporarily contain the previous writer's position.
+    // Wait for its first position update before mapping the next stage.
     if (message == WM_NCDESTROY) {
         RemoveProp(window, L"YAB.Shield");
         RemoveProp(window, L"YAB.ShieldExpansion");
         RemoveWindowSubclass(window, ControlProc, subclassId);
-        if (window == progressBar) { progressBar = nullptr; statusLabel = nullptr; }
+        if (window == progressBar) { progressBar = nullptr; totalProgressBar = nullptr; statusLabel = nullptr; }
     }
     return result;
 }
@@ -402,6 +414,8 @@ extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEnt
 
 extern "C" __declspec(dllexport) void Progress(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
     progressText = Pop(stack);
+    progressStart = progressPercent = 0;
+    progressEnd = 99;
     const HWND page = FindWindowEx(parent, nullptr, L"#32770", nullptr);
     progressBar = GetDlgItem(page, 1004);
     const HWND original = GetDlgItem(page, 1006);
@@ -416,12 +430,42 @@ extern "C" __declspec(dllexport) void Progress(HWND parent, int, wchar_t*, Stack
         rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
         page, reinterpret_cast<HMENU>(0x7F10), nullptr, nullptr);
     SendMessage(statusLabel, WM_SETFONT, SendMessage(original, WM_GETFONT, 0, 0), TRUE);
+    GetWindowRect(progressBar, &rect);
+    MapWindowPoints(nullptr, page, reinterpret_cast<POINT*>(&rect), 2);
+    totalProgressBar = CreateWindowEx(0, PROGRESS_CLASS, L"", WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
+        rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+        page, reinterpret_cast<HMENU>(0x7F11), nullptr, nullptr);
+    SendMessage(totalProgressBar, PBM_SETRANGE32, 0, 100);
+    if (dark && !highContrast) {
+        SetWindowTheme(totalProgressBar, L" ", L" ");
+        SendMessage(totalProgressBar, PBM_SETBKCOLOR, 0, RGB(48, 48, 48));
+        SendMessage(totalProgressBar, PBM_SETBARCOLOR, 0, RGB(80, 160, 224));
+    }
     SetWindowSubclass(progressBar, ControlProc, subclassId, 0);
     SetWindowSubclass(page, DialogProc, subclassId, 0);
-    UpdateProgress();
+    UpdateProgress(false);
 }
 
 extern "C" __declspec(dllexport) void Stage(HWND, int, wchar_t*, StackEntry** stack, void*) {
     progressText = Pop(stack);
-    UpdateProgress();
+    UpdateProgress(false);
+}
+
+extern "C" __declspec(dllexport) void Phase(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    progressText = Pop(stack);
+    const int start = _wtoi(Pop(stack).c_str());
+    const int end = _wtoi(Pop(stack).c_str());
+    // Retrying a copy must not restart its interval or move progress backwards.
+    if (start >= progressStart && start <= end && end < 100) {
+        progressStart = start;
+        progressEnd = end;
+        if (start > progressPercent) progressPercent = start;
+    }
+    UpdateProgress(false);
+}
+
+extern "C" __declspec(dllexport) void Complete(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    progressText = Pop(stack);
+    progressPercent = 100;
+    UpdateProgress(false);
 }

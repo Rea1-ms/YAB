@@ -14,13 +14,13 @@
     DetailPrint "$(yabRemoving)"
     YabInstallUI::Stage /NOUNLOAD "$(yabRemoving)"
   !else
-    DetailPrint "$(yabInstalling)"
-    YabInstallUI::Stage /NOUNLOAD "$(yabInstalling)"
+    DetailPrint "$(yabPreparing)"
+    YabInstallUI::Stage /NOUNLOAD "$(yabPreparing)"
   !endif
 !macroend
 
 !macro customInstall
-  YabInstallUI::Stage /NOUNLOAD "$(yabFinishing)"
+  YabInstallUI::Phase /NOUNLOAD "$(yabFinishing)" 98 99
 !macroend
 
 ; Use native dialog scaling at the display's startup DPI instead of bitmap scaling.
@@ -36,6 +36,11 @@
     !include "getProcessInfo.nsh"
   !endif
   !insertmacro yabUIHeader
+  !ifndef BUILD_UNINSTALLER
+    Function .onInstSuccess
+      YabInstallUI::Complete /NOUNLOAD "$(yabInstalled)"
+    FunctionEnd
+  !endif
   !ifdef BUILD_UNINSTALLER
     !include nsDialogs.nsh
     Var yabKeepAppData
@@ -87,6 +92,7 @@
     ; Retry at successful completion, outside the installation directory. RMDir
     ; without /r removes an empty directory only (as in qBittorrent and Npp).
     Function un.onUninstSuccess
+      YabInstallUI::Complete /NOUNLOAD "$(yabRemoved)"
       ${if} ${isUpdated}
         Return
       ${endif}
