@@ -32,6 +32,7 @@ def ensure_frontend(root=None, force=False):
     inputs = [webapp / name for name in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html',
                                          'vite.config.ts', 'svelte.config.js', 'tsconfig.json')]
     inputs.extend((webapp / 'src').rglob('*'))
+    inputs.extend((webapp / 'public').rglob('*'))
     if (not force and index.is_file()
             and all(path.stat().st_mtime <= index.stat().st_mtime for path in inputs if path.is_file())):
         return

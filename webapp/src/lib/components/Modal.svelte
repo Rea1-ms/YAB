@@ -63,7 +63,7 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
-    min-width: 360px;
+    min-width: min(360px, 90vw);
     max-width: 90vw;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   }
@@ -78,6 +78,11 @@
   }
   .modal-body :global(p) {
     margin: 0;
+  }
+  .modal-body :global(input.input) {
+    display: block;
+    width: 100%;
+    min-width: 0;
   }
   .modal-foot {
     padding: 12px 18px;
