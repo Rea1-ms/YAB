@@ -1,0 +1,3 @@
+# These inputs are verified byte-for-byte against the checkbox manifest.
+assets/checkbox/source/*.svg text eol=lf
+native/checkbox-assets.h text eol=lf

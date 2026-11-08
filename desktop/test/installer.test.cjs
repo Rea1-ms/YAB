@@ -165,6 +165,82 @@ SectionEnd
   t.diagnostic(`Uninstaller previews (no deletion): ${scratch}`);
 });
 
+test('generated uninstall cleanup includes the installer icon outside the application manifest', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/uninstall-files-'));
+  const backend = path.join(scratch, 'backend');
+  const appOutDir = path.join(scratch, 'application');
+  const release = path.join(scratch, 'release');
+  const installDir = path.join(scratch, 'test-install');
+  await fs.mkdir(path.join(backend, 'toolkit'), { recursive: true });
+  await fs.mkdir(path.join(backend, 'app/server'), { recursive: true });
+  await fs.mkdir(path.join(appOutDir, 'resources'), { recursive: true });
+  await fs.writeFile(path.join(backend, 'toolkit/uv.exe'), 'fixture, not an executable');
+  await fs.writeFile(path.join(backend, 'app/server/__main__.py'), '# fixture\n');
+  await fs.writeFile(path.join(appOutDir, 'YAB.exe'), 'fixture, not an executable');
+  execute(process.execPath, ['-e', 'require(process.argv[1]).afterPack({ appOutDir: process.argv[2] });',
+    path.resolve(__dirname, '../electron-builder.cjs'), appOutDir], {
+    env: { ...process.env, BAAS_BACKEND_DIR: backend, BAAS_RELEASE_DIR: release },
+  });
+  const generated = await fs.readFile(path.join(release, 'installer-generated.nsh'), 'utf8');
+  // Execute the actual generated cleanup macro with deletion replaced by logs.
+  // The upgrade branch is inactive, so no file is moved or removed.
+  const cleanup = generated.slice(generated.indexOf('!macro yabRestoreAndAbort'))
+    .replace(/^(\s*)(Delete|RMDir(?: \/r)?) "([^"]+)"\r?$/gm,
+      (_, indent, operation, target) => `${indent}FileWrite $testLog "${operation}|${target}$\\r$\\n"`);
+  for (const withIcon of [true, false]) {
+    const name = withIcon ? 'with-icon' : 'without-icon';
+    const installer = path.join(scratch, `create-${name}.exe`);
+    const uninstaller = path.join(scratch, `uninstall-${name}.exe`);
+    const source = path.join(scratch, `${name}.nsi`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include LogicLib.nsh
+!define isUpdated '0 = 1'
+!define UNINSTALL_FILENAME "Uninstall YAB.exe"
+${withIcon ? '!define UNINSTALLER_ICON "fixture.ico"' : ''}
+Var testLog
+${cleanup}
+Name "YAB generated uninstall cleanup test"
+OutFile "${installer}"
+RequestExecutionLevel user
+InstallDir "${installDir}"
+Function un.atomicRMDir
+  Pop $R0
+  Push 0
+FunctionEnd
+Function un.restoreFiles
+  Pop $R0
+  Push 0
+FunctionEnd
+Section
+  WriteUninstaller "${uninstaller}"
+SectionEnd
+Section Uninstall
+  FileOpen $testLog "$EXEDIR\files-${name}.txt" w
+  !insertmacro customRemoveFiles
+  FileClose $testLog
+SectionEnd
+`);
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    execute(installer, ['/S']);
+    execute(uninstaller, ['/S', `_?=${installDir}`]);
+    const lines = (await fs.readFile(path.join(scratch, `files-${name}.txt`), 'utf8')).trim().split(/\r?\n/);
+    assert.equal(lines.at(-1), `RMDir|${installDir}`, 'Remove the root nonrecursively after its contents.');
+    assert.deepEqual(lines.sort(), [
+      `Delete|${path.join(installDir, 'YAB.exe')}`,
+      `RMDir /r|${path.join(installDir, 'resources')}`,
+      ...(withIcon ? [`Delete|${path.join(installDir, 'uninstallerIcon.ico')}`] : []),
+      `Delete|${path.join(installDir, 'Uninstall YAB.exe')}`,
+      `RMDir|${installDir}`,
+    ].sort(), 'Only packaged files and installer-owned files are removed.');
+  }
+  t.diagnostic(`Generated uninstall cleanup previews (no deletion): ${scratch}`);
+});
+
 test('compiled installer previews use an explicit final path without repeated application folders', {
   skip: process.platform !== 'win32',
 }, async t => {
@@ -372,6 +448,28 @@ XPStyle on
 Var checkbox
 Var tick
 Var resultLog
+!macro testCheckboxPixel NAME POINT
+  System::Call 'user32::RedrawWindow(p $checkbox, p 0, p 0, i 0x185)'
+  System::Call 'user32::GetDpiForWindow(p $checkbox) i.r0'
+  System::Call 'kernel32::MulDiv(i @{POINT}, i r0, i 96) i.r1'
+  System::Call 'kernel32::MulDiv(i 16, i r0, i 96) i.r2'
+  System::Call 'user32::GetClientRect(p $checkbox, @r3)'
+  System::Call '*$3(i, i, i.r5, i.r4)'
+  System::Call 'user32::GetDC(p $checkbox) p.r0'
+  System::Call 'gdi32::CreateCompatibleDC(p r0) p.R0'
+  System::Call 'gdi32::CreateCompatibleBitmap(p r0, i r5, i r4) p.R1'
+  System::Call 'gdi32::SelectObject(p R0, p R1) p.R2'
+  SendMessage $checkbox 0x318 $R0 4 ; WM_PRINTCLIENT, PRF_CLIENT
+  IntOp $4 $4 - $2
+  IntOp $4 $4 / 2
+  IntOp $4 $4 + $1
+  System::Call 'gdi32::GetPixel(p R0, i r1, i r4) i.r2'
+  FileWrite $resultLog "@{NAME}=$2$\r$\n"
+  System::Call 'gdi32::SelectObject(p R0, p R2)'
+  System::Call 'gdi32::DeleteObject(p R1)'
+  System::Call 'gdi32::DeleteDC(p R0)'
+  System::Call 'user32::ReleaseDC(p $checkbox, p r0)'
+!macroend
 Page custom testPage
 !insertmacro customPageAfterChangeDir
 !insertmacro MUI_PAGE_INSTFILES
@@ -403,33 +501,29 @@ Function testState
     System::Call 'user32::RedrawWindow(p $checkbox, p 0, p 0, i 0x185)'
     @{NSD_GetState} $checkbox $0
     FileWrite $resultLog "checked=$0$\r$\n"
-    System::Call 'user32::GetDpiForWindow(p $checkbox) i.r0'
-    System::Call 'kernel32::MulDiv(i 4, i r0, i 96) i.r1'
-    System::Call 'kernel32::MulDiv(i 16, i r0, i 96) i.r2'
-    System::Call 'user32::GetClientRect(p $checkbox, @r3)'
-    System::Call '*$3(i, i, i.r5, i.r4)'
-    System::Call 'user32::GetDC(p $checkbox) p.r0'
-    System::Call 'gdi32::CreateCompatibleDC(p r0) p.R0'
-    System::Call 'gdi32::CreateCompatibleBitmap(p r0, i r5, i r4) p.R1'
-    System::Call 'gdi32::SelectObject(p R0, p R1) p.R2'
-    SendMessage $checkbox 0x318 $R0 4 ; WM_PRINTCLIENT, PRF_CLIENT
-    IntOp $4 $4 - $2
-    IntOp $4 $4 / 2
-    IntOp $4 $4 + $1
-    System::Call 'gdi32::GetPixel(p R0, i r1, i r4) i.r2'
-    FileWrite $resultLog "pixel=$2$\r$\n"
-    System::Call 'gdi32::SelectObject(p R0, p R2)'
-    System::Call 'gdi32::DeleteObject(p R1)'
-    System::Call 'gdi32::DeleteDC(p R0)'
-    System::Call 'user32::ReleaseDC(p $checkbox, p r0)'
+    !insertmacro testCheckboxPixel pixel 4
+    SendMessage $checkbox @{BM_SETSTATE} 1 0
+    !insertmacro testCheckboxPixel pressed 4
+    SendMessage $checkbox @{BM_SETSTATE} 0 0
+    EnableWindow $checkbox 0
+    !insertmacro testCheckboxPixel disabled 4
+    EnableWindow $checkbox 1
     SendMessage $checkbox @{BM_CLICK} 0 0
     @{NSD_GetState} $checkbox $0
     FileWrite $resultLog "clicked=$0$\r$\n"
+    !insertmacro testCheckboxPixel unchecked 4
+    System::Call 'user32::GetSysColor(i 15) i.r0'
+    FileWrite $resultLog "system-background=$0$\r$\n"
     System::Call 'user32::SetFocus(p $checkbox)'
     SendMessage $checkbox @{WM_KEYDOWN} 32 0
     SendMessage $checkbox @{WM_KEYUP} 32 0
     @{NSD_GetState} $checkbox $0
     FileWrite $resultLog "keyboard=$0$\r$\n"
+    SendMessage $checkbox @{BM_SETSTYLE} 6 1 ; BS_AUTO3STATE
+    SendMessage $checkbox @{BM_SETCHECK} 2 0
+    @{NSD_GetState} $checkbox $0
+    FileWrite $resultLog "indeterminate=$0$\r$\n"
+    !insertmacro testCheckboxPixel indeterminate-pixel 8
   @{else}
     FileClose $resultLog
     System::Call 'kernel32::ExitProcess(i 0)'
@@ -441,10 +535,18 @@ SectionEnd
     execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
     execute(executable, []);
     const result = (await fs.readFile(path.join(scratch, `checkbox-${mode}.txt`), 'utf8')).trim().split(/\r?\n/);
-    assert.equal(result[0], 'checked=1');
-    assert.equal(result[1], `pixel=${mode === 0 ? 0xFFCD60 : 0xD47800}`, 'The real control must use our blue glyph.');
-    assert.equal(result[2], 'clicked=0');
-    assert.equal(result[3], 'keyboard=1');
+    const readings = Object.fromEntries(result.map(line => line.split('=').map((value, i) => i ? Number(value) : value)));
+    const accent = mode === 0 ? 0xFFCD60 : 0xD47800;
+    assert.equal(readings.checked, 1);
+    assert.equal(readings.pixel, accent, 'The real control must use the blue Microsoft glyph.');
+    assert.equal(readings.pressed, mode === 0 ? 0xD7AA48 : 0x9E5600);
+    assert.equal(readings.disabled, mode === 0 ? 0x646464 : 0xA0A0A0);
+    assert.equal(readings.clicked, 0);
+    assert.equal(readings.unchecked, mode === 0 ? 0x202020 : readings['system-background'],
+      'The unchecked glyph must leave its interior transparent.');
+    assert.equal(readings.keyboard, 1);
+    assert.equal(readings.indeterminate, 2);
+    assert.equal(readings['indeterminate-pixel'], accent, 'The half-selected state must use its own glyph.');
   }
 });
 

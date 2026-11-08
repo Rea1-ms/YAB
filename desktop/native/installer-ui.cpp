@@ -8,7 +8,9 @@
 #include <dwmapi.h>
 #include <richedit.h>
 #include <gdiplus.h>
+#include <shlwapi.h>
 #include <string>
+#include "checkbox-assets.h"
 
 using namespace Gdiplus;
 
@@ -22,6 +24,32 @@ static HBRUSH statusBrush = nullptr;
 static HWND wizardWindow = nullptr;
 static HHOOK messageBoxHook = nullptr;
 static constexpr UINT_PTR subclassId = 0x594142;
+static Bitmap* checkboxImages[3][checkboxSizeCount] = {};
+
+static Bitmap* CheckboxImage(int state, int size) {
+    int index = 0;
+    while (index + 1 < checkboxSizeCount && checkboxSizes[index] < size) ++index;
+    auto*& cached = checkboxImages[state][index];
+    if (cached) return cached;
+    HMODULE module = nullptr;
+    if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&CheckboxImage), &module)) return nullptr;
+    const HRSRC resource = FindResource(module, MAKEINTRESOURCE(checkboxResourceIds[state][index]), RT_RCDATA);
+    if (!resource) return nullptr;
+    const DWORD length = SizeofResource(module, resource);
+    const auto* bytes = static_cast<const BYTE*>(LockResource(LoadResource(module, resource)));
+    if (!bytes || !length) return nullptr;
+    IStream* stream = SHCreateMemStream(bytes, length);
+    if (!stream) return nullptr;
+    {
+        Bitmap image(stream);
+        if (image.GetLastStatus() == Ok) {
+            cached = image.Clone(0, 0, image.GetWidth(), image.GetHeight(), PixelFormat32bppARGB);
+        }
+    }
+    stream->Release();
+    return cached;
+}
 
 struct RichStream { const char* text; size_t length; size_t position; };
 static DWORD CALLBACK ReadRichText(DWORD_PTR cookie, LPBYTE buffer, LONG count, LONG* read) {
@@ -151,16 +179,22 @@ static void Rounded(Graphics& graphics, const RectF& rect, float radius, Color f
     }
 }
 
-static void DrawButton(HWND window, NMCUSTOMDRAW* draw) {
-    const int saved = SaveDC(draw->hdc);
+static bool DrawButton(HWND window, NMCUSTOMDRAW* draw) {
     const auto style = GetWindowLongPtr(window, GWL_STYLE) & BS_TYPEMASK;
     const bool radio = style == BS_RADIOBUTTON || style == BS_AUTORADIOBUTTON;
     const bool choice = radio || style == BS_CHECKBOX || style == BS_AUTOCHECKBOX
         || style == BS_3STATE || style == BS_AUTO3STATE;
     const bool enabled = IsWindowEnabled(window) != FALSE;
-    const bool hot = (draw->uItemState & CDIS_HOT) != 0;
-    const bool pressed = (draw->uItemState & CDIS_SELECTED) != 0;
-    const bool checked = SendMessage(window, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    const auto buttonState = SendMessage(window, BM_GETSTATE, 0, 0);
+    const bool hot = (draw->uItemState & CDIS_HOT) != 0 || (buttonState & BST_HOT) != 0;
+    const bool pressed = (draw->uItemState & CDIS_SELECTED) != 0 || (buttonState & BST_PUSHED) != 0;
+    const auto checkState = SendMessage(window, BM_GETCHECK, 0, 0);
+    const bool checked = checkState != BST_UNCHECKED;
+    Bitmap* checkbox = choice && !radio
+        ? CheckboxImage(checkState == BST_INDETERMINATE ? 2 : checked ? 1 : 0, Scale(window, 16)) : nullptr;
+    // Missing resources use the complete native button drawing, including text.
+    if (choice && !radio && !checkbox) return false;
+    const int saved = SaveDC(draw->hdc);
     const bool primary = !choice && (style == BS_DEFPUSHBUTTON || GetDlgCtrlID(window) == IDOK);
     RECT rect = draw->rc;
     const COLORREF canvas = dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE);
@@ -190,16 +224,22 @@ static void DrawButton(HWND window, NMCUSTOMDRAW* draw) {
                         box.Width - inset * 2, box.Height - inset * 2);
                 }
             } else {
-                Rounded(graphics, box, static_cast<float>(Scale(window, 2)), fill, checked ? Color(0, 0, 0, 0) : border);
-                if (checked) {
-                    Pen pen(dark ? Color(255, 16, 32, 42) : Color(255, 255, 255, 255), static_cast<float>(Scale(window, 2)));
-                    pen.SetStartCap(LineCapRound);
-                    pen.SetEndCap(LineCapRound);
-                    Point points[] = {{rect.left + size * 3 / 16, top + size / 2},
-                        {rect.left + size * 7 / 16, top + size * 11 / 16},
-                        {rect.left + size * 13 / 16, top + size * 5 / 16}};
-                    graphics.DrawLines(&pen, points, 3);
-                }
+                Color color = checked ? accent : border;
+                if (!enabled) color = dark ? Color(255, 100, 100, 100) : Color(255, 160, 160, 160);
+                else if (checked && pressed) color = dark ? Color(255, 72, 170, 215) : Color(255, 0, 86, 158);
+                else if (checked && hot) color = dark ? Color(255, 120, 215, 255) : Color(255, 0, 105, 190);
+                else if (pressed) color = dark ? Color(255, 200, 200, 200) : Color(255, 40, 40, 40);
+                else if (hot) color = dark ? Color(255, 230, 230, 230) : Color(255, 70, 70, 70);
+                // The saved PNGs contain the upstream alpha silhouette only.
+                // Tint it without changing the native checkbox's input/state.
+                ColorMatrix matrix = {{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0},
+                    {0, 0, 0, 1, 0}, {color.GetR() / 255.0f, color.GetG() / 255.0f, color.GetB() / 255.0f, 0, 1}}};
+                ImageAttributes attributes;
+                attributes.SetColorMatrix(&matrix);
+                graphics.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+                graphics.SetPixelOffsetMode(PixelOffsetModeHalf);
+                graphics.DrawImage(checkbox, Rect(rect.left, top, size, size), 0, 0,
+                    checkbox->GetWidth(), checkbox->GetHeight(), UnitPixel, &attributes);
             }
             rect.left += size + Scale(window, 6);
         } else {
@@ -252,6 +292,7 @@ static void DrawButton(HWND window, NMCUSTOMDRAW* draw) {
         DrawFocusRect(draw->hdc, &rect);
     }
     RestoreDC(draw->hdc, saved);
+    return true;
 }
 
 static void UpdateProgress(bool sample = true) {
@@ -329,8 +370,7 @@ static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPA
         if (draw->hdr.code == NM_CUSTOMDRAW && draw->dwDrawStage == CDDS_PREPAINT && lstrcmp(type, L"Button") == 0) {
             const auto style = GetWindowLongPtr(draw->hdr.hwndFrom, GWL_STYLE) & BS_TYPEMASK;
             if (style != BS_GROUPBOX && style != BS_OWNERDRAW) {
-                DrawButton(draw->hdr.hwndFrom, draw);
-                return CDRF_SKIPDEFAULT;
+                if (DrawButton(draw->hdr.hwndFrom, draw)) return CDRF_SKIPDEFAULT;
             }
         }
     }

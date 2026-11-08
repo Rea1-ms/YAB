@@ -45,7 +45,10 @@ module.exports = {
     for (const entry of entries) {
       lines.push(`  ${entry.isDirectory() ? 'RMDir /r' : 'Delete'} "$INSTDIR\\${entry.name}"`);
     }
-    lines.push('  Delete "$INSTDIR\\${UNINSTALL_FILENAME}"', '  RMDir "$INSTDIR"', '  ClearErrors', '!macroend', '');
+    // The installer writes this icon after packing, outside the application
+    // manifest. It belongs to the installation, not the user's retained data.
+    lines.push('  !ifdef UNINSTALLER_ICON', '    Delete "$INSTDIR\\uninstallerIcon.ico"', '  !endif',
+      '  Delete "$INSTDIR\\${UNINSTALL_FILENAME}"', '  RMDir "$INSTDIR"', '  ClearErrors', '!macroend', '');
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-pages.nsh'), path.join(release, 'installer-pages.nsh'));
