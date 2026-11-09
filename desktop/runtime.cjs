@@ -5,6 +5,7 @@ const path = require('path');
 const { createHash, randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { setTimeout: delay } = require('timers/promises');
+const { INDEXES, loadRuntimeSettings, resolveUv, runtimeEnvironment } = require('./runtime-settings.cjs');
 
 const PROBE = 'import sys,starlette,uvicorn,numpy,cv2,av,adbutils,uiautomator2,win32api; '
   + 'assert sys.version_info[:2] == (3,11); print("Runtime OK")';
@@ -119,18 +120,26 @@ async function digest(file) {
   return hash.digest('hex');
 }
 
-async function verifyBundle(bundle, manifest) {
-  if (manifest?.format !== 2 || !/^[a-f0-9]{64}$/.test(manifest.id)
+async function verifyBundle(bundle, manifest, progress = () => {}) {
+  const online = manifest?.format === 3 && manifest.mode === 'online';
+  if ((!online && manifest?.format !== 2) || !/^[a-f0-9]{64}$/.test(manifest.id)
       || !/^[a-f0-9]{64}$/.test(manifest.runtimeKey) || !manifest.files) {
-    throw new Error('桌面发行包清单不完整，请重新下载完整包');
+    throw new Error('桌面发行包清单不完整，请重新下载发行包');
   }
-  for (const required of ['toolkit/python/python.exe', 'toolkit/uv.exe', 'requirements.txt',
+  if (online && (!/^3\.11\.\d+$/.test(manifest.python) || !['bundled', 'system'].includes(manifest.uv))) {
+    throw new Error('轻量发行包的运行环境配置不完整');
+  }
+  const tools = online ? ['build-constraints.txt', ...(manifest.uv === 'bundled' ? ['toolkit/uv.exe'] : [])]
+    : ['toolkit/python/python.exe', 'toolkit/uv.exe'];
+  for (const required of [...tools, 'requirements.txt',
     'app/server/__main__.py', 'app/webapp/dist/index.html', 'app/distribution.json',
     'app/core/ocr/baas_ocr_client/bin/BAAS_ocr_server.exe']) {
     if (!manifest.files[required]) throw new Error(`桌面发行包缺少 ${required}`);
   }
-  for (const [name, expected] of Object.entries(manifest.files)) {
-    if (!/^(app\/|toolkit\/|wheels\/|requirements\.txt$)/.test(name)
+  const files = Object.entries(manifest.files);
+  let verified = 0;
+  for (const [name, expected] of files) {
+    if (!/^(app\/|toolkit\/|wheels\/|requirements\.txt$|build-constraints\.txt$)/.test(name)
         || name.split('/').some(part => !part || part === '..' || part === '.' || part.startsWith('.'))
         || name.includes('\\') || name.includes(':')
         || /^(app\/config\/|app\/setup\.toml$|app\/core\/ocr\/baas_ocr_client\/bin\/(config|output)\/)/.test(name)
@@ -139,6 +148,7 @@ async function verifyBundle(bundle, manifest) {
     if ((await fs.lstat(file)).isSymbolicLink() || await digest(file) !== expected) {
       throw new Error(`发行文件校验失败：${name}`);
     }
+    progress(++verified / files.length);
   }
 }
 
@@ -146,12 +156,14 @@ function runProcess(command, args, { cwd, env, signal, output }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, signal, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const tail = [];
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
-      const text = chunk.toString();
-      output(text);
-      tail.push(text);
-      if (tail.length > 20) tail.shift();
-    });
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.setEncoding('utf8');
+      stream.on('data', text => {
+        output(text);
+        tail.push(text);
+        if (tail.length > 20) tail.shift();
+      });
+    }
     child.once('error', reject);
     child.once('close', code => code === 0 ? resolve() : reject(new Error(`运行环境准备失败（${code}）：\n${tail.join('')}`)));
   });
@@ -162,27 +174,26 @@ async function prepareRuntime(bundle, userData, options = {}) {
   const run = options.run || runProcess;
   const progress = options.progress || (() => {});
   const signal = options.signal;
-  const env = { ...process.env, UV_OFFLINE: '1', UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1',
-    UV_CACHE_DIR: path.join(userData, 'uv-cache'), UV_LINK_MODE: 'copy',
-    PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' };
-  delete env.PYTHONHOME;
-  delete env.PYTHONPATH;
-  delete env.VIRTUAL_ENV;
+  let env = runtimeEnvironment(false, userData);
   await fs.mkdir(userData, { recursive: true });
   const log = await fs.open(path.join(userData, 'desktop-setup.log'), 'a');
   const pendingWrites = [];
   const output = text => { pendingWrites.push(log.write(text)); options.output?.(text); };
   const execute = (command, args, cwd = userData) => run(command, args, { cwd, env, signal, output });
   try {
-    progress('正在校验内置程序和离线依赖…');
+    progress('正在校验发行文件…', 2);
     const manifest = await readJson(path.join(bundle, 'bundle.json'));
-    await verifyBundle(bundle, manifest);
+    await verifyBundle(bundle, manifest, fraction => progress('正在校验发行文件…', 2 + fraction * 16));
+    const online = manifest.format === 3;
+    env = runtimeEnvironment(online, userData);
     signal?.throwIfAborted();
     const active = await readActiveRuntime(userData);
+    progress('正在检查已有运行环境…', 20);
     const settings = await prepareSettings(userData, configRoot, active?.configRoot);
     if (active?.id === manifest.id && active.runtimeKey === manifest.runtimeKey && active.configRoot === configRoot) {
       try {
         await execute(active.python, PROBE_ARGS);
+        progress('已有运行环境检查通过，正在复用…', 82);
         return active;
       } catch (error) {
         signal?.throwIfAborted();
@@ -208,7 +219,7 @@ async function prepareRuntime(bundle, userData, options = {}) {
       } catch { signal?.throwIfAborted(); }
     }
     if (!runtimeRoot) {
-      progress('正在使用内置离线依赖准备运行环境…');
+      progress('正在准备运行环境工具…', 24);
       runtimeRoot = path.join(runtimes, runtimePrefix + randomUUID().slice(0, 12));
       await fs.mkdir(runtimeRoot);
       for (const name of Object.keys(manifest.files).filter(name => name.startsWith('toolkit/'))) {
@@ -216,23 +227,47 @@ async function prepareRuntime(bundle, userData, options = {}) {
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.copyFile(path.join(bundle, name), destination);
       }
-      const uv = path.join(runtimeRoot, 'uv.exe');
       const python = path.join(runtimeRoot, '.venv/Scripts/python.exe');
-      await execute(uv, ['venv', '--no-config', '--offline', '--no-python-downloads',
-        '--python', path.join(runtimeRoot, 'python/python.exe'), path.join(runtimeRoot, '.venv')]);
-      await execute(uv, ['pip', 'sync', '--no-config', '--offline', '--no-index', '--no-build', '--require-hashes',
-        '--find-links', path.join(bundle, 'wheels'), '--python', python, path.join(bundle, 'requirements.txt')]);
-      await execute(uv, ['pip', 'check', '--no-config', '--offline', '--python', python]);
+      if (online) {
+        const { settings } = await loadRuntimeSettings(configRoot, userData, manifest.uv === 'bundled');
+        const uv = await (options.resolveUv || resolveUv)(settings, path.join(runtimeRoot, 'uv.exe'));
+        const index = INDEXES[settings.index].url;
+        progress('正在下载或检查解释器…', 32);
+        await execute(uv, ['python', 'install', '--no-config', '--no-bin', '--no-registry', manifest.python]);
+        progress('正在创建独立运行环境…', 46);
+        await execute(uv, ['venv', '--no-config', '--managed-python', '--no-python-downloads',
+          '--python', manifest.python, path.join(runtimeRoot, '.venv')]);
+        progress('正在下载并安装锁定依赖…', 50);
+        await execute(uv, ['pip', 'sync', '--no-config', '--require-hashes', '--default-index', index,
+          '--build-constraints', path.join(bundle, 'build-constraints.txt'),
+          '--python', python, path.join(bundle, 'requirements.txt')]);
+        progress('正在校验依赖…', 68);
+        await execute(uv, ['pip', 'check', '--no-config', '--python', python]);
+      } else {
+        const uv = path.join(runtimeRoot, 'uv.exe');
+        progress('正在使用内置解释器创建运行环境…', 32);
+        await execute(uv, ['venv', '--no-config', '--offline', '--no-python-downloads',
+          '--python', path.join(runtimeRoot, 'python/python.exe'), path.join(runtimeRoot, '.venv')]);
+        progress('正在安装内置离线依赖…', 50);
+        await execute(uv, ['pip', 'sync', '--no-config', '--offline', '--no-index', '--no-build', '--require-hashes',
+          '--find-links', path.join(bundle, 'wheels'), '--python', python, path.join(bundle, 'requirements.txt')]);
+        progress('正在校验依赖…', 68);
+        await execute(uv, ['pip', 'check', '--no-config', '--offline', '--python', python]);
+      }
+      progress('正在检查运行环境和识别组件…', 72);
       await execute(python, PROBE_ARGS);
       await fs.writeFile(path.join(runtimeRoot, '.ready.json'), JSON.stringify({ path: runtimeRoot, key: manifest.runtimeKey }));
     }
 
-    progress('正在准备新版程序和配置目录…');
+    progress('正在准备新版程序和配置目录…', 74);
     const root = path.join(userData, 'versions', `${manifest.id.slice(0, 16)}-${randomUUID().slice(0, 12)}`);
-    for (const name of Object.keys(manifest.files).filter(name => name.startsWith('app/'))) {
+    const appFiles = Object.keys(manifest.files).filter(name => name.startsWith('app/'));
+    let copied = 0;
+    for (const name of appFiles) {
       const destination = path.join(root, name.slice('app/'.length));
       await fs.mkdir(path.dirname(destination), { recursive: true });
       await fs.copyFile(path.join(bundle, name), destination);
+      progress('正在准备新版程序和配置目录…', 74 + ++copied / appFiles.length * 6);
     }
     // Junctions keep relative-path consumers working with installation-local settings.
     for (const { relative, shared } of settings) {
@@ -243,6 +278,7 @@ async function prepareRuntime(bundle, userData, options = {}) {
     for (const { relative, shared } of settings) {
       await fs.cp(shared, path.join(backup, relative), { recursive: true });
     }
+    progress('运行环境准备完成…', 82);
     return { id: manifest.id, version: manifest.version, runtimeKey: manifest.runtimeKey, backup, configRoot,
       root, python: path.join(runtimeRoot, '.venv/Scripts/python.exe') };
   } finally {

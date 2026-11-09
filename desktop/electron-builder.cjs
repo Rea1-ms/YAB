@@ -5,7 +5,7 @@ const path = require('path');
 
 const backend = process.env.BAAS_BACKEND_DIR;
 const release = process.env.BAAS_RELEASE_DIR;
-if (!backend || !fs.existsSync(path.join(backend, 'toolkit', 'uv.exe'))
+if (!backend || !fs.existsSync(path.join(backend, 'bundle.json'))
     || !fs.existsSync(path.join(backend, 'app', 'server', '__main__.py'))) {
   throw new Error('请通过 pnpm run dist 或 pnpm run pack 构建完整程序');
 }
@@ -59,9 +59,12 @@ module.exports = {
     fs.copyFileSync(path.join(__dirname, 'assets/YabInstallUI.dll'), path.join(release, 'assets/YabInstallUI.dll'));
     fs.writeFileSync(path.join(release, 'installer-generated.nsh'), lines.join('\r\n'));
   },
-  files: ['main.js', 'preload.js', 'runtime.cjs', 'webui.cjs', 'assets/**', 'package.json'],
+  files: ['main.js', 'preload.js', 'runtime.cjs', 'runtime-settings.cjs', 'runtime-window.cjs',
+    'runtime-preload.cjs', 'runtime-settings.html', 'runtime-settings-page.js', 'webui.cjs',
+    'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js',
+    'message-window.cjs', 'message-preload.cjs', 'message.html', 'message-page.js', 'assets/**', 'package.json'],
   extraResources: [{ from: backend, to: 'backend' }],
-  artifactName: 'YAB-${version}-${arch}.${ext}',
+  artifactName: 'YAB-${version}-${arch}' + (process.env.YAB_BUILD_VARIANT?.startsWith('lite') ? '-' + process.env.YAB_BUILD_VARIANT : '') + '.${ext}',
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
     icon: 'assets/installer.ico',
@@ -73,7 +76,7 @@ module.exports = {
     uninstallerIcon: 'assets/installer.ico',
     installerSidebar: 'assets/installer-sidebar.bmp',
     uninstallerSidebar: 'assets/installer-sidebar.bmp',
-    artifactName: 'YAB-${version}-${arch}-setup.${ext}',
+    artifactName: 'YAB-${version}-${arch}' + (process.env.YAB_BUILD_VARIANT?.startsWith('lite') ? '-' + process.env.YAB_BUILD_VARIANT : '') + '-setup.${ext}',
     oneClick: false,
     perMachine: false,
     // The custom browser immediately displays the finalized folder.

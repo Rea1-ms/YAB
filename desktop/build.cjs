@@ -11,13 +11,17 @@ async function main() {
     throw new Error('目前支持在 Windows x64 上构建桌面发行包');
   }
   const root = path.resolve(__dirname, '..');
+  const lite = process.argv.includes('--lite');
+  const systemUv = process.argv.includes('--system-uv');
+  if (systemUv && !lite) throw new Error('系统工具发行模式仅适用于轻量包');
+  const variant = lite ? (systemUv ? 'lite-system' : 'lite') : 'offline';
   const python = process.env.BAAS_PYTHON || path.join(root, '.venv', 'Scripts', 'python.exe');
   if (!fs.existsSync(python)) throw new Error('请先在仓库根准备 Python 3.11 的 .venv 环境');
   const uv = process.env.BAAS_UV || 'uv';
   const uvPath = spawnSync(python, ['-c', 'import shutil,sys; print(shutil.which(sys.argv[1]) or sys.argv[1])', uv],
     { encoding: 'utf8', windowsHide: true }).stdout?.trim();
   if (!uvPath || !fs.existsSync(uvPath)) throw new Error('请先安装 uv（环境管理工具），或设置 BAAS_UV 指向其可执行文件');
-  const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
+  const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid + '-' + variant;
   const output = path.join(__dirname, 'build', id);
   const release = path.join(__dirname, 'release', id);
   fs.mkdirSync(output, { recursive: true });
@@ -28,7 +32,8 @@ async function main() {
   const backend = path.join(output, 'backend');
   for (const args of [
     ['-B', '-m', 'server.frontend'],
-    ['-B', path.join(__dirname, 'bundle.py'), '--output', backend, '--cache', cache, '--uv', uvPath],
+    ['-B', path.join(__dirname, 'bundle.py'), '--output', backend, '--cache', cache, '--uv', uvPath,
+      '--mode', lite ? 'online' : 'offline', ...(systemUv ? ['--system-uv'] : [])],
   ]) {
     const result = spawnSync(python, args, { cwd: root, env, stdio: 'inherit', windowsHide: true });
     if (result.error) throw result.error;
@@ -36,6 +41,7 @@ async function main() {
   }
   process.env.BAAS_BACKEND_DIR = backend;
   process.env.BAAS_RELEASE_DIR = release;
+  process.env.YAB_BUILD_VARIANT = variant;
   const config = require('./electron-builder.cjs');
   const progressIncludes = prepareInstallerProgress(release);
   const targets = Platform.WINDOWS.createTarget(process.argv.includes('--dir') ? ['dir'] : ['nsis', 'zip'], Arch.x64);

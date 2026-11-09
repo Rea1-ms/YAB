@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <title>YAB 启动中</title>
+  <link rel="stylesheet" href="startup.css">
+  <script src="startup-page.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="assets/logo.ico" width="48" height="48" alt="">
+      <div><div class="eyebrow">YAB</div><h1 id="title">正在启动</h1></div>
+      <span id="elapsed" class="muted">已用 0 秒</span>
+    </header>
+    <section class="preparation" aria-label="启动进度">
+      <div class="status-row"><h2 id="message" role="status">正在准备启动界面…</h2><span id="percent">0%</span></div>
+      <progress id="progress" max="100" value="0" aria-label="总体启动进度"></progress>
+      <ol id="steps"><li data-start="0">校验文件</li><li data-start="20">准备环境</li><li data-start="74">准备程序</li><li data-start="84">启动服务</li><li data-start="96">打开界面</li></ol>
+      <p class="hint">总体进度按步骤估算；下载和安装期间会持续等待当前步骤完成。</p>
+    </section>
+    <section class="logs" aria-labelledby="logs-title">
+      <div class="log-toolbar"><h2 id="logs-title">实时日志</h2><span id="activity" class="muted">等待输出</span><label><input id="follow" type="checkbox" checked>自动滚动</label></div>
+      <pre id="logs" tabindex="0" aria-label="启动日志">正在等待启动日志…</pre>
+    </section>
+    <footer><span id="environment">首次使用会准备运行环境，后续启动将复用。</span></footer>
+  </main>
+</body>
+</html>

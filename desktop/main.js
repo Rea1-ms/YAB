@@ -36,13 +36,17 @@
 //
 // 零构建、无 TypeScript、CommonJS。
 
-const { app, BrowserWindow, Tray, Menu, dialog, shell, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, Notification, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { readWebSettings, probePort } = require('./webui.cjs');
 const { spawn } = require('child_process');
-const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings } = require('./runtime.cjs');
+const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings, verifyBundle } = require('./runtime.cjs');
+const { loadRuntimeSettings } = require('./runtime-settings.cjs');
+const { openRuntimeWindow } = require('./runtime-window.cjs');
+const { StartupProgress, createStartupScreen } = require('./startup.cjs');
+const { showMessage } = require('./message-window.cjs');
 
 const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
 fs.mkdirSync(dataPath, { recursive: true });
@@ -60,6 +64,7 @@ const LOG_RING_SIZE = 200; // 后端输出环形缓冲行数，出错时展示�
 // ------------------------------ 全局状态 ------------------------------
 
 let mainWindow = null;
+let startupScreen = null;
 let tray = null;
 let backend = null; // { child, label, healthy }
 let backendExit = null; // { code, signal }，后端退出时记录
@@ -72,6 +77,7 @@ let previousRuntime = null;
 let runtimeFallbackMessage = '';
 const preparation = new AbortController();
 const logLines = []; // 后端 stdout/stderr 环形缓冲
+const startup = new StartupProgress();
 
 // ------------------------------ 小工具 ------------------------------
 
@@ -80,11 +86,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function log(message) {
   console.log(`[yab-desktop] ${message}`);
+  startup.append(`[启动] ${message}\n`);
 }
 
 function pushBackendLog(chunk) {
   const text = chunk.toString();
   process.stdout.write(text); // 转发到控制台
+  startup.append(text);
   for (const line of text.split(/\r?\n/)) {
     if (line.length === 0) continue;
     logLines.push(line);
@@ -125,15 +133,39 @@ async function resolveRepoRoot() {
       previousRuntime = await readActiveRuntime(userData);
       // A rollback must use the same configuration location as the candidate.
       if (previousRuntime?.configRoot !== configRoot) previousRuntime = null;
-      try {
+      let online = false;
+      let windowOptions;
+      for (;;) try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
+        showPreparation('正在校验发行文件…', 2);
+        await verifyBundle(bundle, manifest, fraction => showPreparation('正在校验发行文件…', 2 + fraction * 14));
+        online = manifest.format === 3;
+        windowOptions = { parent: mainWindow, configRoot, userData, bundle, bundled: manifest.uv === 'bundled' };
+        if (online && !SMOKE_MODE) {
+          const { configured } = await loadRuntimeSettings(configRoot, userData, windowOptions.bundled)
+            .catch(() => ({ configured: false }));
+          if (!configured) {
+            showPreparation('请选择运行环境工具和下载源…', 18);
+            if (!await openRuntimeWindow({ ...windowOptions, initial: true })) throw new Error('已取消运行环境准备');
+          }
+        }
         packagedRuntime = await prepareRuntime(bundle, userData, {
           configRoot, signal: preparation.signal, progress: showPreparation, output: pushBackendLog,
         });
+        break;
       } catch (error) {
-        if (SMOKE_MODE || !previousRuntime || preparation.signal.aborted) throw error;
+        if (SMOKE_MODE || preparation.signal.aborted) throw error;
+        startup.fail(error.message);
+        if (online) {
+          const choice = await showMessage(mainWindow, { type: 'error', message: '运行环境准备失败',
+            detail: error.message, buttons: ['调整设置并重试', previousRuntime ? '使用上一版本' : '退出'], defaultId: 0, cancelId: 1 });
+          if (choice.response === 0 && await openRuntimeWindow({ ...windowOptions, initial: true })) continue;
+        }
+        if (!previousRuntime) throw error;
         packagedRuntime = previousRuntime;
         runtimeFallbackMessage = `新版本准备失败，已使用上一版本。\n${error.message}`;
         log(runtimeFallbackMessage);
+        break;
       }
       return packagedRuntime.root;
     }
@@ -231,11 +263,14 @@ function trySpawnCandidate(candidate, listenArgs, root) {
     });
     child.stdout.on('data', pushBackendLog);
     child.stderr.on('data', pushBackendLog);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
   });
 }
 
 // 拉起后端并等待就绪：健康检查通过 / 进程提前退出 / 90s 超时
 async function launchBackend(root, port) {
+  showPreparation('正在启动后端服务…', 84);
   const listenArgs = ['--host', serverHost, '--port', String(port)];
   const attempted = [];
   for (const candidate of backendCandidates(root)) {
@@ -255,6 +290,7 @@ async function launchBackend(root, port) {
   }
 
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  showPreparation('正在等待后端和识别服务就绪…', 88);
   while (Date.now() < deadline) {
     if (backendExit) {
       throw new StartupError(
@@ -287,7 +323,10 @@ function healthCheck(port) {
         try {
           const state = JSON.parse(body);
           if (state.ocr_error) reject(new StartupError(`识别服务初始化失败：${state.ocr_error}`));
-          else resolve(res.statusCode === 200 && state.ocr_ready === true);
+          else {
+            if (res.statusCode === 200 && state.ocr_ready === false) showPreparation('正在初始化识别服务…', 92);
+            resolve(res.statusCode === 200 && state.ocr_ready === true);
+          }
         } catch { resolve(false); }
       });
     });
@@ -373,7 +412,11 @@ async function fatalExit(title, message, code = 1) {
     console.error(message);
   } else {
     try {
-      dialog.showErrorBox(title, message);
+      startup.fail(message);
+      if (startup.state.status === 'failed' && mainWindow && !mainWindow.isDestroyed() && !startupScreen) {
+        startupScreen = await createStartupScreen(mainWindow, startup, ipcMain);
+      }
+      await showMessage(mainWindow, { type: 'error', title, message: title, detail: message, buttons: ['退出'] });
     } catch (err) {
       console.error(`弹窗失败: ${err.message}\n${message}`);
     }
@@ -388,35 +431,16 @@ async function fatalExit(title, message, code = 1) {
 
 // ------------------------------ 窗口 / 托盘 ------------------------------
 
-let preparationMessage = 'YAB 启动中…';
-
-function showPreparation(message) {
-  preparationMessage = message;
-  log(message);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.executeJavaScript(`document.querySelector('p').textContent = ${JSON.stringify(message)}`).catch(() => {});
-  }
-}
-
-function loadingPageUrl() {
-  const html =
-    '<!doctype html><html><head><meta charset="utf-8"><title>YAB</title><style>' +
-    'html,body{margin:0;height:100%;background:#0f1115;color:#e6e8ec;' +
-    'font-family:"Segoe UI",system-ui,-apple-system,sans-serif}' +
-    '.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}' +
-    '.spin{width:38px;height:38px;border-radius:50%;border:3px solid #262b36;border-top-color:#4f8cff;' +
-    'animation:baas-spin 0.9s linear infinite}' +
-    '@keyframes baas-spin{to{transform:rotate(360deg)}}' +
-    'p{margin:0;font-size:14px;color:#9aa3b2;letter-spacing:0.5px}' +
-    '</style></head><body><div class="wrap"><div class="spin"></div><p>' + preparationMessage + '</p></div></body></html>';
-  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+function showPreparation(message, percent) {
+  if (startup.state.message !== message) console.log(`[启动] ${message}`);
+  startup.report(message, percent);
 }
 
 function mainPageUrl() {
   return `http://${connectHost.includes(':') ? `[${connectHost}]` : connectHost}:${serverPort}/`;
 }
 
-// 是否是本壳自己的页面（loading data: 页 / 后端本机地址）
+// 是否是本壳自己的页面（本地启动页 / 后端本机地址）
 function isAppUrl(url) {
   try {
     const parsed = new URL(url);
@@ -427,7 +451,7 @@ function isAppUrl(url) {
   }
 }
 
-function createMainWindow() {
+async function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -445,7 +469,6 @@ function createMainWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadURL(loadingPageUrl());
 
   // 关闭按钮 = 隐藏到托盘；真正的退出只走托盘菜单 / before-quit
   mainWindow.on('close', (event) => {
@@ -456,6 +479,7 @@ function createMainWindow() {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
+    startupScreen = null;
   });
 
   // 外部域名导航交给系统浏览器
@@ -468,6 +492,7 @@ function createMainWindow() {
     if (!isAppUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  startupScreen = await createStartupScreen(mainWindow, startup, ipcMain);
   return mainWindow;
 }
 
@@ -503,6 +528,22 @@ function createTray() {
       { label: '显示主窗口', click: () => showMainWindow() },
       { label: '重新载入页面', click: () => mainWindow && mainWindow.webContents.reload() },
       { label: '在浏览器中打开', click: () => backend?.healthy && shell.openExternal(mainPageUrl()) },
+      ...(app.isPackaged ? [{ label: '运行环境', click: async () => {
+        try {
+          const bundle = path.join(process.resourcesPath, 'backend');
+          const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
+          if (manifest.format !== 3) {
+            await showMessage(mainWindow, { message: '完整包使用内置离线环境，无需设置下载源。' });
+            return;
+          }
+          await openRuntimeWindow({ parent: mainWindow, bundle, bundled: manifest.uv === 'bundled',
+            configRoot: packagedRuntime?.configRoot || path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config')),
+            userData: app.getPath('userData') });
+        } catch (error) {
+          await showMessage(mainWindow, { type: 'error', title: '无法打开运行环境设置',
+            message: '无法打开运行环境设置', detail: error.message, buttons: ['确定'] });
+        }
+      } }] : []),
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
     ]),
@@ -516,14 +557,18 @@ async function runGui() {
   await app.whenReady();
   try {
     createTray();
-    createMainWindow();
+    await createMainWindow();
     repoRoot = await resolveRepoRoot();
+    if (packagedRuntime) startup.setEnvironment(path.dirname(path.dirname(packagedRuntime.python)));
     serverPort = await acquirePort();
     log(`仓库根: ${repoRoot}`);
     log(`端口: ${serverPort}`);
     await launchPreparedBackend();
-    if (mainWindow) mainWindow.loadURL(mainPageUrl());
-    if (runtimeFallbackMessage) dialog.showMessageBox({ type: 'warning', message: '已继续使用上一版本', detail: runtimeFallbackMessage });
+    showPreparation('正在打开主界面…', 96);
+    if (mainWindow) await mainWindow.loadURL(mainPageUrl());
+    if (startupScreen) await startupScreen.finish();
+    startupScreen = null;
+    if (runtimeFallbackMessage) await showMessage(mainWindow, { type: 'warning', message: '已继续使用上一版本', detail: runtimeFallbackMessage });
   } catch (err) {
     await fatalExit('YAB 启动失败', String((err && err.message) || err));
   }

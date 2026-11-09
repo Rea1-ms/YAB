@@ -6,11 +6,12 @@ const fs = require('fs/promises');
 const path = require('path');
 const { createHash } = require('crypto');
 const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings } = require('../runtime.cjs');
+const { INDEXES, loadRuntimeSettings, saveRuntimeSettings, validateSettings, runtimeEnvironment } = require('../runtime-settings.cjs');
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const ocr = 'core/ocr/baas_ocr_client/bin';
 
-async function fixture() {
+async function fixture({ online = false, bundled = true } = {}) {
   const output = path.resolve(__dirname, '../../develop_tools/out');
   await fs.mkdir(output, { recursive: true });
   const scratch = await fs.mkdtemp(path.join(output, 'desktop-runtime-'));
@@ -28,8 +29,10 @@ async function fixture() {
   const writeBundle = async (version, dependency = 'deps-v1') => {
     const content = { 'app/server/__main__.py': version, 'app/webapp/dist/index.html': 'html',
       'app/distribution.json': '{}', [`app/${ocr}/BAAS_ocr_server.exe`]: 'ocr',
-      'toolkit/python/python.exe': 'standalone python', 'toolkit/uv.exe': 'uv',
-      'requirements.txt': dependency, 'wheels/package.whl': dependency };
+      'requirements.txt': dependency };
+    if (!online) Object.assign(content, { 'toolkit/python/python.exe': 'standalone python', 'wheels/package.whl': dependency });
+    else content['build-constraints.txt'] = 'setuptools==69.5.1\nwheel==0.45.1\n';
+    if (!online || bundled) content['toolkit/uv.exe'] = 'uv';
     const files = {};
     for (const [name, text] of Object.entries(content)) {
       await fs.mkdir(path.dirname(path.join(bundle, name)), { recursive: true });
@@ -37,11 +40,14 @@ async function fixture() {
       files[name] = hash(text);
     }
     await fs.writeFile(path.join(bundle, 'bundle.json'), JSON.stringify({
-      format: 2, id: hash(version + dependency), version, runtimeKey: hash(dependency), files,
+      format: online ? 3 : 2, id: hash(version + dependency), version, runtimeKey: hash(dependency), files,
+      ...(online ? { mode: 'online', uv: bundled ? 'bundled' : 'system', python: '3.11.14' } : {}),
     }));
   };
   await writeBundle('v1');
-  return { bundle, data, calls, run, writeBundle };
+  const selections = [];
+  const resolveUv = async (settings, file) => { selections.push(settings); return settings.uvMode === 'bundled' ? file : path.join(scratch, 'system/uv.exe'); };
+  return { bundle, data, calls, run, writeBundle, resolveUv, selections };
 }
 
 test('upgrade isolates source versions, reuses dependencies and preserves legacy settings', async () => {
@@ -91,6 +97,34 @@ test('desktop data uses the YAB directory and honors explicit overrides', async 
   assert.equal(await fs.readFile(path.join(legacy, 'Preferences'), 'utf8'), 'saved preferences');
   const custom = path.join(f.data, 'custom');
   assert.equal(desktopDataPath(f.data, custom), custom);
+});
+
+test('online and offline startup report real preparation phases and forward live output', async () => {
+  for (const online of [false, true]) {
+    const f = await fixture({ online });
+    const updates = [];
+    const logs = [];
+    const progress = (message, percent) => updates.push({ message, percent });
+    const run = async (command, args, options) => {
+      if (args[0] === 'pip' && args[1] === 'sync') {
+        assert.equal(updates.at(-1).percent, 50, 'Show installation before starting the subprocess.');
+        options.output('正在安装依赖\n');
+      }
+      return f.run(command, args, options);
+    };
+    const runtime = await prepareRuntime(f.bundle, f.data, { ...f, run, progress, output: text => logs.push(text) });
+    assert.ok(updates.some(update => update.percent > 2 && update.percent <= 18));
+    assert.ok(updates.some(update => update.percent === 68));
+    assert.ok(updates.some(update => update.percent > 74 && update.percent <= 80));
+    assert.equal(updates.at(-1).percent, 82, 'The backend and page are still pending.');
+    assert.ok(updates.every(update => update.percent < 100));
+    assert.ok(logs.includes('正在安装依赖\n'));
+    await activateRuntime(f.data, runtime);
+    updates.length = 0;
+    await prepareRuntime(f.bundle, f.data, { ...f, progress });
+    assert.equal(updates.at(-1).percent, 82);
+    assert.ok(!updates.some(update => update.percent === 50), 'An existing environment skips installation.');
+  }
 });
 
 test('installation-local settings migrate legacy data, survive upgrades and restore locally', async () => {
@@ -238,4 +272,106 @@ test('manifest traversal is rejected before executing a package', async () => {
   await fs.writeFile(file, JSON.stringify(manifest));
   await assert.rejects(prepareRuntime(f.bundle, f.data, f), /不合法/);
   assert.equal(f.calls.length, 0);
+});
+
+test('lightweight installation downloads the pinned interpreter and hashed dependencies using the selected mirror', async () => {
+  for (const index of Object.keys(INDEXES)) {
+    const f = await fixture({ online: true });
+    const configRoot = path.join(f.data, '../installed/config');
+    await saveRuntimeSettings(configRoot, f.data, { uvMode: 'bundled', uvPath: '', index });
+    const runtime = await prepareRuntime(f.bundle, f.data, { ...f, configRoot });
+    const install = f.calls.find(call => call.args[0] === 'python');
+    assert.equal(install.args.at(-1), '3.11.14');
+    assert.ok(install.args.includes('--no-registry'));
+    assert.equal(install.options.env.UV_PYTHON_INSTALL_DIR, path.join(f.data, 'python'));
+    const sync = f.calls.find(call => call.args[1] === 'sync');
+    assert.equal(sync.args[sync.args.indexOf('--default-index') + 1], INDEXES[index].url);
+    assert.ok(sync.args.includes('--require-hashes'));
+    assert.ok(sync.args.includes('--build-constraints'));
+    assert.ok(!sync.args.includes('--offline'));
+    assert.ok(!sync.args.includes('--no-index'));
+    assert.equal(sync.options.env.UV_OFFLINE, undefined);
+    assert.ok(!f.calls.some(call => call.args.includes('wheel')));
+    await activateRuntime(f.data, runtime);
+    f.calls.length = 0;
+    await saveRuntimeSettings(configRoot, f.data, { uvMode: 'system', uvPath: '', index: 'aliyun' });
+    assert.equal((await prepareRuntime(f.bundle, f.data, { ...f, configRoot })).python, runtime.python);
+    assert.equal(f.calls.length, 1); // Only the interpreter health probe runs.
+  }
+});
+
+test('a system-tool lightweight package needs no bundled interpreter or uv', async () => {
+  const f = await fixture({ online: true, bundled: false });
+  const runtime = await prepareRuntime(f.bundle, f.data, f);
+  assert.equal(f.selections[0].uvMode, 'system');
+  assert.ok(f.calls.find(call => call.args[0] === 'venv').command.endsWith(path.join('system', 'uv.exe')));
+  assert.equal(await fs.readFile(path.join(runtime.root, 'server/__main__.py'), 'utf8'), 'v1');
+});
+
+test('lightweight source updates reuse dependencies; dependency updates isolate failed preparations', async () => {
+  const f = await fixture({ online: true });
+  const first = await prepareRuntime(f.bundle, f.data, f);
+  await activateRuntime(f.data, first);
+  await fs.writeFile(path.join(first.root, 'config/account.json'), 'keep my settings');
+  await f.writeBundle('v2');
+  const second = await prepareRuntime(f.bundle, f.data, f);
+  assert.equal(second.python, first.python);
+  await activateRuntime(f.data, second);
+  await f.writeBundle('v3', 'new dependency');
+  const failingRun = async (command, args, options) => {
+    if (args[1] === 'sync') throw new Error('mirror unavailable');
+    return f.run(command, args, options);
+  };
+  await assert.rejects(prepareRuntime(f.bundle, f.data, { ...f, run: failingRun }), /mirror unavailable/);
+  assert.equal((await readActiveRuntime(f.data)).root, second.root);
+  assert.equal(await fs.readFile(path.join(first.root, 'config/account.json'), 'utf8'), 'keep my settings');
+  const third = await prepareRuntime(f.bundle, f.data, f);
+  assert.notEqual(third.python, second.python);
+  assert.equal(await fs.readFile(path.join(third.root, 'config/account.json'), 'utf8'), 'keep my settings');
+  assert.equal((await readActiveRuntime(f.data)).root, second.root);
+});
+
+test('corrupt lightweight content and incomplete online metadata never execute tools', async () => {
+  for (const mutation of [manifest => { manifest.python = '3.13'; },
+    manifest => { delete manifest.files['build-constraints.txt']; },
+    manifest => { manifest.uv = 'arbitrary'; }]) {
+    const f = await fixture({ online: true });
+    const file = path.join(f.bundle, 'bundle.json');
+    const manifest = JSON.parse(await fs.readFile(file));
+    mutation(manifest);
+    await fs.writeFile(file, JSON.stringify(manifest));
+    await assert.rejects(prepareRuntime(f.bundle, f.data, f), /不完整|缺少/);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.selections.length, 0);
+  }
+  const f = await fixture({ online: true });
+  await fs.writeFile(path.join(f.bundle, 'toolkit/uv.exe'), 'corrupt');
+  await assert.rejects(prepareRuntime(f.bundle, f.data, f), /校验失败/);
+  assert.equal(f.calls.length, 0);
+});
+
+test('runtime settings persist per installation and reject unsupported indexes or relative tools', async () => {
+  const f = await fixture({ online: true });
+  const config = path.join(f.data, '../installed/config');
+  assert.equal((await loadRuntimeSettings(config, f.data, false)).settings.uvMode, 'system');
+  const selected = { uvMode: 'custom', uvPath: path.resolve('my tools/uv.exe'), index: 'tsinghua' };
+  await saveRuntimeSettings(config, f.data, selected);
+  assert.deepEqual((await loadRuntimeSettings(config, f.data)).settings, selected);
+  assert.equal((await loadRuntimeSettings(path.join(f.data, '../another/config'), f.data)).configured, false);
+  for (const value of [{ ...selected, index: 'other' }, { ...selected, uvPath: 'uv.exe' }, { ...selected, uvMode: 'other' }]) {
+    assert.throws(() => validateSettings(value), /设置无效/);
+  }
+});
+
+test('host uv options cannot override the selected source or make a complete package access the network', () => {
+  const inherited = { PATH: 'preserved', UV_CACHE_DIR: 'shared-cache', UV_OFFLINE: '1', UV_NO_CACHE: '1',
+    UV_NO_VERIFY_HASHES: '1', UV_INDEX: 'https://other.invalid', UV_PYTHON: 'wrong-python',
+    PYTHONPATH: 'unsafe', VIRTUAL_ENV: 'wrong-env' };
+  const online = runtimeEnvironment(true, 'user-data', inherited);
+  assert.equal(online.UV_CACHE_DIR, 'shared-cache');
+  assert.equal(online.PATH, 'preserved');
+  for (const key of ['UV_OFFLINE', 'UV_NO_CACHE', 'UV_NO_VERIFY_HASHES', 'UV_INDEX', 'UV_PYTHON', 'PYTHONPATH', 'VIRTUAL_ENV']) assert.equal(online[key], undefined);
+  const offline = runtimeEnvironment(false, 'user-data', inherited);
+  assert.equal(offline.UV_OFFLINE, '1');
+  assert.equal(offline.UV_PYTHON_DOWNLOADS, 'never');
 });

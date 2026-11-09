@@ -179,6 +179,7 @@ test('generated uninstall cleanup includes the installer icon outside the applic
   await fs.mkdir(path.join(backend, 'app/server'), { recursive: true });
   await fs.mkdir(path.join(appOutDir, 'resources'), { recursive: true });
   await fs.writeFile(path.join(backend, 'toolkit/uv.exe'), 'fixture, not an executable');
+  await fs.writeFile(path.join(backend, 'bundle.json'), '{"format":2}');
   await fs.writeFile(path.join(backend, 'app/server/__main__.py'), '# fixture\n');
   await fs.writeFile(path.join(appOutDir, 'YAB.exe'), 'fixture, not an executable');
   execute(process.execPath, ['-e', 'require(process.argv[1]).afterPack({ appOutDir: process.argv[2] });',

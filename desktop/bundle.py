@@ -1,15 +1,14 @@
-"""Build a source bundle with standalone Python, uv and an offline wheelhouse."""
+"""Build offline or online source distributions without copying a developer venv."""
 
 import argparse
-from email.parser import BytesParser
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import zipfile
-
+from email.parser import BytesParser
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OCR = Path('core/ocr/baas_ocr_client/bin')
@@ -32,10 +31,10 @@ def copy_filter(directory, names):
             or name.endswith(('.pyc', '.pyo', '.log'))]
 
 
-def build_bundle(output, cache, uv):
+def build_bundle(output, cache, uv, mode='offline', system_uv=False):
     output.mkdir(parents=True)
     cache.mkdir(parents=True, exist_ok=True)
-    os.environ['UV_CACHE_DIR'] = str(cache / 'uv')
+    os.environ.setdefault('UV_CACHE_DIR', str(cache / 'uv'))
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     version = json.loads((ROOT / 'desktop/package.json').read_text(encoding='utf-8'))['version']
     python_version = (ROOT / 'desktop/python-version').read_text().strip()
@@ -44,9 +43,45 @@ def build_bundle(output, cache, uv):
     if not (ROOT / 'webapp/dist/index.html').is_file():
         raise RuntimeError('发行包缺少预构建网页')
 
+    # Export dependencies before computing their key: changing only the application
+    # version must not invalidate the complete wheelhouse.
+    locked = output / 'requirements.txt'
+    run([uv, 'export', '--locked', '--no-dev', '--no-default-groups', '--no-emit-project',
+         '--no-header', '--no-annotate', '-o', locked], stdout=subprocess.DEVNULL)
+    toolkit = output / 'toolkit'
+    toolkit.mkdir()
+    if not system_uv:
+        shutil.copy2(uv, toolkit / 'uv.exe')
+    if mode == 'offline':
+        prepare_offline_dependencies(output, cache, uv, python_version, locked, toolkit)
+    else:
+        # Keep legacy source builds compatible with the offline build toolchain.
+        (output / 'build-constraints.txt').write_text(
+            'setuptools==69.5.1\nwheel==0.45.1\n', encoding='utf-8')
+
+    copy_application(output, version)
+    files = {file.relative_to(output).as_posix(): sha256(file)
+             for file in sorted(output.rglob('*')) if file.is_file()}
+    runtime_files = {name: digest for name, digest in files.items() if not name.startswith('app/')}
+    if mode == 'online':
+        # Tool location and mirror selection do not change the locked environment.
+        runtime_files = {name: digest for name, digest in runtime_files.items() if not name.startswith('toolkit/')}
+        runtime_files['python'] = python_version
+        runtime_files['policy'] = 'online-v1'
+    runtime_key = hashlib.sha256(json.dumps(runtime_files, sort_keys=True).encode()).hexdigest()
+    bundle_id = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
+    manifest = {'format': 2 if mode == 'offline' else 3, 'id': bundle_id, 'version': version,
+                'python': python_version, 'runtimeKey': runtime_key, 'files': files}
+    if mode == 'online':
+        manifest.update(mode='online', uv='system' if system_uv else 'bundled')
+    (output / 'bundle.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    print(f'源码发行包准备完成：{output}', flush=True)
+
+
+def prepare_offline_dependencies(output, cache, uv, python_version, locked, toolkit):
     # A managed Python installation is relocatable; a copied developer venv is not.
     find = [uv, 'python', 'find', '--system', '--managed-python', '--no-python-downloads', python_version]
-    result = subprocess.run(find, cwd=ROOT, capture_output=True, text=True)
+    result = subprocess.run(find, check=False, cwd=ROOT, capture_output=True, text=True)
     if result.returncode:
         os.environ['UV_PYTHON_INSTALL_DIR'] = str(cache / 'python')
         run([uv, 'python', 'install', python_version])
@@ -56,22 +91,18 @@ def build_bundle(output, cache, uv):
     if info.stdout.strip() != python_version:
         raise RuntimeError('独立解释器版本与发行配置不符')
 
-    toolkit = output / 'toolkit'
-    toolkit.mkdir()
     shutil.copytree(python.parent, toolkit / 'python', ignore=copy_filter)
-    shutil.copy2(uv, toolkit / 'uv.exe')
 
     # Build source-only dependencies once on the maintainer's machine. All user
     # installations subsequently use these exact wheels, without an index or compiler.
-    key = hashlib.sha256((sha256(ROOT / 'uv.lock') + python_version).encode()).hexdigest()
+    key = hashlib.sha256((sha256(locked) + python_version).encode()).hexdigest()
     wheel_cache = cache / 'wheels' / key
     if not (wheel_cache / '.ready').is_file():
         import uuid
         work = cache / ('wheel-build-' + uuid.uuid4().hex)
         work.mkdir()
         requirements = work / 'locked.txt'
-        run([uv, 'export', '--locked', '--no-dev', '--no-default-groups', '--no-emit-project',
-             '--no-header', '--no-annotate', '-o', requirements], stdout=subprocess.DEVNULL)
+        shutil.copy2(locked, requirements)
         run([uv, 'venv', '--python', python, work / 'env'])
         run([uv, 'pip', 'install', '--python', work / 'env/Scripts/python.exe',
              'pip==25.3', 'setuptools==69.5.1', 'wheel==0.45.1'])
@@ -96,6 +127,8 @@ def build_bundle(output, cache, uv):
         raise RuntimeError('离线依赖包为空')
     (output / 'requirements.txt').write_text('\n'.join(requirements) + '\n', encoding='utf-8')
 
+
+def copy_application(output, version):
     app = output / 'app'
     app.mkdir()
     for directory in ('core', 'module', 'server', 'src', 'assets'):
@@ -116,21 +149,14 @@ def build_bundle(output, cache, uv):
             shutil.copy2(file, ocr / file.name)
     (app / 'distribution.json').write_text(json.dumps({'version': version, 'format': 1}), encoding='utf-8')
 
-    files = {file.relative_to(output).as_posix(): sha256(file)
-             for file in sorted(output.rglob('*')) if file.is_file()}
-    runtime_files = {name: digest for name, digest in files.items() if not name.startswith('app/')}
-    runtime_key = hashlib.sha256(json.dumps(runtime_files, sort_keys=True).encode()).hexdigest()
-    bundle_id = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
-    manifest = {'format': 2, 'id': bundle_id, 'version': version,
-                'python': python_version, 'runtimeKey': runtime_key, 'files': files}
-    (output / 'bundle.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-    print(f'源码发行包准备完成：{output}', flush=True)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--cache', required=True, type=Path)
     parser.add_argument('--uv', required=True, type=Path)
+    parser.add_argument('--mode', choices=('offline', 'online'), default='offline')
+    parser.add_argument('--system-uv', action='store_true')
     args = parser.parse_args()
-    build_bundle(args.output.resolve(), args.cache.resolve(), args.uv.resolve())
+    if args.system_uv and args.mode != 'online':
+        parser.error('--system-uv 仅适用于轻量包')
+    build_bundle(args.output.resolve(), args.cache.resolve(), args.uv.resolve(), args.mode, args.system_uv)
