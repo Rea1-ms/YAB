@@ -76,6 +76,7 @@ export default defineConfig({
                 {text: '开发环境', link: '/develop_doc/env'},
                 {text: '网页与商店维护', link: '/develop_doc/webui_shop_maintenance'},
                 {text: '桌面安装器维护', link: '/develop_doc/desktop_installer'},
+                {text: '离线截图回归', link: '/develop_doc/offline_tests'},
                 {text: '模拟器连接', link: '/develop_doc/script/Connection'},
                 {text: '模拟器截图', link: '/develop_doc/script/screenshot'},
                 {text: '模拟器控制', link: '/develop_doc/script/control'},
