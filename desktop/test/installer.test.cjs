@@ -1833,3 +1833,115 @@ SectionEnd
     t.diagnostic(`theme=${theme}, dpi=${dpi}: shield=${iconLeft}..${iconRight}, caption=${textLeft}..${textRight}, width=${width}`);
   }
 });
+
+test('license text keeps its palette and reading position after font and DPI refresh', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/license-palette-'));
+  const executable = path.join(scratch, 'license-palette.exe');
+  const source = path.join(scratch, 'license-palette.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!macro skipPageIfUpdated
+!macroend
+Var testTheme
+Var report
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} $testTheme
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB license palette regression"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectPalette
+!insertmacro MUI_PAGE_LICENSE "${path.resolve(__dirname, '../../LICENSE')}"
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  ReadEnvStr $testTheme "YAB_PREVIEW_THEME"
+  FileOpen $report "$EXEDIR\palette.txt" w
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+  @{if} $testTheme == 2
+    StrCpy $yabDarkMode 0
+    StrCpy $yabHighContrast 1
+  @{endif}
+FunctionEnd
+!macro snapshot LABEL
+  System::Alloc 92
+  Pop $R0
+  System::Call '*$R0(i 92)'
+  SendMessage $mui.LicensePage.LicenseText 0x43A 1 $R0
+  System::Call '*$R0(i, i, i.r2, i, i, i.r3)'
+  FileWrite $report "@{LABEL}:color=$3,effects=$2"
+  System::Call '*$R0(i 92)'
+  SendMessage $mui.LicensePage.LicenseText 0x43A 0 $R0
+  System::Call '*$R0(i, i, i.r2, i, i, i.r3)'
+  FileWrite $report ",default=$3,default-effects=$2"
+  SendMessage $mui.LicensePage.LicenseText 0x434 0 $R0 ; EM_EXGETSEL
+  System::Call '*$R0(i.r2, i.r3)'
+  FileWrite $report ",selection=$2/$3"
+  SendMessage $mui.LicensePage.LicenseText 0x4DD 0 $R0 ; EM_GETSCROLLPOS
+  System::Call '*$R0(i.r2, i.r3)'
+  FileWrite $report ",scroll=$2/$3"
+  SendMessage $mui.LicensePage.LicenseText @{WM_GETTEXTLENGTH} 0 0 $R2
+  FileWrite $report ",length=$R2"
+  SendMessage $mui.LicensePage.LicenseText 0xCE 0 0 $R2 ; EM_GETFIRSTVISIBLELINE
+  FileWrite $report ",line=$R2$\r$\n"
+  System::Free $R0
+!macroend
+Function inspectPalette
+  Call yabApplyTheme
+  System::Call 'user32::GetSysColor(i 8) i.r0'
+  FileWrite $report "system-color=$0$\r$\n"
+  SendMessage $mui.LicensePage.LicenseText @{EM_SETSEL} 25 42
+  SendMessage $mui.LicensePage.LicenseText 0xB6 0 8 ; EM_LINESCROLL
+  !insertmacro snapshot before
+  SendMessage $mui.LicensePage.LicenseText @{WM_GETFONT} 0 0 $R8
+  SendMessage $mui.LicensePage.LicenseText @{WM_SETFONT} $R8 1
+  !insertmacro snapshot font
+  SendMessage $mui.LicensePage.LicenseText 0x31A 0 0 ; WM_THEMECHANGED
+  !insertmacro snapshot theme
+  SendMessage $mui.LicensePage.LicenseText 0x2E3 0 0 ; WM_DPICHANGED_AFTERPARENT
+  !insertmacro snapshot dpi
+  SendMessage $mui.LicensePage.LicenseText @{WM_SETFONT} $R8 1
+  Call yabApplyTheme
+  !insertmacro snapshot reapplied
+  FileClose $report
+  SetErrorLevel 0
+  Quit
+FunctionEnd
+Section
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  for (const theme of [0, 1, 2]) {
+    execute(executable, [], { env: { ...process.env, YAB_PREVIEW_THEME: String(theme) } });
+    const report = await fs.readFile(path.join(scratch, 'palette.txt'), 'utf8');
+    const systemColor = Number(report.match(/^system-color=(\d+)/)[1]);
+    const expected = theme === 0 ? 0xF0F0F0 : theme === 1 ? 0x202020 : systemColor;
+    const readings = [...report.matchAll(/^(before|font|theme|dpi|reapplied):color=(\d+),effects=(-?\d+),default=(\d+),default-effects=(-?\d+),selection=(\d+\/\d+),scroll=(-?\d+\/-?\d+),length=(\d+),line=(\d+)/gm)];
+    assert.equal(readings.length, 5, report);
+    const baseline = readings[0];
+    assert.equal(baseline[6], '25/42');
+    assert.ok(Number(baseline[7].split('/')[1]) > 0, 'Exercise a scrolled document.');
+    for (const row of readings) {
+      assert.equal(Number(row[2]), expected, `theme=${theme}, event=${row[1]}\n${report}`);
+      assert.equal(Number(row[3]) & 0x40000000, 0, 'Use explicit foreground, not system automatic black.');
+      assert.equal(Number(row[4]), expected, 'Restore the default style as well as existing text.');
+      assert.equal(Number(row[5]) & 0x40000000, 0);
+      assert.equal(row[6], baseline[6], 'Preserve the reading selection.');
+      assert.equal(row[9], baseline[9], 'Keep the same first visible line after native font reflow.');
+      assert.equal(row[8], baseline[8], 'Do not reload or change the license text.');
+    }
+  }
+});
