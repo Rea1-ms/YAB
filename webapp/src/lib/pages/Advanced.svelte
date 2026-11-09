@@ -13,8 +13,12 @@
   let filter = $state('');
   let jsonDrafts = $state<Record<string, string>>({});
 
+  // 旧版首页头图字段仅为兼容配置保留，不在网页提供无效开关。
+  const configurableEntries = $derived(
+    Object.entries($argsStore ?? {}).filter(([key]) => key !== 'bannerVisibility'),
+  );
   const entries = $derived(
-    Object.entries($argsStore ?? {}).filter(([k]) =>
+    configurableEntries.filter(([k]) =>
       k.toLowerCase().includes(filter.trim().toLowerCase()),
     ),
   );
@@ -73,7 +77,7 @@
 
   <div class="adv-tools">
     <input class="input" placeholder={$t('按键名过滤…')} bind:value={filter} />
-    <span class="dim">{entries.length} / {Object.keys($argsStore ?? {}).length} {$t('项')}</span>
+    <span class="dim">{entries.length} / {configurableEntries.length} {$t('项')}</span>
   </div>
 
   <div class="card adv-list">

@@ -130,11 +130,41 @@ static DWORD CALLBACK ReadRichText(DWORD_PTR cookie, LPBYTE buffer, LONG count, 
     return 0;
 }
 
+static COLORREF LicenseTextColor() {
+    return highContrast ? GetSysColor(COLOR_WINDOWTEXT) : dark ? RGB(240, 240, 240) : RGB(32, 32, 32);
+}
+
+static void ColorLicense(HWND window) {
+    CHARFORMAT2W format = {};
+    format.cbSize = sizeof(format);
+    format.dwMask = CFM_COLOR;
+    format.crTextColor = LicenseTextColor();
+    // WM_SETFONT resets RichEdit's text to CFE_AUTOCOLOR. Restore an explicit
+    // foreground after native font/DPI handling, including the default style.
+    // SCF_ALL changes color without selecting text or reloading the document.
+    SendMessage(window, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
+    SendMessage(window, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&format));
+    SendMessage(window, EM_SETBKGNDCOLOR, 0,
+        highContrast ? GetSysColor(COLOR_WINDOW) : dark ? RGB(32, 32, 32) : GetSysColor(COLOR_WINDOW));
+}
+
+static LRESULT CALLBACK LicenseProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+    UINT_PTR, DWORD_PTR) {
+    const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+    if (message == WM_SETFONT || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE
+        || message == WM_DPICHANGED || message == WM_DPICHANGED_AFTERPARENT) ColorLicense(window);
+    if (message == WM_NCDESTROY) {
+        RemoveProp(window, L"YAB.License");
+        RemoveWindowSubclass(window, LicenseProc, subclassId);
+    }
+    return result;
+}
+
 static void FormatLicense(HWND window) {
     if (GetProp(window, L"YAB.License")) return;
     std::wstring original(static_cast<size_t>(GetWindowTextLength(window)) + 1, L'\0');
     original.resize(static_cast<size_t>(GetWindowText(window, &original[0], static_cast<int>(original.size()))));
-    const COLORREF text = highContrast ? GetSysColor(COLOR_WINDOWTEXT) : dark ? RGB(240, 240, 240) : RGB(32, 32, 32);
+    const COLORREF text = LicenseTextColor();
     std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Microsoft YaHei UI;}}"
         "{\\colortbl;\\red" + std::to_string(GetRValue(text)) + "\\green" + std::to_string(GetGValue(text))
         + "\\blue" + std::to_string(GetBValue(text)) + ";}\\cf1\\f0\\fs18 ";
@@ -583,7 +613,11 @@ static BOOL CALLBACK AttachControl(HWND window, LPARAM) {
         }
     }
     if (lstrcmpi(type, L"RichEdit20W") == 0 || lstrcmpi(type, L"RichEdit20A") == 0
-        || lstrcmpi(type, L"RICHEDIT50W") == 0) FormatLicense(window);
+        || lstrcmpi(type, L"RICHEDIT50W") == 0) {
+        SetWindowSubclass(window, LicenseProc, subclassId, 0);
+        FormatLicense(window);
+        ColorLicense(window);
+    }
     // RichEdit keeps its own formatted text in twips; preserve the fonts of
     // ordinary dialogs and text controls without flattening rich formatting.
     if (lstrcmp(type, L"#32770") == 0 || lstrcmp(type, L"Static") == 0 || lstrcmp(type, L"Button") == 0

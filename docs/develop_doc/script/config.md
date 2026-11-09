@@ -749,7 +749,7 @@
 ## `bannerVisibility`
 
 - **type** : `bool`
-- **description** : 是否显示ui首页banner(关闭后日志界面更大)
+- **description** : 旧版首页头图开关。当前网页没有头图，设置和高级页均不再显示；字段仅为兼容已有配置保留。
 
 ## `name`
 
