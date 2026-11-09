@@ -7,7 +7,7 @@ try:
 except ImportError:
     _notify = None
     _toast = None
-app_id = 'BlueArchiveAutoScript.exe'
+app_id = 'YAB'
 icon_path = '/assets/logo.png'
 
 
@@ -28,7 +28,7 @@ def notify(title=None, body=None):
     _notify(
         title=title,
         body=body,
-        app_id='BlueArchiveAutoScript.exe',
+        app_id=app_id,
         icon=root_path + icon_path,
     )
 
@@ -38,7 +38,7 @@ def toast(title=None, body=None, button=None, duration=None):
     return _toast(
         title=title,
         body=body,
-        app_id='BlueArchiveAutoScript.exe',
+        app_id=app_id,
         icon=root_path + icon_path,
         button=button,
         duration=duration
