@@ -246,6 +246,14 @@ class BaasService:
 
     # ---------- config management ----------
 
+    def push_test(self, config, params):
+        from core.push_config import validate_channels
+        from core.push_onepush import send_channel
+        config_path(config)
+        channel = params.get('channel')
+        validate_channels([channel], require_complete=True)
+        return send_channel(channel, 'YAB 通知测试', '收到这条消息，说明推送渠道配置成功。')
+
     def config_set(self, config, params):
         from core.config.config_set import ConfigSet
         if params['key'] == 'name':

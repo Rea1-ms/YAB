@@ -2,6 +2,8 @@ import requests
 import json
 from core.utils import Logger
 from core.config.generated_user_config import Config
+from core.push_config import legacy_channels
+from core.push_onepush import send_channels
 serverchan_url = 'https://sctapi.ftqq.com/{KEY}.send'
 
 headers = {
@@ -20,26 +22,11 @@ def push(logger: Logger, config: Config, error: str = None):
         data['desp'] = "all activities finished"
 
     if data:
-        if config.push_json != '':
-            push_json(logger, config.push_json, data)
-        if config.push_serverchan != '':
-            push_serverchan(logger, serverchan_url.format(KEY=config.push_serverchan), data)
-        if config.push_feishu != '':
-            push_feishu(logger, config.push_feishu, data)
-        if config.push_wecom != '':
-            push_wecom(logger, config.push_wecom, data)
-        if (
-            config.push_telegram_bot_token != ''
-            and config.push_telegram_chat_id != ''
-        ):
-            push_telegram(
-                logger,
-                config.push_telegram_bot_token,
-                config.push_telegram_chat_id,
-                data,
-                config.push_telegram_proxy,
-                config.push_telegram_api
-        )
+        channels = getattr(config, 'push_onepush', None)
+        if channels is None:
+            channels = legacy_channels(vars(config))
+        return send_channels(logger, channels, data['title'], data['desp'])
+    return []
 
 
 def push_json(logger: Logger, url: str, data: dict):

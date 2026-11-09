@@ -25,6 +25,7 @@ MULTI_EMULATOR_NAMES = {
 
 
 def build_meta(service: BaasService):
+    from core.push_config import provider_catalog
     from core.config import default_config
     from core.config.config_set import ConfigSet
     if ConfigSet.static_config is None:
@@ -43,6 +44,7 @@ def build_meta(service: BaasService):
             e['func_name']: e['event_name']
             for e in json.loads(default_config.EVENT_DEFAULT_CONFIG)
         },
+        'push_providers': provider_catalog(),
     }
 
 
@@ -113,6 +115,7 @@ def register_topics(hub: Hub, service: BaasService):
 
     hub.register_rpc('ConfigArg', 'set', service.config_set)
     hub.register_rpc('ConfigArg', 'set_sweep', service.set_sweep)
+    hub.register_rpc('ConfigArg', 'push_test', service.push_test)
     hub.register_rpc('Assets', 'get', lambda config, _params: service.provide_assets(config))
 
     hub.register_rpc('EventConfig', 'set_event', service.event_set)

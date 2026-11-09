@@ -11,6 +11,21 @@ export interface Meta {
   servers: string[];
   multi_emulator_names: Record<string, string>;
   event_names: Record<string, string>;
+  push_providers: PushProvider[];
+}
+
+export interface PushProvider {
+  id: string;
+  label: string;
+  required: string[];
+  optional: string[];
+}
+
+export interface PushChannel {
+  provider: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  proxy?: string;
 }
 
 /** ConfigScan topic 条目 */

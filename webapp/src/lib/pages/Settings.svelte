@@ -7,6 +7,7 @@
   import PanelAccordion from '../components/fields/PanelAccordion.svelte';
   import WebServerSettings from '../components/WebServerSettings.svelte';
   import DesktopSettings from '../components/DesktopSettings.svelte';
+  import PushSettings from '../components/PushSettings.svelte';
   import type { Meta } from '../types';
 
   let { dir }: { dir: string } = $props();
@@ -80,19 +81,6 @@
         },
         { key: 'multiEmulatorName', label: '多开模拟器类型', kind: 'select', optKey: 'multi_emulator_names' },
         { key: 'emulatorMultiInstanceNumber', label: '多开编号', kind: 'text' },
-      ],
-    },
-    {
-      title: '推送通知',
-      fields: [
-        { key: 'push_after_error', label: '出错时推送', kind: 'switch' },
-        { key: 'push_after_completion', label: '完成后推送', kind: 'switch' },
-        { key: 'push_serverchan', label: 'Server酱 SendKey', kind: 'text' },
-        { key: 'push_feishu', label: '飞书 Webhook', kind: 'text' },
-        { key: 'push_wecom', label: '企业微信 Webhook', kind: 'text' },
-        { key: 'push_telegram_bot_token', label: 'Telegram Bot Token', kind: 'text' },
-        { key: 'push_telegram_chat_id', label: 'Telegram Chat ID', kind: 'text' },
-        { key: 'push_telegram_api', label: 'Telegram API', kind: 'text' },
       ],
     },
   ];
@@ -215,6 +203,7 @@
         {/if}
       </div>
     {/each}
+    <PushSettings {dir} />
   </div>
 
   {#if settingsPanels.length > 0}

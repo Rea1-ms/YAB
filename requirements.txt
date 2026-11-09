@@ -13,6 +13,7 @@ starlette >= 0.37.2, < 1.0
 uvicorn[standard] >= 0.30.6
 
 requests
+onepush == 1.10.0
 dulwich
 psutil
 tqdm
