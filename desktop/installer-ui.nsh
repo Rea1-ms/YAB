@@ -176,17 +176,12 @@ Var yabSidebarBitmap
       IntOp $0 $0 & 1
       ${if} $0 == 0
         StrCpy $yabDarkMode 1
-        ; These optional theme APIs are available on supported Windows 10/11.
-        System::Call 'kernel32::GetModuleHandleW(w "uxtheme.dll") p.r0'
-        System::Call 'kernel32::GetProcAddress(p r0, p 135) p.r1'
-        ${if} $1 != 0
-          System::Call '::$1(i 1) i.r2'
-        ${endif}
       ${endif}
     ${endif}
     Pop $2
     Pop $1
     Pop $0
+    YabInstallUI::Initialize /NOUNLOAD $yabDarkMode $yabHighContrast
   FunctionEnd
 
   Function ${PREFIX}yabColorWindow
@@ -330,9 +325,15 @@ Var yabSidebarBitmap
   Function yabBrowseDirectory
     Pop $0
     ${NSD_GetText} $yabDirectoryInput $0
-    nsDialogs::SelectFolderDialog "$(^BrowseForFolder)" "$0"
+    YabInstallUI::BrowseFolder /NOUNLOAD "$(^BrowseForFolder)" "$0"
     Pop $1
     ${if} $1 == error
+      ; Retain browsing on systems where the modern shell dialog is unavailable.
+      nsDialogs::SelectFolderDialog "$(^BrowseForFolder)" "$0"
+      Pop $1
+    ${endif}
+    ${if} $1 == error
+    ${orIf} $1 == ""
       Return
     ${endif}
     StrCpy $INSTDIR $1
@@ -387,6 +388,13 @@ Var yabSidebarBitmap
 !macro customInit
   Call yabInitTheme
   StrCpy $yabDirectoryVisited 0
+!macroend
+
+; The builder invokes this before architecture and elevation checks.
+!macro preInit
+  !ifndef BUILD_UNINSTALLER
+    Call yabInitTheme
+  !endif
 !macroend
 
 ; Use our own directory page, replacing the builder's late path mutation.

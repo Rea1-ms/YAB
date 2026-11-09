@@ -28,15 +28,35 @@ function extractionWithProgress(source) {
   return patched;
 }
 
-function prepareInstallerProgress(release) {
+function installerTemplateRoot() {
   const builderRoot = path.dirname(require.resolve('app-builder-lib/package.json', {
     paths: [path.dirname(require.resolve('electron-builder'))],
   }));
-  const source = fs.readFileSync(path.join(builderRoot, 'templates/nsis/include/extractAppPackage.nsh'), 'utf8');
+  return path.join(builderRoot, 'templates/nsis');
+}
+
+function prepareInstallerProgress(release) {
+  const templateRoot = installerTemplateRoot();
+  const source = fs.readFileSync(path.join(templateRoot, 'include/extractAppPackage.nsh'), 'utf8');
   const includeDir = path.join(release, 'nsis-progress');
   fs.mkdirSync(includeDir, { recursive: true });
+  // Preserve the upstream working-directory layout. Several builder templates
+  // share names with NSIS built-ins (notably multiUser.nsh), so adding an
+  // include path alone can select a different implementation.
+  fs.cpSync(templateRoot, includeDir, { recursive: true });
   fs.writeFileSync(path.join(includeDir, 'extractAppPackage.nsh'), extractionWithProgress(source));
+  const uninstaller = fs.readFileSync(path.join(templateRoot, 'uninstaller.nsh'), 'utf8');
+  fs.writeFileSync(path.join(includeDir, 'uninstaller.nsh'), uninstallerWithTheme(uninstaller));
   return includeDir;
 }
 
-module.exports = { extractionWithProgress, prepareInstallerProgress };
+function uninstallerWithTheme(source) {
+  const normalized = source.replaceAll('\r\n', '\n');
+  const anchor = 'Function un.onInit\n';
+  if (normalized.split(anchor).length !== 2) throw new Error('卸载器模板已变化，需要检查初始化主题');
+  // customUnInit runs after process and elevation checks. Initialize the local
+  // drawing policy before any of those checks can display a message box.
+  return normalized.replace(anchor, anchor + '!define YAB_UNINSTALLER_EARLY_THEME\n  Call un.yabInitTheme\n');
+}
+
+module.exports = { extractionWithProgress, prepareInstallerProgress, uninstallerWithTheme, installerTemplateRoot };

@@ -12,6 +12,10 @@ source（原始素材目录）保留上游 16 像素的未勾选、勾选和半�
 普通发行直接使用已保存的图片，不联网或重新生成。
 生成后再重建原生插件，并重新生成安装包和完整压缩包。
 
+原图和生成头文件受 desktop/.gitattributes（桌面换行约定）约束，固定为 LF（换行格式）。
+构建前校验原图、图片及头文件摘要；提交时也核对暂存与检出后的字节，避免自动换行转换破坏校验。
+更完整的构建、卸载残留与发行核对说明见仓库 docs/develop_doc/desktop_installer.md（桌面安装器维护）。
+
 资源、颜色和尺寸分开管理的方式参考了
 [WPF UI（桌面界面库）](https://github.com/lepoco/wpfui/blob/main/src/Wpf.Ui/Resources/Fonts.xaml)
 和 [FluentIcons（多框架图标封装）](https://github.com/davidxuang/FluentIcons)。

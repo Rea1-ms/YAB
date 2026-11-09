@@ -23,7 +23,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='installer-native-', dir=output))
     exports = scratch / 'exports.def'
-    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
+    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Initialize\n BrowseFolder\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
     assets = desktop / 'assets/checkbox'
     manifest = json.loads((assets / 'manifest.json').read_text(encoding='utf-8'))
     inputs = {desktop / 'native/checkbox-assets.h': manifest['headerSha256']}
@@ -41,7 +41,7 @@ def main():
         '/D_WIN32_WINNT=0x0A00', '"' + str(desktop / 'native/installer-ui.cpp') + '"',
         '"' + str(compiled_resources) + '"', '/link',
         '/DEF:"' + str(exports) + '"', '/OUT:"' + str(desktop / 'assets/YabInstallUI.dll') + '"',
-        'user32.lib', 'gdi32.lib', 'gdiplus.lib', 'comctl32.lib', 'uxtheme.lib', 'shell32.lib', 'dwmapi.lib', 'shlwapi.lib']
+        'user32.lib', 'gdi32.lib', 'gdiplus.lib', 'comctl32.lib', 'uxtheme.lib', 'shell32.lib', 'dwmapi.lib', 'shlwapi.lib', 'ole32.lib', 'uuid.lib']
     response.write_text(' '.join(arguments), encoding='utf-8')
     setup = Path(installation) / 'VC/Auxiliary/Build/vcvarsall.bat'
     command = scratch / 'build.cmd'

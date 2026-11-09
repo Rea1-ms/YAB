@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { build, Platform, Arch } = require('electron-builder');
-const { prepareInstallerProgress } = require('./installer-progress.cjs');
+const { prepareInstallerProgress, installerTemplateRoot } = require('./installer-progress.cjs');
 
 async function main() {
   if (process.platform !== 'win32' || process.arch !== 'x64') {
@@ -48,8 +48,13 @@ async function main() {
   const artifacts = await build({ targets, config, publish: 'never',
     // Command-line include paths precede the builder's header include paths.
     // Use its normal main script and uninstaller generation/signing pipeline.
-    effectiveOptionComputed([, commands]) {
-      commands['!addincludedir'] = `"${progressIncludes}"`;
+    effectiveOptionComputed([defines, commands]) {
+      defines.YAB_REQUIRE_EARLY_THEME = null;
+      // NSIS checks its working directory before include paths. The builder's
+      // own template directory contains uninstaller.nsh, unlike extraction's
+      // nested include. Compile from our generated directory so both win.
+      commands['!cd'] = `"${progressIncludes}"`;
+      commands['!addincludedir'] = [`"${progressIncludes}"`, `"${installerTemplateRoot()}"`];
       return false;
     },
     projectDir: __dirname });

@@ -4,8 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
-const { spawnSync } = require('child_process');
-const { extractionWithProgress, prepareInstallerProgress } = require('../installer-progress.cjs');
+const { spawn, spawnSync } = require('child_process');
+const { extractionWithProgress, prepareInstallerProgress, uninstallerWithTheme } = require('../installer-progress.cjs');
 
 async function nsisCompiler() {
   const cache = path.resolve(__dirname, '../build/cache/electron-builder');
@@ -59,6 +59,7 @@ Var installMode
 Var testUpdated
 Var testLog
 Var testEmptyBusy
+Var testEmptyAttempts
 !macro _isUpdated _a _b _t _f
   StrCmp $testUpdated "1" "@{_t}" "@{_f}"
 !macroend
@@ -71,9 +72,19 @@ Var testEmptyBusy
   FileSeek $R9 0 END
   FileWrite $R9 "$INSTDIR|$OUTDIR$\r$\n"
   FileClose $R9
+  IntOp $testEmptyAttempts $testEmptyAttempts + 1
   @{if} $testEmptyBusy == "1"
     SetErrors
+  @{elseIf} $testEmptyBusy == "once"
+  @{andIf} $testEmptyAttempts == 1
+    SetErrors
   @{endif}
+!macroend
+!macro yabRemoveEmptyProgramDirectories
+  FileOpen $R9 "$EXEDIR\child-cleanup.txt" a
+  FileSeek $R9 0 END
+  FileWrite $R9 "$INSTDIR\resources\backend\app|$OUTDIR$\r$\n"
+  FileClose $R9
 !macroend
 !include "${path.resolve(__dirname, '../installer.nsh')}"
 Name "YAB uninstall policy test"
@@ -97,6 +108,7 @@ Function un.onInit
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
   StrCpy $installMode "current"
   StrCpy $testUpdated "0"
+  StrCpy $testEmptyAttempts 0
   ReadEnvStr $testEmptyBusy "YAB_PREVIEW_EMPTY_BUSY"
   @{GetParameters} $R0
   @{GetOptions} $R0 "--updated" $R1
@@ -114,6 +126,8 @@ Section
   WriteUninstaller "${uninstaller}"
 SectionEnd
 Section Uninstall
+  FileOpen $testLog "$EXEDIR\child-cleanup.txt" w
+  FileClose $testLog
   FileOpen $testLog "$EXEDIR\empty-cleanup.txt" w
   FileClose $testLog
   FileOpen $testLog "$EXEDIR\result.txt" w
@@ -131,10 +145,11 @@ SectionEnd
       { name: 'upgrade', args: ['--updated'], state: 1, remove: false },
       { name: 'upgrade after uncheck', args: ['--updated', '--uncheck'], state: 0, remove: false },
       { name: 'nonempty or busy folder', args: [], state: 1, remove: false, busy: true },
+      { name: 'child directory released on retry', args: [], state: 1, remove: false, transient: true },
     ];
     for (const scenario of cases) {
       execute(uninstaller, ['/S', ...scenario.args, `_?=${installDir}`], {
-        env: { ...process.env, YAB_PREVIEW_EMPTY_BUSY: scenario.busy ? '1' : '0' },
+        env: { ...process.env, YAB_PREVIEW_EMPTY_BUSY: scenario.busy ? '1' : scenario.transient ? 'once' : '0' },
       });
       const lines = (await fs.readFile(path.join(scratch, 'result.txt'), 'utf8')).trim().split(/\r?\n/);
       assert.equal(lines[0], `state=${scenario.state}`, scenario.name);
@@ -142,13 +157,18 @@ SectionEnd
       assert.deepEqual(lines.slice(1), scenario.remove ? [path.join(installDir, 'config'),
         path.join(appData, 'yab-desktop')] : [], scenario.name);
       const cleanup = (await fs.readFile(path.join(scratch, 'empty-cleanup.txt'), 'utf8')).trim();
+      const children = (await fs.readFile(path.join(scratch, 'child-cleanup.txt'), 'utf8')).trim();
       if (scenario.args.includes('--updated')) {
         assert.equal(cleanup, '', 'Updates must leave the installation directory available.');
+        assert.equal(children, '', 'Updates must also skip the final child-directory cleanup.');
       } else {
         const attempts = cleanup.split(/\r?\n/);
-        assert.equal(attempts.length, scenario.busy ? 3 : 1, 'Empty-directory cleanup has bounded retries.');
+        assert.equal(attempts.length, scenario.busy ? 3 : scenario.transient ? 2 : 1, 'Empty-directory cleanup has bounded retries.');
         assert.ok(attempts.every(line => line.toLowerCase() === `${installDir}|${process.env.TEMP}`.toLowerCase()),
           'Final cleanup runs outside the installation directory.');
+        assert.deepEqual(children.split(/\r?\n/).map(line => line.toLowerCase()),
+          attempts.map(() => `${path.join(installDir, 'resources/backend/app')}|${process.env.TEMP}`.toLowerCase()),
+          'Each final retry includes child directories, not just the installation root.');
       }
     }
     const before = await fs.readFile(path.join(scratch, 'result.txt'), 'utf8');
@@ -165,7 +185,7 @@ SectionEnd
   t.diagnostic(`Uninstaller previews (no deletion): ${scratch}`);
 });
 
-test('generated uninstall cleanup includes the installer icon outside the application manifest', {
+test('generated uninstall cleanup includes the icon and retries only packaged empty directories deepest first', {
   skip: process.platform !== 'win32',
 }, async t => {
   const compiler = await nsisCompiler();
@@ -177,7 +197,12 @@ test('generated uninstall cleanup includes the installer icon outside the applic
   const installDir = path.join(scratch, 'test-install');
   await fs.mkdir(path.join(backend, 'toolkit'), { recursive: true });
   await fs.mkdir(path.join(backend, 'app/server'), { recursive: true });
-  await fs.mkdir(path.join(appOutDir, 'resources'), { recursive: true });
+  await fs.mkdir(path.join(appOutDir, 'resources/backend/app/core'), { recursive: true });
+  await fs.mkdir(path.join(appOutDir, 'resources/backend/app/$literal'), { recursive: true });
+  await fs.mkdir(path.join(appOutDir, 'resources/backend/toolkit'), { recursive: true });
+  const linkedContent = path.join(scratch, 'linked-content');
+  await fs.mkdir(path.join(linkedContent, 'must-not-traverse'), { recursive: true });
+  await fs.symlink(linkedContent, path.join(appOutDir, 'resources/backend/app/user-link'), 'junction');
   await fs.writeFile(path.join(backend, 'toolkit/uv.exe'), 'fixture, not an executable');
   await fs.writeFile(path.join(backend, 'bundle.json'), '{"format":2}');
   await fs.writeFile(path.join(backend, 'app/server/__main__.py'), '# fixture\n');
@@ -223,6 +248,8 @@ SectionEnd
 Section Uninstall
   FileOpen $testLog "$EXEDIR\files-${name}.txt" w
   !insertmacro customRemoveFiles
+  FileWrite $testLog "final-empty-directories$\r$\n"
+  !insertmacro yabRemoveEmptyProgramDirectories
   FileClose $testLog
 SectionEnd
 `);
@@ -230,14 +257,28 @@ SectionEnd
     execute(installer, ['/S']);
     execute(uninstaller, ['/S', `_?=${installDir}`]);
     const lines = (await fs.readFile(path.join(scratch, `files-${name}.txt`), 'utf8')).trim().split(/\r?\n/);
-    assert.equal(lines.at(-1), `RMDir|${installDir}`, 'Remove the root nonrecursively after its contents.');
-    assert.deepEqual(lines.sort(), [
+    const split = lines.indexOf('final-empty-directories');
+    const initial = lines.slice(0, split);
+    assert.equal(initial.at(-1), `RMDir|${installDir}`, 'Remove the root nonrecursively after its contents.');
+    assert.deepEqual(initial.sort(), [
       `Delete|${path.join(installDir, 'YAB.exe')}`,
       `RMDir /r|${path.join(installDir, 'resources')}`,
       ...(withIcon ? [`Delete|${path.join(installDir, 'uninstallerIcon.ico')}`] : []),
       `Delete|${path.join(installDir, 'Uninstall YAB.exe')}`,
       `RMDir|${installDir}`,
     ].sort(), 'Only packaged files and installer-owned files are removed.');
+    const final = lines.slice(split + 1);
+    const relativeDirectories = ['resources/backend/app/$literal', 'resources/backend/app/core',
+      'resources/backend/app', 'resources/backend/toolkit', 'resources/backend', 'resources'];
+    assert.deepEqual(final.slice().sort(), relativeDirectories.map(directory => `RMDir|${path.join(installDir, directory)}`).sort());
+    for (const directory of relativeDirectories) {
+      const parent = path.dirname(directory);
+      if (parent === '.') continue;
+      assert.ok(final.indexOf(`RMDir|${path.join(installDir, directory)}`) < final.indexOf(`RMDir|${path.join(installDir, parent)}`),
+        'Children are removed before parents.');
+    }
+    assert.ok(final.every(line => !line.includes('/r') && !line.includes('config') && !line.includes('user-link')),
+      'Final retry is nonrecursive and never follows directory links or includes config.');
   }
   t.diagnostic(`Generated uninstall cleanup previews (no deletion): ${scratch}`);
 });
@@ -908,6 +949,22 @@ test('the packaged extraction template keeps builder retries and drives the real
 
   const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-extraction-'));
   const includeDir = prepareInstallerProgress(scratch);
+  const uninstallerSource = (await fs.readFile(path.join(builderRoot, 'templates/nsis/uninstaller.nsh'), 'utf8'))
+    .replaceAll('\r\n', '\n');
+  const themedUninstaller = await fs.readFile(path.join(includeDir, 'uninstaller.nsh'), 'utf8');
+  for (const entry of await fs.readdir(path.dirname(templateDir), { withFileTypes: true })) {
+    if (entry.isFile() && entry.name !== 'uninstaller.nsh') {
+      assert.deepEqual(await fs.readFile(path.join(includeDir, entry.name)),
+        await fs.readFile(path.join(path.dirname(templateDir), entry.name)),
+        'Retain upstream root templates so their names take precedence over NSIS built-ins.');
+    }
+  }
+  assert.equal(themedUninstaller, uninstallerWithTheme(uninstallerSource));
+  assert.equal(themedUninstaller.replace('!define YAB_UNINSTALLER_EARLY_THEME\n  Call un.yabInitTheme\n', ''), uninstallerSource,
+    'Early theme initialization must preserve every upstream uninstall check.');
+  assert.throws(() => uninstallerWithTheme(uninstallerSource.replace('Function un.onInit', 'Function un.changed')),
+    /卸载器模板已变化/);
+  assert.throws(() => uninstallerWithTheme(uninstallerSource + '\nFunction un.onInit\n'), /卸载器模板已变化/);
   const payload = path.join(scratch, 'payload.txt');
   const archive = path.join(scratch, 'payload.7z');
   await fs.writeFile(payload, 'YAB isolated extraction check\n');
@@ -1205,6 +1262,373 @@ SectionEnd
     }
     t.diagnostic(`theme=${theme}: body=${body}, footer=${footer}`);
   }
+});
+
+test('native installer warnings follow dark, light and high-contrast palettes without changing results', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/warning-dialog-'));
+  for (const palette of [{ name: 'dark', theme: 0, contrast: 0 }, { name: 'light', theme: 1, contrast: 0 },
+    { name: 'high-contrast', theme: 0, contrast: 1 }]) {
+    const source = path.join(scratch, `${palette.name}.nsi`);
+    const executable = path.join(scratch, `${palette.name}.exe`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} ${palette.theme}
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB warning test"
+; This preview exits after exercising its warnings; exit confirmation has a
+; separate regression and must not leave an unhandled extra modal dialog.
+!undef MUI_ABORTWARNING
+!undef MUI_UNABORTWARNING
+OutFile "${executable}"
+RequestExecutionLevel user
+XPStyle on
+Var report
+Var step
+Var sampled
+Var expectedButton
+Page custom testPage
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro customHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+  FileOpen $report "$EXEDIR\result-${palette.name}.txt" w
+FunctionEnd
+Function testPage
+  nsDialogs::Create 1018
+  Pop $0
+  @{NSD_CreateLabel} 0 0 100% 30u "Warning-dialog preview; no installation or process termination."
+  Pop $0
+  Call yabApplyTheme
+  ; Override only the plugin's local policy, never the system accessibility settings.
+  YabInstallUI::Apply /NOUNLOAD ${palette.theme === 0 ? 1 : 0} ${palette.contrast}
+  @{NSD_CreateTimer} showWarnings 50
+  @{NSD_CreateTimer} inspectWarning 75
+  nsDialogs::Show
+FunctionEnd
+Function showWarnings
+  @{NSD_KillTimer} showWarnings
+  StrCpy $step 1
+  StrCpy $sampled 0
+  StrCpy $expectedButton 4
+  ; Same flags and prompt as the builder's process/file-in-use warning.
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "YAB 无法关闭。$\n请手动关闭它，然后单击重试以继续。" /SD IDCANCEL IDRETRY retried
+  Abort "Retry was not preserved"
+  retried:
+  FileWriteUTF16LE $report "result-1=4$\r$\n"
+  StrCpy $step 2
+  StrCpy $sampled 0
+  StrCpy $expectedButton 2
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "YAB 无法关闭。$\n请手动关闭它，然后单击重试以继续。" /SD IDCANCEL IDCANCEL cancelled
+  Abort "Cancel was not preserved"
+  cancelled:
+  FileWriteUTF16LE $report "result-2=2$\r$\n"
+  StrCpy $step 3
+  StrCpy $sampled 0
+  StrCpy $expectedButton 1
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "YAB 正在运行。是否继续？" /SD IDOK IDOK confirmed
+  Abort "OK was not preserved"
+  confirmed:
+  FileWriteUTF16LE $report "result-3=1$\r$\n"
+  StrCpy $step 4
+  StrCpy $sampled 0
+  StrCpy $expectedButton 2
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "YAB 正在运行。是否继续？" /SD IDOK IDCANCEL declined
+  Abort "Cancel was not preserved"
+  declined:
+  FileWriteUTF16LE $report "result-4=2$\r$\n"
+  StrCpy $step 5
+  StrCpy $sampled 0
+  ; Windows uses IDCANCEL for the lone OK control but returns IDOK.
+  StrCpy $expectedButton 2
+  MessageBox MB_OK|MB_ICONSTOP "YAB 测试错误提示。" /SD IDOK
+  FileWriteUTF16LE $report "result-5=1$\r$\n"
+  @{NSD_KillTimer} inspectWarning
+  FileClose $report
+  ; Leave the timer callback before closing the wizard's main message loop.
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_CLOSE}, p 0, p 0)'
+FunctionEnd
+Function inspectWarning
+  System::Call 'user32::GetLastActivePopup(p $HWNDPARENT) p.r0'
+  @{if} $0 == $HWNDPARENT
+    Return
+  @{endif}
+  GetDlgItem $1 $0 $expectedButton
+  @{if} $1 P= 0
+    Return
+  @{endif}
+  System::Call 'user32::GetPropW(p r0, w "YAB.MessageBox") p.r2'
+  ; Draw synchronously before sampling; a hidden/inactive desktop can return -1.
+  System::Call 'user32::RedrawWindow(p r0, p 0, p 0, i 0x185)'
+  System::Call 'user32::GetDC(p r0) p.r5'
+  System::Call 'gdi32::GetPixel(p r5, i 5, i 5) i.r6'
+  System::Call 'user32::ReleaseDC(p r0, p r5)'
+  @{if} $6 == -1
+    Return
+  @{endif}
+  @{if} $sampled == 0
+    StrCpy $sampled 1
+    Return
+  @{endif}
+  FileWriteUTF16LE $report "themed-$step=$2$\r$\nbody-$step=$6$\r$\n"
+  System::Call 'user32::GetClientRect(p r0, @r3)'
+  System::Call '*$3(i, i, i, i.r4)'
+  IntOp $4 $4 - 5
+  System::Call 'user32::GetDC(p r0) p.r5'
+  System::Call 'gdi32::GetPixel(p r5, i 5, i r4) i.r6'
+  System::Call 'user32::ReleaseDC(p r0, p r5)'
+  FileWriteUTF16LE $report "footer-$step=$6$\r$\n"
+  System::Call 'user32::GetDC(p r1) p.r5'
+  System::Call 'gdi32::GetPixel(p r5, i 8, i 7) i.r6'
+  System::Call 'user32::ReleaseDC(p r1, p r5)'
+  FileWriteUTF16LE $report "button-$step=$6$\r$\n"
+  ; Click the real native button so the MessageBox returns its original ID.
+  System::Call 'user32::PostMessageW(p r1, i @{BM_CLICK}, p 0, p 0)'
+FunctionEnd
+Section
+  SetErrorLevel 17
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    const run = spawnSync(executable, [], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    assert.ifError(run.error);
+    assert.equal(run.status, 1, 'Close the preview with the native user-cancel result.');
+    const report = await fs.readFile(path.join(scratch, `result-${palette.name}.txt`), 'utf16le');
+    const themed = palette.theme === 0 && !palette.contrast;
+    for (let step = 1; step <= 5; step++) {
+      assert.match(report, new RegExp(`themed-${step}=${Number(themed)}\\r?\\n`), palette.name);
+      const body = Number(report.match(new RegExp(`body-${step}=(-?\\d+)`))[1]);
+      const footer = Number(report.match(new RegExp(`footer-${step}=(-?\\d+)`))[1]);
+      assert.notEqual(body, -1, 'The body pixel must come from a rendered dialog.');
+      assert.notEqual(footer, -1, 'The footer pixel must come from a rendered dialog.');
+      if (themed) {
+        assert.equal(body, 0x202020);
+        assert.equal(footer, 0x202020);
+        const buttonColor = step === 2 || step === 4 ? 0x333333 : 0xFFCD60;
+        assert.match(report, new RegExp(`button-${step}=${buttonColor}\\r?\\n`));
+      }
+    }
+    for (const [index, expected] of [4, 2, 1, 2, 1].entries()) {
+      assert.match(report, new RegExp(`result-${index + 1}=${expected}\\r?\\n`));
+    }
+  }
+  t.diagnostic(`Native warning previews (no installation): ${scratch}`);
+});
+
+test('initialization and real install/uninstall worker threads theme their native warnings', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/worker-dialog-'));
+  for (const uninstall of [false, true]) for (const palette of [
+    { name: 'dark', theme: 0, contrast: 0 }, { name: 'light', theme: 1, contrast: 0 },
+    { name: 'high-contrast', theme: 0, contrast: 1 },
+  ]) {
+    const prefix = uninstall ? 'un.' : '.';
+    const name = `${uninstall ? 'uninstall' : 'install'}-${palette.name}`;
+    const source = path.join(scratch, `${name}.nsi`);
+    const generator = path.join(scratch, `${name}-generator.exe`);
+    const executable = path.join(scratch, `${name}.exe`);
+    let init = String.raw`
+Function ${prefix}onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  StrCpy $yabSidebarBitmap 0
+  ${uninstall ? '' : '!insertmacro preInit'}
+  FileOpen $report "$EXEDIR\\${name}.txt" w
+  System::Call 'kernel32::GetCurrentThreadId() i.r0'
+  FileWrite $report "ui-thread=$0$\r$\n"
+  ${palette.contrast ? 'YabInstallUI::Initialize /NOUNLOAD 1 1' : ''}
+  MessageBox MB_OK|MB_ICONEXCLAMATION "YAB-PREVIEW:init:1" /SD IDOK
+  FileWrite $report "init-result=1$\r$\n"
+  ${uninstall ? '' : 'GetFunctionAddress $0 yabDirectoryPage\n  GetFunctionAddress $0 yabDirectoryPageLeave'}
+FunctionEnd
+`.replaceAll('@{', '${');
+    if (uninstall) init = uninstallerWithTheme(init);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+${uninstall ? '!define BUILD_UNINSTALLER' : ''}
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} ${palette.theme}
+!macroend
+; Only the simulated high-contrast case overrides the local plugin policy.
+; Dark/light use the actual shared running-check hook to attach the worker.
+!macro IS_POWERSHELL_AVAILABLE
+  ${palette.contrast ? 'YabInstallUI::Initialize /NOUNLOAD 1 1' : ''}
+!macroend
+!macro _CHECK_APP_RUNNING
+  System::Call 'kernel32::GetCurrentThreadId() i.r0'
+  FileWrite $report "worker-thread=$0$\r$\n"
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "YAB-PREVIEW:worker:1" /SD IDCANCEL IDRETRY retried
+  SetErrorLevel 21
+  Quit
+  retried:
+  FileWrite $report "worker-result-1=4$\r$\n"
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "YAB-PREVIEW:worker:2" /SD IDCANCEL IDCANCEL cancelled
+  SetErrorLevel 22
+  Quit
+  cancelled:
+  FileWrite $report "worker-result-2=2$\r$\n"
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "YAB-PREVIEW:worker:3" /SD IDOK IDOK confirmed
+  SetErrorLevel 23
+  Quit
+  confirmed:
+  FileWrite $report "worker-result-3=1$\r$\n"
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "YAB-PREVIEW:worker:4" /SD IDOK IDCANCEL declined
+  SetErrorLevel 24
+  Quit
+  declined:
+  FileWrite $report "worker-result-4=2$\r$\n"
+  MessageBox MB_OK|MB_ICONSTOP "YAB-PREVIEW:worker:5" /SD IDOK
+  FileWrite $report "worker-result-5=1$\r$\n"
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+!undef MUI_ABORTWARNING
+!undef MUI_UNABORTWARNING
+Name "YAB isolated worker preview"
+OutFile "${uninstall ? generator : executable}"
+RequestExecutionLevel user
+AutoCloseWindow true
+Var report
+${uninstall ? '!insertmacro MUI_UNPAGE_INSTFILES' : '!insertmacro MUI_PAGE_INSTFILES'}
+!insertmacro MUI_LANGUAGE SimpChinese
+; Avoid all uninstall success/cleanup callbacks. These are message-box previews.
+!insertmacro yabUIHeader
+${init}
+${uninstall ? `Section\n  WriteUninstaller "${executable}"\nSectionEnd\nSection Uninstall` : 'Section'}
+  SetDetailsPrint none
+  !insertmacro customCheckAppRunning
+  FileClose $report
+  SetErrorLevel 0
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    if (uninstall) execute(generator, ['/S']);
+    const preview = spawn(executable, uninstall ? [`_?=${scratch}`] : [], { windowsHide: true, timeout: 35000 });
+    const finished = new Promise((resolve, reject) => {
+      preview.once('error', reject);
+      preview.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    const pixels = path.join(scratch, `${name}-pixels.json`);
+    execute('pwsh.exe', ['-NoProfile', '-File', path.join(__dirname, 'native-dialog-probe.ps1'),
+      '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', pixels]);
+    assert.deepEqual(await finished, { code: 0, signal: null }, name);
+    const report = await fs.readFile(path.join(scratch, `${name}.txt`), 'utf8');
+    const uiThread = Number(report.match(/ui-thread=(\d+)/)?.[1]);
+    const workerThread = Number(report.match(/worker-thread=(\d+)/)?.[1]);
+    assert.ok(uiThread > 0 && workerThread > 0);
+    assert.notEqual(workerThread, uiThread, 'Exercise the real section worker, not a GUI timer.');
+    assert.match(report, /init-result=1/);
+    for (const [index, value] of [4, 2, 1, 2, 1].entries()) {
+      assert.match(report, new RegExp(`worker-result-${index + 1}=${value}`));
+    }
+    const samples = JSON.parse((await fs.readFile(pixels, 'utf8')).replace(/^\uFEFF/, ''));
+    assert.equal(samples.length, 6, name);
+    for (const [index, sample] of samples.entries()) {
+      assert.equal(sample.Thread, index === 0 ? uiThread : workerThread, name);
+      assert.equal(sample.Themed, palette.theme === 0 && !palette.contrast, name);
+      assert.notEqual(sample.Body, -1);
+      assert.notEqual(sample.Footer, -1);
+      if (sample.Themed) {
+        assert.equal(sample.Body, 0x202020, name);
+        assert.equal(sample.Footer, 0x202020, name);
+        assert.equal(sample.Button, index === 2 || index === 4 ? 0x333333 : 0xFFCD60, name);
+      }
+    }
+  }
+  t.diagnostic(`Real initialization and section-thread previews: ${scratch}`);
+});
+
+test('modern folder browsing follows the system palette and preserves selection and cancellation', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/folder-dialog-'));
+  for (const theme of ['system']) {
+    const executable = path.join(scratch, `folder-${theme}.exe`);
+    const source = path.join(scratch, `folder-${theme}.nsi`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '0 = 1'
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB folder preview"
+OutFile "${executable}"
+RequestExecutionLevel user
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro yabUIHeader
+Function .onInit
+  StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
+  StrCpy $yabSidebarBitmap 0
+  !insertmacro preInit
+  ; Keep the real modern picker; no files or folders are created or removed.
+  YabInstallUI::BrowseFolder /NOUNLOAD "YAB-PREVIEW:folder:1" "$EXEDIR"
+  Pop $0
+  FileOpen $1 "$EXEDIR\\folder-${theme}.txt" w
+  FileWriteUTF16LE $1 "dark=$yabDarkMode$\r$\ncontrast=$yabHighContrast$\r$\n"
+  FileWriteUTF16LE $1 "selected=$0$\r$\n"
+  YabInstallUI::BrowseFolder /NOUNLOAD "YAB-PREVIEW:folder:2" "$EXEDIR"
+  Pop $0
+  FileWriteUTF16LE $1 "cancelled=$0$\r$\n"
+  FileClose $1
+  SetErrorLevel 0
+  Quit
+FunctionEnd
+Section
+  SetErrorLevel 17
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    const preview = spawn(executable, [], { windowsHide: true, timeout: 35000 });
+    const finished = new Promise((resolve, reject) => {
+      preview.once('error', reject);
+      preview.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    const pixels = path.join(scratch, `folder-${theme}.json`);
+    execute('pwsh.exe', ['-NoProfile', '-File', path.join(__dirname, 'native-dialog-probe.ps1'),
+      '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', pixels, '-Kind', 'folder']);
+    assert.deepEqual(await finished, { code: 0, signal: null });
+    const report = await fs.readFile(path.join(scratch, `folder-${theme}.txt`), 'utf16le');
+    assert.ok(report.endsWith(`selected=${scratch}\r\ncancelled=\r\n`), report);
+    const dark = report.startsWith('dark=1');
+    const contrast = report.includes('contrast=1');
+    const samples = JSON.parse((await fs.readFile(pixels, 'utf8')).replace(/^\uFEFF/, ''));
+    assert.equal(samples.length, 2);
+    for (const sample of samples) {
+      assert.equal(sample.Themed, false, 'Common dialogs must not be subclassed as message boxes.');
+      for (const color of [sample.Body, sample.Footer]) {
+        assert.notEqual(color, -1);
+        const channels = [color & 255, (color >> 8) & 255, (color >> 16) & 255];
+        if (!contrast) assert.ok(channels.every(value => dark ? value < 100 : value > 150), JSON.stringify(sample));
+      }
+    }
+  }
+  t.diagnostic(`Modern folder previews: ${scratch}`);
 });
 
 test('real install-mode navigation clears elevation shields and paints the icon with its caption', {

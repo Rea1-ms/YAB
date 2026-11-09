@@ -3,6 +3,12 @@
 ; The builder calls this after its own SetDetailsPrint none. Restore only the
 ; live status line, keeping its application-running checks and file operations.
 !macro customCheckAppRunning
+  ; This can run during initialization or on the section's worker thread.
+  !ifdef __UNINSTALL__
+    Call un.yabInitTheme
+  !else
+    Call yabInitTheme
+  !endif
   SetDetailsPrint textonly
   DetailPrint "$(yabChecking)"
   YabInstallUI::Stage /NOUNLOAD "$(yabChecking)"
@@ -89,8 +95,9 @@
     FunctionEnd
 
     ; The builder removes shortcuts and registry entries after customRemoveFiles.
-    ; Retry at successful completion, outside the installation directory. RMDir
-    ; without /r removes an empty directory only (as in qBittorrent and Npp).
+    ; Retry known program directories deepest first, then the installation root.
+    ; A child left behind by the first recursive pass would otherwise prevent
+    ; every root-only retry. RMDir without /r removes empty directories only.
     Function un.onUninstSuccess
       YabInstallUI::Complete /NOUNLOAD "$(yabRemoved)"
       ${if} ${isUpdated}
@@ -100,6 +107,9 @@
       Push $0
       StrCpy $0 0
       ${do}
+        !ifmacrodef yabRemoveEmptyProgramDirectories
+          !insertmacro yabRemoveEmptyProgramDirectories
+        !endif
         ClearErrors
         !insertmacro yabRemoveEmptyInstallDirectory
         ${ifNot} ${Errors}
@@ -124,6 +134,11 @@
 !macroend
 
 !macro customUnInit
+  !ifdef YAB_REQUIRE_EARLY_THEME
+    !ifndef YAB_UNINSTALLER_EARLY_THEME
+      !error "The generated uninstaller theme template was not loaded."
+    !endif
+  !endif
   Call un.yabInitTheme
   StrCpy $yabKeepAppData ${BST_CHECKED}
   ; Honor the existing explicit silent-uninstall flag; ordinary /S keeps data.

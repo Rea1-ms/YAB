@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <richedit.h>
@@ -22,7 +23,10 @@ static std::wstring progressText;
 static int progressStart = 0, progressEnd = 99, progressPercent = 0;
 static HBRUSH statusBrush = nullptr;
 static HWND wizardWindow = nullptr;
-static HHOOK messageBoxHook = nullptr;
+// NSIS executes installation and removal sections on a separate thread.
+// Windows removes that thread's hook when it exits; the GUI hook is removed
+// with the wizard. /NOUNLOAD keeps the callback code alive in both cases.
+static thread_local HHOOK messageBoxHook = nullptr;
 static constexpr UINT_PTR subclassId = 0x594142;
 static Bitmap* checkboxImages[3][checkboxSizeCount] = {};
 
@@ -414,10 +418,27 @@ static LRESULT CALLBACK ThemeMessageBox(int code, WPARAM wparam, LPARAM lparam) 
         const HWND window = reinterpret_cast<HWND>(wparam);
         wchar_t type[32] = {};
         GetClassName(window, type, 32);
-        // Limit this thread-local hook to our own native Yes/No dialogs.
-        // UAC and other applications' windows are never affected.
-        if (lstrcmp(type, L"#32770") == 0 && GetWindow(window, GW_OWNER) == wizardWindow
-            && GetDlgItem(window, IDYES) && GetDlgItem(window, IDNO)) {
+        // Match only standard message boxes in this process and thread, also
+        // before a wizard exists. Common file/folder dialogs have other child
+        // classes and must retain their own layout and painting.
+        // A one-button OK message box can expose its button as IDCANCEL even
+        // though MessageBox returns IDOK, so do not infer type from IDOK alone.
+        bool standardButtons = false, standardChildren = true;
+        for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+            wchar_t childType[32] = {};
+            GetClassName(child, childType, 32);
+            const int id = GetDlgCtrlID(child);
+            if (lstrcmp(childType, L"Button") == 0 && id >= IDOK && id <= IDCONTINUE) standardButtons = true;
+            else if (lstrcmp(childType, L"Static") != 0) standardChildren = false;
+        }
+        const HWND owner = GetWindow(window, GW_OWNER);
+        const bool owned = !owner || !wizardWindow || owner == wizardWindow
+            || GetAncestor(owner, GA_ROOTOWNER) == wizardWindow;
+        DWORD process = 0;
+        GetWindowThreadProcessId(window, &process);
+        if (lstrcmp(type, L"#32770") == 0 && process == GetCurrentProcessId() && owned
+            && !(GetWindowLongPtr(window, GWL_STYLE) & WS_CHILD) && GetDlgItem(window, 0xFFFF)
+            && standardButtons && standardChildren) {
             SetProp(window, L"YAB.MessageBox", reinterpret_cast<HANDLE>(1));
             SetWindowSubclass(window, DialogProc, subclassId, 0);
             EnumChildWindows(window, AttachControl, 0);
@@ -431,16 +452,84 @@ static LRESULT CALLBACK ThemeMessageBox(int code, WPARAM wparam, LPARAM lparam) 
     return CallNextHookEx(messageBoxHook, code, wparam, lparam);
 }
 
-extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
+static void ObserveMessageBoxes() {
+    if (!messageBoxHook) messageBoxHook = SetWindowsHookEx(WH_CBT, ThemeMessageBox, nullptr, GetCurrentThreadId());
+}
+
+static void InitializeTheme(HWND parent, StackEntry** stack) {
     dark = Pop(stack) == L"1";
     highContrast = Pop(stack) != L"0";
+    // Common shell dialogs paint themselves. Give them the same process-local
+    // policy as the wizard; do not subclass their complex control hierarchy.
+    using VersionProc = LONG(WINAPI*)(OSVERSIONINFOW*);
+    const auto versionProc = reinterpret_cast<VersionProc>(GetProcAddress(GetModuleHandle(L"ntdll.dll"), "RtlGetVersion"));
+    OSVERSIONINFOW version = {};
+    version.dwOSVersionInfoSize = sizeof(version);
+    const auto preferred = GetProcAddress(GetModuleHandle(L"uxtheme.dll"), MAKEINTRESOURCEA(135));
+    if (preferred && versionProc && versionProc(&version) == 0) {
+        if (version.dwBuildNumber >= 18362) {
+            reinterpret_cast<int(WINAPI*)(int)>(preferred)(dark && !highContrast ? 1 : 0);
+        } else {
+            reinterpret_cast<BOOL(WINAPI*)(BOOL)>(preferred)(dark && !highContrast);
+        }
+    }
     if (!graphicsToken && !highContrast) {
         GdiplusStartupInput input;
         GdiplusStartup(&graphicsToken, &input, nullptr);
     }
     if (!statusBrush) statusBrush = CreateSolidBrush(dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
-    wizardWindow = parent;
-    if (!messageBoxHook) messageBoxHook = SetWindowsHookEx(WH_CBT, ThemeMessageBox, nullptr, GetCurrentThreadId());
+    if (parent && IsWindow(parent)) wizardWindow = parent;
+    ObserveMessageBoxes();
+}
+
+extern "C" __declspec(dllexport) void Initialize(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
+    InitializeTheme(parent, stack);
+}
+
+extern "C" __declspec(dllexport) void BrowseFolder(HWND parent, int stringSize, wchar_t*, StackEntry** stack, void*) {
+    const std::wstring title = Pop(stack), initial = Pop(stack);
+    std::wstring selected = L"error";
+    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(initialized)) {
+        IFileOpenDialog* dialog = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
+            FILEOPENDIALOGOPTIONS options = 0;
+            dialog->GetOptions(&options);
+            dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+            dialog->SetTitle(title.c_str());
+            IShellItem* folder = nullptr;
+            if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+                dialog->SetFolder(folder);
+                folder->Release();
+            }
+            const HRESULT result = dialog->Show(parent);
+            if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) selected.clear();
+            else if (SUCCEEDED(result)) {
+                IShellItem* item = nullptr;
+                if (SUCCEEDED(dialog->GetResult(&item))) {
+                    PWSTR filename = nullptr;
+                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &filename))) {
+                        selected = filename;
+                        CoTaskMemFree(filename);
+                    }
+                    item->Release();
+                }
+            }
+            dialog->Release();
+        }
+        CoUninitialize();
+    }
+    if (selected.size() >= static_cast<size_t>(stringSize)) selected = L"error";
+    auto* entry = static_cast<StackEntry*>(GlobalAlloc(GPTR, sizeof(StackEntry) + static_cast<size_t>(stringSize) * sizeof(wchar_t)));
+    if (entry) {
+        lstrcpyn(entry->text, selected.c_str(), stringSize);
+        entry->next = *stack;
+        *stack = entry;
+    }
+}
+
+extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
+    InitializeTheme(parent, stack);
     SetWindowSubclass(parent, DialogProc, subclassId, 0);
     EnumChildWindows(parent, AttachControl, 0);
     // MUI draws a second, offset branding label as an embossed shadow. Giving
@@ -453,6 +542,7 @@ extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEnt
 }
 
 extern "C" __declspec(dllexport) void Progress(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
+    ObserveMessageBoxes();
     progressText = Pop(stack);
     progressStart = progressPercent = 0;
     progressEnd = 99;
@@ -487,11 +577,13 @@ extern "C" __declspec(dllexport) void Progress(HWND parent, int, wchar_t*, Stack
 }
 
 extern "C" __declspec(dllexport) void Stage(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    ObserveMessageBoxes();
     progressText = Pop(stack);
     UpdateProgress(false);
 }
 
 extern "C" __declspec(dllexport) void Phase(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    ObserveMessageBoxes();
     progressText = Pop(stack);
     const int start = _wtoi(Pop(stack).c_str());
     const int end = _wtoi(Pop(stack).c_str());
@@ -505,6 +597,7 @@ extern "C" __declspec(dllexport) void Phase(HWND, int, wchar_t*, StackEntry** st
 }
 
 extern "C" __declspec(dllexport) void Complete(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    ObserveMessageBoxes();
     progressText = Pop(stack);
     progressPercent = 100;
     UpdateProgress(false);

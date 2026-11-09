@@ -3,6 +3,18 @@
 const fs = require('fs');
 const path = require('path');
 
+// Retry only directories belonging to this build, deepest first. Never walk
+// an installed directory at uninstall time or follow directory links.
+function packagedDirectories(root, relative = '') {
+  const directories = [];
+  for (const entry of fs.readdirSync(path.join(root, relative), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const child = path.join(relative, entry.name);
+    directories.push(...packagedDirectories(root, child), child);
+  }
+  return directories;
+}
+
 const backend = process.env.BAAS_BACKEND_DIR;
 const release = process.env.BAAS_RELEASE_DIR;
 if (!backend || !fs.existsSync(path.join(backend, 'bundle.json'))
@@ -49,6 +61,13 @@ module.exports = {
     // manifest. It belongs to the installation, not the user's retained data.
     lines.push('  !ifdef UNINSTALLER_ICON', '    Delete "$INSTDIR\\uninstallerIcon.ico"', '  !endif',
       '  Delete "$INSTDIR\\${UNINSTALL_FILENAME}"', '  RMDir "$INSTDIR"', '  ClearErrors', '!macroend', '');
+    lines.push('!macro yabRemoveEmptyProgramDirectories');
+    for (const directory of packagedDirectories(context.appOutDir)) {
+      // Escape literal dollar signs rather than interpreting them as variables.
+      const target = directory.split(path.sep).join('\\').split('$').join('$$');
+      lines.push(`  RMDir "$INSTDIR\\${target}"`);
+    }
+    lines.push('!macroend', '');
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-pages.nsh'), path.join(release, 'installer-pages.nsh'));
