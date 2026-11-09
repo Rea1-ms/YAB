@@ -393,7 +393,6 @@ PANELS = [
         'id': 'otherConfig', 'name': '其他设置', 'page': 'settings',
         'groups': [
             _group('',
-                   _field('bannerVisibility', '显示首页头图（下次启动时生效）', 'switch'),
                    _field('__de_clothes', '一键反和谐', 'actions',
                           actions=[{'label': '执行反和谐', 'task': 'de_clothes'}]),
                    ),
