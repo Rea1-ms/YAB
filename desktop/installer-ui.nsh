@@ -97,6 +97,16 @@ Var yabSidebarBitmap
   !macroend
 !endif
 
+!ifmacrondef yabReadHighContrast
+  !macro yabReadHighContrast OUTPUT
+    System::Call '*(i 12, i 0, p 0) p.r1'
+    System::Call 'user32::SystemParametersInfoW(i 0x42, i 12, p r1, i 0)'
+    System::Call '*$1(i, i.r0)'
+    System::Free $1
+    IntOp ${OUTPUT} $0 & 1
+  !macroend
+!endif
+
 !ifndef BUILD_UNINSTALLER
   !define MUI_CUSTOMFUNCTION_GUIINIT yabApplyTheme
 !else
@@ -162,24 +172,14 @@ Var yabSidebarBitmap
     Push $1
     Push $2
     StrCpy $yabDarkMode 0
-    System::Call '*(i 12, i 0, p 0) p.r1'
-    System::Call 'user32::SystemParametersInfoW(i 0x42, i 12, p r1, i 0)'
-    System::Call '*$1(i, i.r0)'
-    System::Free $1
-    IntOp $yabHighContrast $0 & 1
+    !insertmacro yabReadHighContrast $yabHighContrast
     ClearErrors
     !insertmacro yabReadThemePreference $0
     ${ifNot} ${Errors}
     ${andIf} $0 == 0
+    ${andIf} $yabHighContrast == 0
       ; Respect high contrast instead of replacing the accessibility palette.
-      System::Call '*(i 12, i 0, p 0) p.r1'
-      System::Call 'user32::SystemParametersInfoW(i 0x42, i 12, p r1, i 0)'
-      System::Call '*$1(i, i.r0)'
-      System::Free $1
-      IntOp $0 $0 & 1
-      ${if} $0 == 0
-        StrCpy $yabDarkMode 1
-      ${endif}
+      StrCpy $yabDarkMode 1
     ${endif}
     Pop $2
     Pop $1

@@ -1308,6 +1308,9 @@ Unicode true
   ClearErrors
   StrCpy @{OUTPUT} ${palette.theme}
 !macroend
+!macro yabReadHighContrast OUTPUT
+  StrCpy @{OUTPUT} ${palette.contrast}
+!macroend
 !include "${path.resolve(__dirname, '../installer.nsh')}"
 Name "YAB warning test"
 ; This preview exits after exercising its warnings; exit confirmation has a
@@ -1338,8 +1341,7 @@ Function testPage
   @{NSD_CreateLabel} 0 0 100% 30u "Warning-dialog preview; no installation or process termination."
   Pop $0
   Call yabApplyTheme
-  ; Override only the plugin's local policy, never the system accessibility settings.
-  YabInstallUI::Apply /NOUNLOAD ${palette.theme === 0 ? 1 : 0} ${palette.contrast}
+  ; The wizard and plugin share the same simulated accessibility policy.
   @{NSD_CreateTimer} showWarnings 50
   @{NSD_CreateTimer} inspectWarning 75
   nsDialogs::Show
@@ -1476,7 +1478,6 @@ Function ${prefix}onInit
   FileOpen $report "$EXEDIR\\${name}.txt" w
   System::Call 'kernel32::GetCurrentThreadId() i.r0'
   FileWrite $report "ui-thread=$0$\r$\n"
-  ${palette.contrast ? 'YabInstallUI::Initialize /NOUNLOAD 1 1' : ''}
   MessageBox MB_OK|MB_ICONEXCLAMATION "YAB-PREVIEW:init:1" /SD IDOK
   FileWrite $report "init-result=1$\r$\n"
   ${uninstall ? '' : 'GetFunctionAddress $0 yabDirectoryPage\n  GetFunctionAddress $0 yabDirectoryPageLeave'}
@@ -1494,10 +1495,11 @@ ${uninstall ? '!define BUILD_UNINSTALLER' : ''}
   ClearErrors
   StrCpy @{OUTPUT} ${palette.theme}
 !macroend
-; Only the simulated high-contrast case overrides the local plugin policy.
-; Dark/light use the actual shared running-check hook to attach the worker.
+!macro yabReadHighContrast OUTPUT
+  StrCpy @{OUTPUT} ${palette.contrast}
+!macroend
+; Every palette uses the actual shared running-check hook to attach the worker.
 !macro IS_POWERSHELL_AVAILABLE
-  ${palette.contrast ? 'YabInstallUI::Initialize /NOUNLOAD 1 1' : ''}
 !macroend
 !macro _CHECK_APP_RUNNING
   System::Call 'kernel32::GetCurrentThreadId() i.r0'
@@ -1573,10 +1575,19 @@ SectionEnd
       assert.equal(sample.Themed, palette.theme === 0 && !palette.contrast, name);
       assert.notEqual(sample.Body, -1);
       assert.notEqual(sample.Footer, -1);
+      if (index > 0) {
+        assert.notEqual(sample.StatusBackground, -1, `${name}: progress label exists`);
+        assert.equal(sample.StatusBackground, sample.StatusCanvas, `${name}: progress label matches its page`);
+        assert.deepEqual(sample.HeaderBackgrounds, Array(3).fill(sample.StatusCanvas),
+          `${name}: header title, description and icon match their page`);
+      }
       if (sample.Themed) {
         assert.equal(sample.Body, 0x202020, name);
         assert.equal(sample.Footer, 0x202020, name);
-        assert.equal(sample.Button, index === 2 || index === 4 ? 0x333333 : 0xFFCD60, name);
+        // Windows can move the default-button style when a preview loses
+        // activation. Check its actual native state rather than its step.
+        const primary = sample.ButtonId === 1 || sample.ButtonStyle === 1;
+        assert.equal(sample.Button, primary ? 0xFFCD60 : 0x333333, `${name}: ${sample.Prompt}`);
       }
     }
   }
@@ -2141,11 +2152,20 @@ Function .onInit
 FunctionEnd
 Function inspectFinish
   ShowWindow $HWNDPARENT 0
+  ; SHOW runs before nsDialogs enters its message loop. Let the page finish
+  ; initializing before exercising the native checkbox click.
+  @{NSD_CreateTimer} clickFinish 50
+FunctionEnd
+Function clickFinish
+  @{NSD_KillTimer} clickFinish
   ReadEnvStr $testUpdated "YAB_PREVIEW_UPDATED"
   SendMessage $mui.FinishPage.Run @{BM_GETCHECK} 0 0 $0
   System::Call 'user32::GetWindowTextW(p $mui.FinishPage.Run, w.r1, i @{NSIS_MAX_STRLEN})'
   ReadEnvStr $2 "YAB_PREVIEW_UNCHECK"
   @{if} $2 == 1
+    ; BM_CLICK requires an active owning dialog. Activate this preview's own
+    ; hidden wizard within its UI thread; never change the foreground window.
+    System::Call 'user32::SetActiveWindow(p $HWNDPARENT)'
     SendMessage $mui.FinishPage.Run @{BM_CLICK} 0 0
   @{endif}
   SendMessage $mui.FinishPage.Run @{BM_GETCHECK} 0 0 $2

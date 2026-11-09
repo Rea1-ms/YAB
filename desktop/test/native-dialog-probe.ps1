@@ -19,15 +19,21 @@ public class YabPopupSample {
     public int Footer { get; set; }
     public int Button { get; set; }
     public int ButtonId { get; set; }
+    public int ButtonStyle { get; set; }
+    public int StatusBackground { get; set; }
+    public int StatusCanvas { get; set; }
+    public int[] HeaderBackgrounds { get; set; }
 }
 public static class YabDialogProbe {
     delegate bool EnumCallback(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr window, EnumCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr window);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr window, int id);
+    [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr window);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr window, string name);
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
@@ -43,17 +49,19 @@ public static class YabDialogProbe {
     [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window, IntPtr area, IntPtr region, uint flags);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
     struct Rect { public int Left, Top, Right, Bottom; }
-    static int Pixel(IntPtr window, int x, int y) {
-        IntPtr dc = GetDC(window);
-        try { return GetPixel(dc, x, y); } finally { ReleaseDC(window, dc); }
-    }
-    static int[] RenderedPixels(IntPtr window, Rect rect) {
+    static int[] RenderedPixels(IntPtr window, params int[] points) {
+        Rect rect; GetClientRect(window, out rect);
         IntPtr source = GetDC(window), dc = CreateCompatibleDC(source);
         IntPtr bitmap = CreateCompatibleBitmap(source, rect.Right, rect.Bottom);
         IntPtr original = SelectObject(dc, bitmap);
         try {
-            if (!PrintWindow(window, dc, 3)) return new int[] { -1, -1 };
-            return new int[] { GetPixel(dc, 5, 5), GetPixel(dc, 5, rect.Bottom - 5) };
+            var pixels = new int[points.Length / 2];
+            if (!PrintWindow(window, dc, 3)) {
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = -1;
+                return pixels;
+            }
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = GetPixel(dc, points[2 * i], points[2 * i + 1]);
+            return pixels;
         } finally {
             SelectObject(dc, original); DeleteObject(bitmap); DeleteDC(dc); ReleaseDC(window, source);
         }
@@ -95,17 +103,46 @@ public static class YabDialogProbe {
                 RedrawWindow(window, IntPtr.Zero, IntPtr.Zero, 0x185);
                 Thread.Sleep(160);
                 Rect rect; GetClientRect(window, out rect);
-                int body = Pixel(window, 5, 5), footer = Pixel(window, 5, rect.Bottom - 5);
-                if (kind != "message") {
-                    int[] rendered = RenderedPixels(window, rect);
-                    body = rendered[0]; footer = rendered[1];
-                }
+                // Render the explicitly owned HWND instead of reading its screen
+                // surface, which can be clipped by another concurrent preview.
+                int[] rendered = RenderedPixels(window, 5, 5, 5, rect.Bottom - 5);
+                int body = rendered[0], footer = rendered[1];
                 if (body == -1 || footer == -1) return true;
+                int buttonColor = kind == "message" ? RenderedPixels(button, 8, 7)[0] : -1;
+                if (kind == "message" && buttonColor == -1) return true;
+                int status = -1, canvas = -1;
+                int[] headers = new int[] { -1, -1, -1 };
+                EnumWindows((wizard, ignored) => {
+                    uint wizardProcess; GetWindowThreadProcessId(wizard, out wizardProcess);
+                    if (wizardProcess != process) return true;
+                    for (int i = 0; i < headers.Length; i++) {
+                        IntPtr header = GetDlgItem(wizard, new int[] { 1037, 1038, 1039 }[i]);
+                        if (header == IntPtr.Zero) continue;
+                        Rect bounds; GetClientRect(header, out bounds);
+                        headers[i] = RenderedPixels(header, bounds.Right - 1, bounds.Bottom - 1)[0];
+                    }
+                    EnumChildWindows(wizard, (child, unused) => {
+                        if (GetDlgCtrlID(child) == 0x7F10) {
+                            Rect bounds; GetClientRect(child, out bounds);
+                            status = RenderedPixels(child, bounds.Right - 3, bounds.Bottom / 2)[0];
+                            IntPtr page = GetParent(child);
+                            GetClientRect(page, out bounds);
+                            canvas = RenderedPixels(page, bounds.Right - 3, bounds.Bottom - 3)[0];
+                        }
+                        return true;
+                    }, IntPtr.Zero);
+                    return true;
+                }, IntPtr.Zero);
                 samples.Add(new YabPopupSample { Prompt = prompt, Thread = thread,
                     Themed = GetProp(window, "YAB.MessageBox") != IntPtr.Zero,
-                    Body = body, Footer = footer, Button = Pixel(button, 8, 7), ButtonId = GetDlgCtrlID(button) });
+                    Body = body, Footer = footer, Button = buttonColor, ButtonId = GetDlgCtrlID(button),
+                    ButtonStyle = GetWindowLong(button, -16) & 15,
+                    StatusBackground = status, StatusCanvas = canvas, HeaderBackgrounds = headers });
                 handled.Add(prompt);
-                PostMessage(button, 0xF5, IntPtr.Zero, IntPtr.Zero);
+                // Dispatch the selected real dialog command without requiring
+                // this test process to own the user's foreground window.
+                if (kind == "message") PostMessage(window, 0x111, new IntPtr(GetDlgCtrlID(button)), button);
+                else PostMessage(button, 0xF5, IntPtr.Zero, IntPtr.Zero);
                 return true;
             }, IntPtr.Zero);
             Thread.Sleep(25);

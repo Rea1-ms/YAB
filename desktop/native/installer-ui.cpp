@@ -587,6 +587,19 @@ static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPA
         SetBkColor(reinterpret_cast<HDC>(wparam), dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
         return reinterpret_cast<LRESULT>(statusBrush);
     }
+    if (message == WM_CTLCOLORSTATIC && window == wizardWindow) {
+        const int id = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
+        if (id == 1037 || id == 1038 || id == 1039) {
+            // MUI hard-codes white behind the title, subtitle and header icon.
+            // Its background panel is hidden, so match the wizard canvas in
+            // every palette, including the system's accessibility colors.
+            const HDC dc = reinterpret_cast<HDC>(wparam);
+            const bool customDark = dark && !highContrast;
+            SetTextColor(dc, customDark ? RGB(240, 240, 240) : GetSysColor(COLOR_BTNTEXT));
+            SetBkColor(dc, customDark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
+            return reinterpret_cast<LRESULT>(customDark ? statusBrush : GetSysColorBrush(COLOR_BTNFACE));
+        }
+    }
     if (message == WM_NCDESTROY) {
         RemoveProp(window, L"YAB.MessageBox");
         RemoveWindowSubclass(window, DialogProc, subclassId);

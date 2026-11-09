@@ -10,7 +10,7 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",
-    "test": "node --test test/*.test.cjs",
+    "test": "node --test --test-concurrency=1 test/*.test.cjs",
     "pack": "node build.cjs --dir",
     "dist": "node build.cjs",
     "pack:lite": "node build.cjs --lite --dir",
