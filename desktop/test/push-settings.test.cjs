@@ -10,7 +10,11 @@ test('notification form migrates, saves, tests and removes channels over real We
   const output = path.resolve(__dirname, '../../develop_tools/out');
   await fs.mkdir(output, { recursive: true });
   const scratch = await fs.mkdtemp(path.join(output, 'onepush-ui-'));
-  const env = { ...process.env, YAB_PUSH_TEST_DATA: scratch };
+  const { build } = await import('../../webapp/node_modules/vite/dist/node/index.js');
+  const frontend = path.join(scratch, 'frontend');
+  await build({ root: path.resolve(__dirname, '../../webapp'),
+    build: { outDir: frontend, emptyOutDir: false } });
+  const env = { ...process.env, YAB_PUSH_TEST_DATA: scratch, YAB_PUSH_TEST_FRONTEND: frontend };
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await new Promise((resolve, reject) => {
     const child = spawn(require('electron'), [path.join(__dirname, 'push-settings-render.cjs')],

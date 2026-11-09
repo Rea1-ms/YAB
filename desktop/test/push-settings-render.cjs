@@ -12,10 +12,10 @@ app.setPath('userData', path.join(scratch, 'browser'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let backend;
 let window;
+let logs = '';
 
 async function main() {
   await app.whenReady();
-  let logs = '';
   const url = await new Promise((resolve, reject) => {
     backend = spawn(path.join(root, '.venv/Scripts/python.exe'),
       ['-B', path.join(root, 'develop_tools/test/push_ui_server.py'), scratch],
@@ -30,22 +30,26 @@ async function main() {
     backend.once('error', reject);
     backend.once('exit', code => reject(new Error(`Backend exited ${code}: ${logs}`)));
   });
+  let healthy = false;
   for (let count = 0; count < 100; count++) {
-    try { if ((await fetch(`${url}/api/health`)).ok) break; } catch {}
+    try { if ((await fetch(`${url}/api/health`)).ok) { healthy = true; break; } } catch {}
     await sleep(30);
   }
+  assert.ok(healthy, 'Notification backend never became healthy: ' + logs);
   window = new BrowserWindow({ width: 1440, height: 1000, show: false,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
       offscreen: true, backgroundThrottling: false } });
   const errors = [];
-  window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
+  window.webContents.on('console-message', ({ level, message }) => { if (level === 'error') errors.push(message); });
   const run = source => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let count = 0; count < 150; count++) {
       if (await run(source)) return;
       await sleep(30);
     }
-    throw new Error('UI condition timed out: ' + source + '\n' + errors.join('\n'));
+    const visible = await run('document.body.innerText');
+    throw new Error('UI condition timed out: ' + source + '\n' + errors.join('\n')
+      + '\nPage: ' + visible + '\nBackend: ' + logs);
   }
   async function click(label) {
     await run(`Array.from(document.querySelectorAll('.push-settings button')).find(button => button.textContent.trim() === ${JSON.stringify(label)}).click()`);
@@ -118,6 +122,7 @@ main().then(() => {
   app.exit(0);
 }).catch(error => {
   console.error(error);
+  console.error('Notification backend: ' + logs);
   backend?.kill();
   window?.destroy();
   app.exit(1);

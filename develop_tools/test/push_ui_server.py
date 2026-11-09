@@ -11,9 +11,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 import uvicorn
+from starlette.routing import Mount
 
 from core.config.default_config import DEFAULT_CONFIG
-from server.app import create_app
+from server.app import SPAStaticFiles, create_app
 
 
 def main():
@@ -40,7 +41,8 @@ def main():
         listener.bind(('127.0.0.1', 0))
         listener.listen()
         port = listener.getsockname()[1]
-        app = create_app(access_token='', listener={'host': '127.0.0.1', 'port': port})
+        app = create_app(serve_webapp=False, access_token='', listener={'host': '127.0.0.1', 'port': port})
+        app.routes.append(Mount('/', SPAStaticFiles(directory=os.environ['YAB_PUSH_TEST_FRONTEND'], html=True)))
         print(f'PUSH_UI_URL=http://127.0.0.1:{port}', flush=True)
         uvicorn.Server(uvicorn.Config(app, log_level='error')).run(sockets=[listener])
 
