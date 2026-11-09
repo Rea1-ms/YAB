@@ -1,5 +1,7 @@
 # Class `ConfigSet`
-对应文件路径 :`"core/config/ConfigSet.py"`
+对应文件路径：`core/config/config_set.py`（配置集合实现）。
+
+当前网页和运行任务的配置生效时机，见 [网页与商店维护](../webui_shop_maintenance.md#配置何时生效)。以下接口中的保存、页面推送和任务重读不是同一件事。
 
 **related files**:
 - `"develop_tools/generate_dataclass_code.py"`
@@ -60,19 +62,19 @@
 ### `_init_config`
 - **Description**: 加载用户配置文件, 并将其存储在 [`config`](#config) 中, 同时会设置 [`server_mode`](#server_mode)  
 ### `get`
-- **Description**: 获取一条配置值
+- **Description**: 每次先重新读取用户配置文件，再获取一条配置值；直接访问已有配置对象不会自动刷新
 - **Args**:
     - `key`: 配置名
     - `default`: 默认值
 ### `set`
-- **Description**: 更新一条配置值并保存
+- **Description**: 先重新读取用户配置，再更新一条配置值并保存
 - **Args**:
     - `key`: 配置名
     - `value`: 新值
-- **note**: 如果绑定了某个UI组件, 组件中的值会被同步更新
+- **note**: 当前网页由服务在保存后推送配置更新；本方法不会自动同步网页或运行中的任务副本
 
 ### `update`
-- **Description**: 相较[`set`](#set), 仅更新配置值
+- **Description**: 直接调用 [`set`](#set)，同样会更新配置值并保存文件
 
 ### `save`
 - **Description**: 保存用户配置到`config.json`文件
