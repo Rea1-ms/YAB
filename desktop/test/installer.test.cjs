@@ -1931,7 +1931,7 @@ SectionEnd
   }
 });
 
-test('per-monitor wizard previews refresh artwork and progress on the available displays', {
+test('per-monitor wizard previews preserve Chinese fonts, artwork and progress on the available displays', {
   skip: process.platform !== 'win32',
 }, async t => {
   const compiler = await nsisCompiler();
@@ -1959,8 +1959,12 @@ RequestExecutionLevel user
 !insertmacro customPageAfterChangeDir
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW progressReady
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW finishReady
+!define MUI_FINISHPAGE_RUN "unused-preview-target"
+!define MUI_FINISHPAGE_RUN_FUNCTION noLaunch
+!insertmacro MUI_PAGE_FINISH
 UninstPage instfiles
-!insertmacro MUI_LANGUAGE English
+!insertmacro MUI_LANGUAGE SimpChinese
 !insertmacro customHeader
 Function .onInit
   StrCpy $testUpdated 0
@@ -1970,7 +1974,7 @@ Function sidebarReady
   StrCpy $testUpdated 1
   ShowWindow $HWNDPARENT 0
   GetDlgItem $0 $HWNDPARENT 1
-  SendMessage $0 @{WM_SETTEXT} 0 "STR:Install for all users"
+  SendMessage $0 @{WM_SETTEXT} 0 "STR:为所有用户安装"
   SendMessage $0 0x160C 0 1
   SendMessage $HWNDPARENT @{WM_SETTEXT} 0 "STR:YAB-DPI-PREVIEW:sidebar"
 FunctionEnd
@@ -1978,20 +1982,29 @@ Function progressReady
   ShowWindow $HWNDPARENT 0
   SendMessage $HWNDPARENT @{WM_SETTEXT} 0 "STR:YAB-DPI-PREVIEW:progress"
 FunctionEnd
+Function finishReady
+  ShowWindow $HWNDPARENT 0
+  SendMessage $HWNDPARENT @{WM_SETTEXT} 0 "STR:YAB-DPI-PREVIEW:finish"
+FunctionEnd
+Function noLaunch
+  ; The finish checkbox never launches an application in this preview.
+FunctionEnd
 Section
   IfSilent generateUninstaller
   ; Keep the real progress-page message loop active without installing files.
   StrCpy $0 0
   waitForProbe:
+    IfFileExists "$EXEDIR\progress-complete.txt" finished
     IfFileExists "$EXEDIR\complete.txt" finished
     Sleep 50
     IntOp $0 $0 + 1
     IntCmp $0 600 finished waitForProbe finished
   finished:
     SetErrorLevel 0
-    Quit
+    Goto done
   generateUninstaller:
     WriteUninstaller "$EXEDIR\uninstall-dpi.exe"
+  done:
 SectionEnd
 Section Uninstall
   Quit
@@ -2019,7 +2032,21 @@ SectionEnd
       assert.equal(row.PerMonitorV2, true);
       assert.ok(row.Dpi >= 96);
       assert.ok(row.Next[2] > 0 && row.Next[3] > 0);
-      if (row.Page === 'sidebar') {
+      assert.ok(row.Fonts.length >= 4, 'Inspect actual dialog, label and button fonts.');
+      assert.equal(row.Fonts.length, row.InitialFonts.length);
+      for (const [index, font] of row.Fonts.entries()) {
+        const original = row.InitialFonts[index];
+        const label = `${row.Page}, DPI=${row.Dpi}, ${font.Class} ${font.Text}`;
+        if (font.Class !== '#32770') assert.equal(original.LogicalFace, 'Microsoft YaHei UI', label);
+        assert.equal(font.LogicalFace, original.LogicalFace, label);
+        assert.equal(font.Weight, original.Weight, `Keep title weight: ${label}`);
+        assert.ok(Math.abs(font.Height - Math.round(original.Height * row.Dpi / row.InitialDpi)) <= 1,
+          `Scale the original font size: ${label}`);
+        if (font.Class === 'Static' && font.Id === 1202) {
+          assert.ok(font.Bounds[3] >= font.TextHeight, `Keep all body text visible: ${label}`);
+        }
+      }
+      if (row.Page !== 'progress') {
         assert.ok(row.Sidebar && row.Sidebar[2] > 0 && row.Sidebar[3] > 0);
       } else {
         assert.deepEqual(row.Status, row.OriginalStatus, 'Keep the independent label aligned with the native label.');
@@ -2027,14 +2054,16 @@ SectionEnd
         assert.ok(row.Percent >= 0 && row.Percent < 100);
       }
     }
-    for (const page of ['sidebar', 'progress']) {
+    for (const page of ['sidebar', 'progress', 'finish']) {
       const rows = samples.filter(row => row.Page === page);
       const count = new Set(rows.map(row => row.Monitor)).size;
       for (let index = count; index < rows.length; ++index) {
-        for (const key of ['Window', 'Next', 'Sidebar', 'Status', 'Progress', 'Percent']) {
+        for (const key of ['Window', 'Next', 'Sidebar', 'Status', 'Progress', 'Percent', 'Fonts']) {
           const baseline = rows[count + index % count][key];
           assert.deepEqual(rows[index][key], baseline, `Repeated monitor visits retain ${page} ${key}.`);
         }
+        assert.ok(rows[index].GdiObjects <= rows[count + index % count].GdiObjects + 2,
+          'Repeated monitor moves must release replaced font resources.');
       }
     }
     const displays = [...new Map(samples.filter(row => row.Page === 'sidebar').map(row => [row.Monitor, row])).values()];

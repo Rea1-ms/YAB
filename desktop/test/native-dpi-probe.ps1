@@ -23,11 +23,30 @@ public class YabDpiSample {
     public int[] Progress { get; set; }
     public int[] OriginalProgress { get; set; }
     public int Percent { get; set; }
+    public List<YabDpiFont> Fonts { get; set; }
+    public List<YabDpiFont> InitialFonts { get; set; }
+    public uint InitialDpi { get; set; }
+    public uint GdiObjects { get; set; }
+}
+public class YabDpiFont {
+    public int Id { get; set; }
+    public string Class { get; set; }
+    public string Text { get; set; }
+    public string LogicalFace { get; set; }
+    public int Height { get; set; }
+    public int Weight { get; set; }
+    public int[] Bounds { get; set; }
+    public int TextHeight { get; set; }
 }
 public static class YabDpiProbe {
     delegate bool WindowCallback(IntPtr window, IntPtr state);
     delegate bool MonitorCallback(IntPtr monitor, IntPtr dc, ref Rect area, IntPtr state);
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct LogFont {
+        public int Height, Width, Escapement, Orientation, Weight;
+        public byte Italic, Underline, StrikeOut, CharacterSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string Face;
+    }
     [DllImport("user32.dll")] static extern bool EnumWindows(WindowCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr window, WindowCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorCallback callback, IntPtr state);
@@ -47,10 +66,17 @@ public static class YabDpiProbe {
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
     [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window, IntPtr rect, IntPtr region, uint flags);
     [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
     [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr value);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr value);
     [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll", CharSet=CharSet.Unicode)] static extern int GetObjectW(IntPtr value, int size, out LogFont font);
+    [DllImport("user32.dll")] static extern uint GetGuiResources(IntPtr process, uint flags);
+    [DllImport("gdi32.dll", CharSet=CharSet.Unicode)] static extern IntPtr CreateFontIndirectW(ref LogFont font);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int DrawTextW(IntPtr dc, string text, int count, ref Rect rect, uint flags);
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, byte[] info, uint usage, out IntPtr bits, IntPtr section, uint offset);
     static void Capture(IntPtr window, string filename) {
         var size = Bounds(window, IntPtr.Zero);
@@ -66,6 +92,27 @@ public static class YabDpiProbe {
         try {
             if (image == IntPtr.Zero || !PrintWindow(window, dc, 2)) throw new InvalidOperationException("Cannot render DPI preview.");
             var pixels = new byte[length]; Marshal.Copy(bits, pixels, 0, length);
+            bool blank = true;
+            for (int offset = 0; offset < pixels.Length; offset += 4) {
+                if (pixels[offset] != 0 || pixels[offset + 1] != 0 || pixels[offset + 2] != 0) { blank = false; break; }
+            }
+            if (blank) {
+                // Hidden finish pages may not render at all. Paint this isolated
+                // preview behind other windows without activating it, then hide
+                // it again. Never capture or move a user's application.
+                bool visible = IsWindowVisible(window);
+                try {
+                    SetWindowPos(window, new IntPtr(1), 0, 0, 0, 0, 0x253);
+                    RedrawWindow(window, IntPtr.Zero, IntPtr.Zero, 0x585);
+                    if (!PrintWindow(window, dc, 2)) throw new InvalidOperationException("Cannot render finish preview.");
+                    Marshal.Copy(bits, pixels, 0, length);
+                } finally { if (!visible) ShowWindow(window, 0); }
+                blank = true;
+                for (int offset = 0; offset < pixels.Length; offset += 4) {
+                    if (pixels[offset] != 0 || pixels[offset + 1] != 0 || pixels[offset + 2] != 0) { blank = false; break; }
+                }
+                if (blank) throw new InvalidOperationException("DPI preview capture was blank.");
+            }
             using (var writer = new System.IO.BinaryWriter(System.IO.File.Open(filename, System.IO.FileMode.Create))) {
                 writer.Write((ushort)0x4D42); writer.Write(length + 54); writer.Write(0); writer.Write(54);
                 writer.Write(info); writer.Write(pixels);
@@ -101,7 +148,10 @@ public static class YabDpiProbe {
     static YabDpiSample Read(IntPtr window, string page, int monitor) {
         IntPtr sidebar = IntPtr.Zero, status = IntPtr.Zero, progress = IntPtr.Zero;
         IntPtr originalStatus = IntPtr.Zero, originalProgress = IntPtr.Zero;
+        var fonts = new List<YabDpiFont>();
+        ReadFont(window, fonts);
         EnumChildWindows(window, (child, state) => {
+            ReadFont(child, fonts);
             int id = GetDlgCtrlID(child);
             if (id == 0x7F10) status = child;
             if (id == 0x7F11) progress = child;
@@ -120,9 +170,30 @@ public static class YabDpiProbe {
             Window = Bounds(window, IntPtr.Zero), Next = Bounds(GetDlgItem(window, 1), window),
             Sidebar = Bounds(sidebar, window), Status = Bounds(status, window), OriginalStatus = Bounds(originalStatus, window),
             Progress = Bounds(progress, window), OriginalProgress = Bounds(originalProgress, window),
-            Percent = progress == IntPtr.Zero ? -1 : SendMessage(progress, 0x408, IntPtr.Zero, IntPtr.Zero).ToInt32()
+            Percent = progress == IntPtr.Zero ? -1 : SendMessage(progress, 0x408, IntPtr.Zero, IntPtr.Zero).ToInt32(),
+            Fonts = fonts, GdiObjects = GetGuiResources(Process.GetProcessById((int)Owner(window)).Handle, 0)
         };
     }
+    static uint Owner(IntPtr window) { uint process; GetWindowThreadProcessId(window, out process); return process; }
+    static void ReadFont(IntPtr window, List<YabDpiFont> fonts) {
+        var type = new StringBuilder(40); GetClassName(window, type, type.Capacity);
+        if (type.ToString() != "#32770" && type.ToString() != "Static" && type.ToString() != "Button"
+            && type.ToString() != "Edit") return;
+        IntPtr handle = SendMessage(window, 0x31, IntPtr.Zero, IntPtr.Zero);
+        if (handle == IntPtr.Zero) return;
+        LogFont font; GetObjectW(handle, Marshal.SizeOf<LogFont>(), out font);
+        // LOGFONT can be queried across processes. Selecting the preview's font
+        // into this probe's DC is not supported and would report the stock font.
+        int[] bounds = Bounds(window, GetParentWindow(window));
+        string text = Title(window);
+        Rect measured = new Rect { Right = bounds[2] };
+        IntPtr copy = CreateFontIndirectW(ref font), dc = GetDC(window), previous = SelectObject(dc, copy);
+        try { DrawTextW(dc, text, text.Length, ref measured, 0xC10); }
+        finally { SelectObject(dc, previous); DeleteObject(copy); ReleaseDC(window, dc); }
+        fonts.Add(new YabDpiFont { Id = GetDlgCtrlID(window), Class = type.ToString(), Text = Title(window),
+            LogicalFace = font.Face, Height = font.Height, Weight = font.Weight, Bounds = bounds, TextHeight = measured.Bottom });
+    }
+    [DllImport("user32.dll", EntryPoint="GetParent")] static extern IntPtr GetParentWindow(IntPtr window);
     public static List<YabDpiSample> Run(int process, string directory) {
         IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         try {
@@ -132,9 +203,10 @@ public static class YabDpiProbe {
             }, IntPtr.Zero);
             if (monitors.Count == 0) throw new InvalidOperationException("No active monitors.");
             var samples = new List<YabDpiSample>();
-            foreach (string page in new string[] { "sidebar", "progress" }) {
+            foreach (string page in new string[] { "sidebar", "progress", "finish" }) {
                 IntPtr window = Find(process, "YAB-DPI-PREVIEW:" + page);
                 Rect original; GetWindowRect(window, out original);
+                var initial = Read(window, page, -1);
                 for (int pass = 0; pass < 4; ++pass) {
                     for (int index = 0; index < monitors.Count; ++index) {
                         Rect target = monitors[index];
@@ -143,12 +215,15 @@ public static class YabDpiProbe {
                         Thread.Sleep(180);
                         // Sending a benign message also synchronizes with its UI thread.
                         SendMessage(window, 0, IntPtr.Zero, IntPtr.Zero);
-                        samples.Add(Read(window, page, index));
+                        var sample = Read(window, page, index);
+                        sample.InitialFonts = initial.Fonts; sample.InitialDpi = initial.Dpi;
+                        samples.Add(sample);
                         if (pass == 1) Capture(window, System.IO.Path.Combine(directory, page + "-" + index + ".bmp"));
                     }
                 }
                 SetWindowPos(window, IntPtr.Zero, original.Left, original.Top, 0, 0, 0x15);
-                if (page == "sidebar") PostMessage(window, 0x111, new IntPtr(1), IntPtr.Zero);
+                if (page == "progress") System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "progress-complete.txt"), "complete");
+                else PostMessage(window, 0x111, new IntPtr(1), IntPtr.Zero);
             }
             return samples;
         } finally { SetThreadDpiAwarenessContext(previous); }

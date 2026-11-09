@@ -192,6 +192,72 @@ static int Scale(HWND window, int value) {
     return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96);
 }
 
+struct ControlFont {
+    LOGFONT original = {};
+    UINT dpi = 96;
+    HFONT replacement = nullptr;
+    bool changingDpi = false, assigning = false;
+};
+
+static void RememberFont(HWND window, HFONT handle, ControlFont* font) {
+    LOGFONT original = {};
+    if (!handle || !GetObject(handle, sizeof(original), &original)) return;
+    font->original = original;
+    font->dpi = GetDpiForWindow(window);
+}
+
+static void ScaleControlFont(HWND window, ControlFont* font) {
+    // NSIS and nsDialogs set fonts after creating a template-based dialog.
+    // PMv2 restores the template font on each DPI change, discarding those
+    // overrides (including MUI's larger, bold welcome and finish titles).
+    LOGFONT scaled = font->original;
+    const UINT dpi = GetDpiForWindow(window);
+    scaled.lfHeight = MulDiv(scaled.lfHeight, static_cast<int>(dpi), static_cast<int>(font->dpi));
+    scaled.lfWidth = MulDiv(scaled.lfWidth, static_cast<int>(dpi), static_cast<int>(font->dpi));
+    const HFONT replacement = CreateFontIndirect(&scaled);
+    if (!replacement) return;
+    font->assigning = true;
+    SendMessage(window, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
+    font->assigning = false;
+    if (font->replacement) DeleteObject(font->replacement);
+    font->replacement = replacement;
+}
+
+static LRESULT CALLBACK FontProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+    UINT_PTR, DWORD_PTR data) {
+    auto* font = reinterpret_cast<ControlFont*>(data);
+    if (message == WM_DPICHANGED || message == WM_DPICHANGED_BEFOREPARENT) font->changingDpi = true;
+    if (message == WM_SETFONT && !font->assigning && !font->changingDpi
+        && reinterpret_cast<HFONT>(wparam) != font->replacement) {
+        // Page changes can assign a new font outside the system's DPI pass.
+        // Keep that intentional update as the new, unrounded baseline.
+        RememberFont(window, reinterpret_cast<HFONT>(wparam), font);
+    }
+    const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+    if (message == WM_DPICHANGED || message == WM_DPICHANGED_AFTERPARENT) {
+        ScaleControlFont(window, font);
+        font->changingDpi = false;
+    }
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, FontProc, subclassId);
+        if (font->replacement) DeleteObject(font->replacement);
+        delete font;
+    }
+    return result;
+}
+
+static void PreserveControlFont(HWND window) {
+    DWORD_PTR existing = 0;
+    if (GetWindowSubclass(window, FontProc, subclassId, &existing)) return;
+    const auto handle = reinterpret_cast<HFONT>(SendMessage(window, WM_GETFONT, 0, 0));
+    LOGFONT original = {};
+    if (!handle || !GetObject(handle, sizeof(original), &original)) return;
+    auto* font = new (std::nothrow) ControlFont;
+    if (!font) return;
+    RememberFont(window, handle, font);
+    if (!SetWindowSubclass(window, FontProc, subclassId, reinterpret_cast<DWORD_PTR>(font))) delete font;
+}
+
 static void LayoutShieldButton(HWND window, bool includeShield = true) {
     if (GetDlgCtrlID(window) != IDOK) return;
     const HWND parent = GetParent(window);
@@ -439,8 +505,8 @@ static BOOL CALLBACK RefreshControlDpi(HWND window, LPARAM) {
 
 static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
     if (message == WM_DPICHANGED || message == WM_DPICHANGED_AFTERPARENT) {
-        // DefDlgProc handles the suggested rectangle, fonts and native child
-        // layout in PMv2. Refresh only after that pass, without scaling twice.
+        // DefDlgProc handles the suggested rectangle and native child layout
+        // in PMv2. FontProc restores runtime font overrides after that pass.
         const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
         PostMessage(window, refreshDpiMessage, 0, 0);
         return result;
@@ -518,6 +584,10 @@ static BOOL CALLBACK AttachControl(HWND window, LPARAM) {
     }
     if (lstrcmpi(type, L"RichEdit20W") == 0 || lstrcmpi(type, L"RichEdit20A") == 0
         || lstrcmpi(type, L"RICHEDIT50W") == 0) FormatLicense(window);
+    // RichEdit keeps its own formatted text in twips; preserve the fonts of
+    // ordinary dialogs and text controls without flattening rich formatting.
+    if (lstrcmp(type, L"#32770") == 0 || lstrcmp(type, L"Static") == 0 || lstrcmp(type, L"Button") == 0
+        || lstrcmp(type, L"Edit") == 0 || lstrcmp(type, L"ComboBox") == 0) PreserveControlFont(window);
     return TRUE;
 }
 
@@ -677,6 +747,7 @@ extern "C" __declspec(dllexport) void BrowseFolder(HWND parent, int stringSize, 
 extern "C" __declspec(dllexport) void Apply(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
     InitializeTheme(parent, stack);
     SetWindowSubclass(parent, DialogProc, subclassId, 0);
+    PreserveControlFont(parent);
     EnumChildWindows(parent, AttachControl, 0);
     // MUI draws a second, offset branding label as an embossed shadow. Giving
     // both layers the same foreground produces the blurry text in dark mode.
