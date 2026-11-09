@@ -2046,3 +2046,111 @@ SectionEnd
     if (preview.exitCode === null) preview.kill();
   }
 });
+
+test('the real builder finish page defaults to opening YAB and honors unchecking', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const builder = path.dirname(require.resolve('app-builder-lib/package.json', {
+    paths: [path.dirname(require.resolve('electron-builder/package.json'))],
+  }));
+  const template = await fs.readFile(path.join(builder, 'templates/nsis/assistedInstaller.nsh'), 'utf8');
+  const start = template.indexOf('  !ifmacrodef customFinishPage');
+  const end = template.indexOf('\n!else', start);
+  assert.ok(start >= 0 && end > start, 'Keep the actual builder finish-page block in this preview.');
+  const finishPage = template.slice(start, end);
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/finish-launch-'));
+  const executable = path.join(scratch, 'finish-preview.exe');
+  const source = path.join(scratch, 'finish-preview.nsi');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define MUI_ICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+Var testUpdated
+Var launchLink
+Var launchCount
+!define isUpdated '$testUpdated == 1'
+!macro skipPageIfUpdated
+!macroend
+!macro yabReadThemePreference OUTPUT
+  ReadEnvStr @{OUTPUT} "YAB_PREVIEW_THEME"
+!macroend
+; Record dispatch from the builder's real StartApp without running an app.
+!define StdUtils.ExecShellAsUser '!insertmacro recordLaunch'
+!macro recordLaunch OUTPUT TARGET VERB ARGS
+  IntOp $launchCount $launchCount + 1
+  FileOpen $R8 "$EXEDIR\finish.txt" a
+  FileSeek $R8 0 END
+  FileWriteUTF16LE $R8 "launch=@{TARGET}|@{VERB}|@{ARGS}$\r$\n"
+  FileClose $R8
+  StrCpy @{OUTPUT} 0
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB finish preview"
+OutFile "${executable}"
+RequestExecutionLevel user
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectFinish
+${finishPage}
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro MUI_LANGUAGE TradChinese
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  StrCpy $testUpdated 1
+  StrCpy $launchCount 0
+  StrCpy $launchLink "$EXEDIR\installation folder\YAB.lnk"
+  ReadEnvStr $LANGUAGE "YAB_PREVIEW_LANGUAGE"
+  FileOpen $R8 "$EXEDIR\finish.txt" w
+  FileClose $R8
+  !insertmacro customInit
+FunctionEnd
+Function inspectFinish
+  ShowWindow $HWNDPARENT 0
+  ReadEnvStr $testUpdated "YAB_PREVIEW_UPDATED"
+  SendMessage $mui.FinishPage.Run @{BM_GETCHECK} 0 0 $0
+  System::Call 'user32::GetWindowTextW(p $mui.FinishPage.Run, w.r1, i @{NSIS_MAX_STRLEN})'
+  ReadEnvStr $2 "YAB_PREVIEW_UNCHECK"
+  @{if} $2 == 1
+    SendMessage $mui.FinishPage.Run @{BM_CLICK} 0 0
+  @{endif}
+  SendMessage $mui.FinishPage.Run @{BM_GETCHECK} 0 0 $2
+  FileOpen $R8 "$EXEDIR\finish.txt" a
+  FileSeek $R8 0 END
+  FileWriteUTF16LE $R8 "label=$1|default=$0|after=$2$\r$\n"
+  FileClose $R8
+  System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 1, p 0)'
+FunctionEnd
+Function .onGUIEnd
+  FileOpen $R8 "$EXEDIR\finish.txt" a
+  FileSeek $R8 0 END
+  FileWriteUTF16LE $R8 "count=$launchCount$\r$\n"
+  FileClose $R8
+FunctionEnd
+Section
+  ; No files are installed and no registration or application launch occurs.
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  for (const [language, label] of [[2052, '打开 YAB'], [1028, '開啟 YAB'], [1033, 'Open YAB']]) {
+    for (const theme of [0, 1]) {
+      for (const updated of [0, 1]) {
+        for (const unchecked of [0, 1]) {
+          execute(executable, [], { env: { ...process.env, YAB_PREVIEW_LANGUAGE: String(language),
+            YAB_PREVIEW_THEME: String(theme), YAB_PREVIEW_UPDATED: String(updated), YAB_PREVIEW_UNCHECK: String(unchecked) } });
+          const lines = (await fs.readFile(path.join(scratch, 'finish.txt'), 'utf16le')).trim().split(/\r?\n/);
+          const expected = [`label=${label}|default=1|after=${1 - unchecked}`];
+          if (!unchecked) expected.push(`launch=${path.join(scratch, 'installation folder/YAB.lnk')}|open|${updated ? '--updated' : ''}`);
+          expected.push(`count=${1 - unchecked}`);
+          assert.deepEqual(lines, expected, `language=${language}, theme=${theme}, updated=${updated}, unchecked=${unchecked}`);
+        }
+      }
+    }
+  }
+  t.diagnostic(`Finish page previews (dispatch recorded, no app launch): ${scratch}`);
+});

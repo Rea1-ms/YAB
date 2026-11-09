@@ -102,7 +102,7 @@ module.exports = {
     allowToChangeInstallationDirectory: false,
     deleteAppDataOnUninstall: false,
     createDesktopShortcut: true,
-    runAfterFinish: false,
+    runAfterFinish: true,
     license: '../LICENSE',
   },
 };

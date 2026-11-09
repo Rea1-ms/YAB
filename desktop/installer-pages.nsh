@@ -2,6 +2,11 @@
 ; The license resume rule follows electron-builder's assisted installer:
 ; https://github.com/electron-userland/electron-builder/blob/42eb34fc6a22990762735e563227f4914074dc75/packages/app-builder-lib/templates/nsis/assistedInstaller.nsh
 
+; Retain the builder's checked-by-default run option and unelevated launcher.
+!ifndef BUILD_UNINSTALLER
+  !define MUI_FINISHPAGE_RUN_TEXT "$(yabOpenApp)"
+!endif
+
 !macro customWelcomePage
   !ifdef UAC_IsInnerInstance
     Var yabWelcomeResumeSkipped

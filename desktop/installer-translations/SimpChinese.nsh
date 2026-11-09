@@ -1,6 +1,7 @@
 !insertmacro LANGFILE_EXT "${YAB_TRANSLATION_LANGUAGE}"
 
 ${LangFileString} yabWelcomeTitle "欢迎使用 ${YAB_DISPLAY_NAME} 安装向导"
+${LangFileString} yabOpenApp "打开 YAB"
 ${LangFileString} yabUnWelcomeTitle "欢迎使用 ${YAB_DISPLAY_NAME} 解除安装向导"
 ${LangFileString} yabDirectoryTitle "选择安装位置"
 ${LangFileString} yabDirectorySubtitle "选择 ${YAB_DISPLAY_NAME} 的安装文件夹。"

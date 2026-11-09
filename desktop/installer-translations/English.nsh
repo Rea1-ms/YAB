@@ -1,6 +1,7 @@
 !insertmacro LANGFILE_EXT "${YAB_TRANSLATION_LANGUAGE}"
 
 ${LangFileString} yabWelcomeTitle "Welcome to ${YAB_DISPLAY_NAME} Setup"
+${LangFileString} yabOpenApp "Open YAB"
 ${LangFileString} yabUnWelcomeTitle "Welcome to ${YAB_DISPLAY_NAME} Uninstall"
 ${LangFileString} yabDirectoryTitle "Installation folder"
 ${LangFileString} yabDirectorySubtitle "Choose the folder in which to install ${YAB_DISPLAY_NAME}."
