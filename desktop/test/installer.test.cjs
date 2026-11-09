@@ -436,6 +436,23 @@ Function checkRendering
   System::Call 'gdi32::GetObjectW(p R8, i 24, p R6) i.r0'
   System::Call '*$R6(i, i.r1, i.r2)'
   FileWriteUTF16LE $R5 "bitmap=$0,$1,$2$\r$\n"
+  ; Resize this same live control repeatedly. Its original image remains
+  ; owned by MUI, while the plugin replaces and releases only its own images.
+  System::Call 'kernel32::GetCurrentProcess() p.r0'
+  System::Call 'user32::GetGuiResources(p r0, i 0) i.R9'
+  ${[...sizes, ...sizes.slice().reverse()].map(([nextWidth, nextHeight]) => String.raw`
+  System::Call 'user32::SetWindowPos(p R7, p 0, i 0, i 0, i ${nextWidth}, i ${nextHeight}, i 0x16)'
+  SendMessage $R7 @{STM_GETIMAGE} @{IMAGE_BITMAP} 0 $0
+  System::Call 'gdi32::GetObjectW(p r0, i 24, p R6) i.r0'
+  System::Call '*$R6(i, i.r1, i.r2)'
+  FileWriteUTF16LE $R5 "resize=$0,$1,$2$\r$\n"
+`).join('')}
+  System::Call 'kernel32::GetCurrentProcess() p.r0'
+  System::Call 'user32::GetGuiResources(p r0, i 0) i.r0'
+  IntOp $0 $0 - $R9
+  FileWriteUTF16LE $R5 "gdi-growth=$0$\r$\n"
+  System::Call 'gdi32::GetObjectW(p R8, i 24, p R6) i.r0'
+  FileWriteUTF16LE $R5 "original-valid=$0$\r$\n"
   SendMessage $R7 @{STM_SETIMAGE} @{IMAGE_BITMAP} 0
   @{NSD_FreeImage} $R8
   System::Call 'user32::DestroyWindow(p R7)'
@@ -455,8 +472,15 @@ SectionEnd
     assert.equal(lines[0], `language-font=${font}`);
     assert.match(lines[1], /^dpi=\d+$/);
     assert.equal(lines[2], `title-font=${font}`, 'MUI titles must use the configured outline font.');
-    assert.deepEqual(lines.slice(3), sizes.map(([width, height]) => `bitmap=24,${width},${height}`),
+    assert.deepEqual(lines.filter(line => line.startsWith('bitmap=')), sizes.map(([width, height]) => `bitmap=24,${width},${height}`),
       'Render an actual bitmap at each target size, rather than a scaled stock image.');
+    assert.deepEqual(lines.filter(line => line.startsWith('resize=')), sizes.flatMap(() =>
+      [...sizes, ...sizes.slice().reverse()].map(([width, height]) => `resize=24,${width},${height}`)),
+    'Each resize must render from the original artwork, including when shrinking again.');
+    assert.ok(lines.filter(line => line.startsWith('gdi-growth=')).every(line => Number(line.split('=')[1]) <= 1),
+      'Repeated resizing owns at most one replacement bitmap.');
+    assert.ok(lines.filter(line => line.startsWith('original-valid=')).every(line => line === 'original-valid=24'),
+      'Leave MUI ownership of the initial image intact.');
     t.diagnostic(`${language}: ${lines.slice(0, 3).join(', ')}`);
   }
 });
@@ -1755,6 +1779,17 @@ Function inspectModeShield
   SendMessage $MultiUser.InstallModePage.AllUsers @{BM_CLICK} 0 0
   Call readShield
   FileWrite $report "all=$1$\r$\n"
+  ; Simulate only the child notification order here. Real per-monitor moves
+  ; are covered separately and must not be inferred from these messages.
+  GetDlgItem $0 $HWNDPARENT 1
+  ${Array.from({ length: 3 }, () => String.raw`
+  SendMessage $0 0x2E2 0 0
+  System::Call 'user32::GetPropW(p r0, w "YAB.ShieldExpansion") p.r1'
+  FileWrite $report "dpi-reset=$1$\r$\n"
+  SendMessage $0 0x2E3 0 0
+  Call readShield
+  GetDlgItem $0 $HWNDPARENT 1
+`).join('')}
   Call captureNextButton
   StrCpy $testStep 1
   System::Call 'user32::PostMessageW(p $HWNDPARENT, i @{WM_COMMAND}, p 3, p 0)'
@@ -1792,11 +1827,15 @@ SectionEnd
   for (const theme of [0, 1]) {
     execute(executable, [], { env: { ...process.env, YAB_PREVIEW_THEME: String(theme) } });
     const lines = (await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf8')).trim().split(/\r?\n/);
-    assert.deepEqual(lines.filter(line => !/^(bitmap|dpi|layout)=/.test(line)), [
+    assert.deepEqual(lines.filter(line => !/^(bitmap|dpi|layout|dpi-reset)=/.test(line)), [
       'welcome=0', 'license=0', 'mode=1', 'current=0', 'all=1',
       'license=0', 'welcome=0', 'license=0', 'mode=1',
     ], 'The real install-mode callback owns the shield only while its page is visible.');
     const layouts = lines.filter(line => line.startsWith('layout=')).map(line => line.slice(7).split(',').map(Number));
+    assert.deepEqual(lines.filter(line => line.startsWith('dpi-reset=')), Array(3).fill('dpi-reset=0'),
+      'Restore the unexpanded baseline before native scaling.');
+    assert.deepEqual(layouts.slice(5, 8), Array(3).fill(layouts[4]),
+      'Repeated DPI notifications must not accumulate shield expansion.');
     const baseline = layouts[0].slice(1);
     for (const [shield, left, width, back] of layouts) {
       if (!shield) {
@@ -1831,5 +1870,179 @@ SectionEnd
     assert.ok(Math.abs(iconLeft - (width - 1 - textRight)) <= Math.round(4 * dpi / 96),
       `Center the rendered group: icon=${iconLeft}..${iconRight}, caption=${textLeft}..${textRight}, width=${width}.`);
     t.diagnostic(`theme=${theme}, dpi=${dpi}: shield=${iconLeft}..${iconRight}, caption=${textLeft}..${textRight}, width=${width}`);
+  }
+});
+
+
+test('wizard captions use the packaged icon instead of a system error fallback', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-icons-'));
+  for (const mode of [0, 1]) {
+    const source = path.join(scratch, `icons-${mode}.nsi`);
+    const executable = path.join(scratch, `icons-${mode}.exe`);
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!addplugindir /x86-unicode "${path.resolve(__dirname, '../assets')}"
+!define MUI_ICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+Name "YAB caption icon check"
+OutFile "${executable}"
+RequestExecutionLevel user
+ManifestDPIAware true
+ManifestDPIAwareness "PerMonitorV2,System"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW inspectIcons
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE English
+Function inspectIcons
+  ShowWindow $HWNDPARENT 0
+  System::Call 'kernel32::GetModuleHandleW(p 0) p.R0'
+  System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i.R3'
+  System::Call 'user32::GetSystemMetricsForDpi(i 49, i R3) i.R1'
+  System::Call 'user32::GetSystemMetricsForDpi(i 50, i R3) i.R2'
+  System::Call 'user32::LoadImageW(p R0, p 103, i 1, i R1, i R2, i 0x8000) p.r1'
+  System::Call 'user32::GetSystemMetricsForDpi(i 11, i R3) i.R1'
+  System::Call 'user32::GetSystemMetricsForDpi(i 12, i R3) i.R2'
+  System::Call 'user32::LoadImageW(p R0, p 103, i 1, i R1, i R2, i 0x8000) p.r2'
+  System::Call 'user32::LoadIconW(p 0, p 32513) p.r3'
+  SendMessage $HWNDPARENT 0x80 0 $3
+  SendMessage $HWNDPARENT 0x80 1 $3
+  YabInstallUI::Apply /NOUNLOAD "${mode}" "0"
+  SendMessage $HWNDPARENT 0x7F 0 0 $4
+  SendMessage $HWNDPARENT 0x7F 1 0 $5
+  FileOpen $R8 "$EXEDIR\icons-${mode}.txt" w
+  FileWrite $R8 "$1|$4|$2|$5$\r$\n"
+  FileClose $R8
+  SetErrorLevel 0
+  Quit
+FunctionEnd
+Section
+SectionEnd
+`);
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    execute(executable, []);
+    const [small, actualSmall, large, actualLarge] = (await fs.readFile(path.join(scratch, `icons-${mode}.txt`), 'utf8')).trim().split('|');
+    assert.notEqual(small, '0');
+    assert.notEqual(large, '0');
+    assert.equal(actualSmall, small);
+    assert.equal(actualLarge, large);
+  }
+});
+
+test('per-monitor wizard previews refresh artwork and progress on the available displays', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/per-monitor-'));
+  const source = path.join(scratch, 'dpi-preview.nsi');
+  const executable = path.join(scratch, 'dpi-preview.exe');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+Var testUpdated
+!define isUpdated '$testUpdated == 1'
+!macro skipPageIfUpdated
+!macroend
+!define MUI_ICON "${path.resolve(__dirname, '../assets/installer.ico')}"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB DPI preview"
+OutFile "${executable}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW sidebarReady
+!insertmacro customWelcomePage
+!insertmacro customPageAfterChangeDir
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW progressReady
+!insertmacro MUI_PAGE_INSTFILES
+UninstPage instfiles
+!insertmacro MUI_LANGUAGE English
+!insertmacro customHeader
+Function .onInit
+  StrCpy $testUpdated 0
+  !insertmacro customInit
+FunctionEnd
+Function sidebarReady
+  StrCpy $testUpdated 1
+  ShowWindow $HWNDPARENT 0
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 @{WM_SETTEXT} 0 "STR:Install for all users"
+  SendMessage $0 0x160C 0 1
+  SendMessage $HWNDPARENT @{WM_SETTEXT} 0 "STR:YAB-DPI-PREVIEW:sidebar"
+FunctionEnd
+Function progressReady
+  ShowWindow $HWNDPARENT 0
+  SendMessage $HWNDPARENT @{WM_SETTEXT} 0 "STR:YAB-DPI-PREVIEW:progress"
+FunctionEnd
+Section
+  IfSilent generateUninstaller
+  ; Keep the real progress-page message loop active without installing files.
+  StrCpy $0 0
+  waitForProbe:
+    IfFileExists "$EXEDIR\complete.txt" finished
+    Sleep 50
+    IntOp $0 $0 + 1
+    IntCmp $0 600 finished waitForProbe finished
+  finished:
+    SetErrorLevel 0
+    Quit
+  generateUninstaller:
+    WriteUninstaller "$EXEDIR\uninstall-dpi.exe"
+SectionEnd
+Section Uninstall
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  execute(executable, ['/S']);
+  for (const filename of [executable, path.join(scratch, 'uninstall-dpi.exe')]) {
+    assert.match((await fs.readFile(filename)).toString('utf8'), /<dpiAwareness[^>]*>PerMonitorV2,System<\/dpiAwareness>/i,
+      'The generated installer and uninstaller must both carry the DPI manifest.');
+  }
+  const preview = spawn(executable, [], { windowsHide: true, stdio: 'ignore' });
+  const completed = new Promise((resolve, reject) => {
+    preview.once('error', reject);
+    preview.once('exit', code => resolve(code));
+  });
+  try {
+    const report = path.join(scratch, 'displays.json');
+    execute('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'native-dpi-probe.ps1'),
+      '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', report]);
+    assert.equal(await completed, 0);
+    const samples = JSON.parse((await fs.readFile(report, 'utf8')).replace(/^\uFEFF/, ''));
+    assert.ok(samples.length >= 4);
+    for (const row of samples) {
+      assert.equal(row.PerMonitorV2, true);
+      assert.ok(row.Dpi >= 96);
+      assert.ok(row.Next[2] > 0 && row.Next[3] > 0);
+      if (row.Page === 'sidebar') {
+        assert.ok(row.Sidebar && row.Sidebar[2] > 0 && row.Sidebar[3] > 0);
+      } else {
+        assert.deepEqual(row.Status, row.OriginalStatus, 'Keep the independent label aligned with the native label.');
+        assert.deepEqual(row.Progress, row.OriginalProgress, 'Keep the total bar aligned without altering progress.');
+        assert.ok(row.Percent >= 0 && row.Percent < 100);
+      }
+    }
+    for (const page of ['sidebar', 'progress']) {
+      const rows = samples.filter(row => row.Page === page);
+      const count = new Set(rows.map(row => row.Monitor)).size;
+      for (let index = count; index < rows.length; ++index) {
+        for (const key of ['Window', 'Next', 'Sidebar', 'Status', 'Progress', 'Percent']) {
+          const baseline = rows[count + index % count][key];
+          assert.deepEqual(rows[index][key], baseline, `Repeated monitor visits retain ${page} ${key}.`);
+        }
+      }
+    }
+    const displays = [...new Map(samples.filter(row => row.Page === 'sidebar').map(row => [row.Monitor, row])).values()];
+    const dpis = [...new Set(displays.map(row => row.Dpi))];
+    t.diagnostic(`${displays.length} active display(s), DPI=${dpis.join(',')}; `
+      + (dpis.length > 1 ? 'physical mixed-DPI moves checked.' : 'mixed-DPI hardware was unavailable; resize and notification checks cover simulation only.'));
+    t.diagnostic(`Isolated per-monitor preview: ${scratch}`);
+  } finally {
+    if (preview.exitCode === null) preview.kill();
   }
 });

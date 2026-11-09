@@ -29,10 +29,11 @@
   YabInstallUI::Phase /NOUNLOAD "$(yabFinishing)" 98 99
 !macroend
 
-; Use native dialog scaling at the display's startup DPI instead of bitmap scaling.
-; This also applies to the generated uninstaller; it is not per-monitor DPI support.
+; Windows scales native dialogs per monitor. The plugin refreshes its own
+; artwork and layout after the system finishes scaling their controls.
 !macro customHeader
   ManifestDPIAware true
+  ManifestDPIAwareness "PerMonitorV2,System"
   ; Language packs otherwise choose SimSun, including its bitmap strikes.
   ; MUI uses these same language fonts for its separately created bold titles.
   SetFont "Microsoft YaHei UI" 9

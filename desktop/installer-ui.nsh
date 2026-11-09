@@ -72,6 +72,9 @@ Var yabSidebarBitmap
     SendMessage $0 ${STM_SETIMAGE} ${IMAGE_BITMAP} $4
   ${endif}
   StrCpy $yabSidebarBitmap $4
+  ; Preserve MUI's ownership of this initial bitmap. The plugin owns only
+  ; replacement images rendered when this control changes physical size.
+  YabInstallUI::Sidebar /NOUNLOAD $0 "${IMAGE}"
   Pop $R2
   Pop $R1
   Pop $R0

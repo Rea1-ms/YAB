@@ -23,7 +23,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='installer-native-', dir=output))
     exports = scratch / 'exports.def'
-    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Initialize\n BrowseFolder\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
+    exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Initialize\n BrowseFolder\n Sidebar\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
     assets = desktop / 'assets/checkbox'
     manifest = json.loads((assets / 'manifest.json').read_text(encoding='utf-8'))
     inputs = {desktop / 'native/checkbox-assets.h': manifest['headerSha256']}

@@ -11,6 +11,9 @@
 #include <gdiplus.h>
 #include <shlwapi.h>
 #include <string>
+#include <new>
+#include <cwchar>
+#include <utility>
 #include "checkbox-assets.h"
 
 using namespace Gdiplus;
@@ -28,7 +31,68 @@ static HWND wizardWindow = nullptr;
 // with the wizard. /NOUNLOAD keeps the callback code alive in both cases.
 static thread_local HHOOK messageBoxHook = nullptr;
 static constexpr UINT_PTR subclassId = 0x594142;
+static constexpr UINT refreshDpiMessage = WM_APP + 0x541;
 static Bitmap* checkboxImages[3][checkboxSizeCount] = {};
+
+static void ApplyWizardIcons(HWND parent);
+
+struct SidebarImage {
+    HBITMAP source = nullptr;
+    HBITMAP replacement = nullptr;
+    int width = 0, height = 0;
+    bool resizing = false;
+};
+
+static void ResizeSidebar(HWND window, SidebarImage* image) {
+    if (image->resizing) return;
+    RECT rect;
+    GetClientRect(window, &rect);
+    const int width = rect.right, height = rect.bottom;
+    if (width <= 0 || height <= 0 || (width == image->width && height == image->height)) return;
+    BITMAP source = {};
+    if (!GetObject(image->source, sizeof(source), &source)) return;
+    const HDC dc = GetDC(window);
+    const HDC input = CreateCompatibleDC(dc), output = CreateCompatibleDC(dc);
+    HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+    if (input && output && bitmap) {
+        const HGDIOBJ previousInput = SelectObject(input, image->source);
+        const HGDIOBJ previousOutput = SelectObject(output, bitmap);
+        SetStretchBltMode(output, HALFTONE);
+        SetBrushOrgEx(output, 0, 0, nullptr);
+        const BOOL rendered = StretchBlt(output, 0, 0, width, height, input, 0, 0,
+            source.bmWidth, source.bmHeight, SRCCOPY);
+        SelectObject(input, previousInput);
+        SelectObject(output, previousOutput);
+        if (rendered) {
+            image->resizing = true;
+            SendMessage(window, STM_SETIMAGE, IMAGE_BITMAP, reinterpret_cast<LPARAM>(bitmap));
+            image->resizing = false;
+            if (image->replacement) DeleteObject(image->replacement);
+            image->replacement = bitmap;
+            image->width = width;
+            image->height = height;
+            bitmap = nullptr;
+        }
+    }
+    if (bitmap) DeleteObject(bitmap);
+    if (input) DeleteDC(input);
+    if (output) DeleteDC(output);
+    ReleaseDC(window, dc);
+}
+
+static LRESULT CALLBACK SidebarProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+    UINT_PTR, DWORD_PTR data) {
+    auto* image = reinterpret_cast<SidebarImage*>(data);
+    const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+    if (message == WM_SIZE || message == WM_DPICHANGED_AFTERPARENT) ResizeSidebar(window, image);
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, SidebarProc, subclassId);
+        if (image->replacement) DeleteObject(image->replacement);
+        DeleteObject(image->source);
+        delete image;
+    }
+    return result;
+}
 
 static Bitmap* CheckboxImage(int state, int size) {
     int index = 0;
@@ -128,7 +192,7 @@ static int Scale(HWND window, int value) {
     return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96);
 }
 
-static void LayoutShieldButton(HWND window) {
+static void LayoutShieldButton(HWND window, bool includeShield = true) {
     if (GetDlgCtrlID(window) != IDOK) return;
     const HWND parent = GetParent(window);
     RECT rect;
@@ -137,7 +201,7 @@ static void LayoutShieldButton(HWND window) {
     const int previous = static_cast<int>(reinterpret_cast<INT_PTR>(GetProp(window, L"YAB.ShieldExpansion")));
     const int baseWidth = rect.right - rect.left - previous;
     int expansion = 0;
-    if (GetProp(window, L"YAB.Shield")) {
+    if (includeShield && GetProp(window, L"YAB.Shield")) {
         wchar_t title[1024] = {};
         GetWindowText(window, title, 1024);
         const HDC dc = GetDC(window);
@@ -323,12 +387,16 @@ static void UpdateProgress(bool sample = true) {
 }
 
 static LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
+    // Restore the baseline before Windows scales the dialog. Otherwise the
+    // old pixel expansion is scaled and then subtracted as an unscaled value.
+    if (message == WM_DPICHANGED_BEFOREPARENT) LayoutShieldButton(window, false);
     if (message == BCM_SETSHIELD) {
         if (lparam) SetProp(window, L"YAB.Shield", reinterpret_cast<HANDLE>(1));
         else RemoveProp(window, L"YAB.Shield");
     }
     const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
-    if (message == BCM_SETSHIELD || (message == WM_SETTEXT && GetProp(window, L"YAB.Shield"))) {
+    if (message == BCM_SETSHIELD || message == WM_DPICHANGED_AFTERPARENT
+        || (message == WM_SETTEXT && GetProp(window, L"YAB.Shield"))) {
         LayoutShieldButton(window);
     }
     if (window == progressBar && (message == PBM_SETPOS || message == PBM_DELTAPOS || message == PBM_STEPIT)) UpdateProgress();
@@ -343,7 +411,47 @@ static LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam, LP
     return result;
 }
 
+static void RefreshProgressLayout() {
+    if (!IsWindow(statusLabel) || !IsWindow(progressBar) || !IsWindow(totalProgressBar)) return;
+    const HWND page = GetParent(progressBar);
+    const HWND original = GetDlgItem(page, 1006);
+    for (const auto& pair : {std::pair<HWND, HWND>{original, statusLabel}, {progressBar, totalProgressBar}}) {
+        if (!IsWindow(pair.first)) continue;
+        RECT rect;
+        GetWindowRect(pair.first, &rect);
+        MapWindowPoints(nullptr, page, reinterpret_cast<POINT*>(&rect), 2);
+        SetWindowPos(pair.second, nullptr, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        SendMessage(pair.second, WM_SETFONT, SendMessage(pair.first, WM_GETFONT, 0, 0), TRUE);
+    }
+}
+
+static BOOL CALLBACK RefreshControlDpi(HWND window, LPARAM) {
+    DWORD_PTR data = 0;
+    if (GetWindowSubclass(window, SidebarProc, subclassId, &data)) {
+        ResizeSidebar(window, reinterpret_cast<SidebarImage*>(data));
+    }
+    wchar_t type[32] = {};
+    GetClassName(window, type, 32);
+    if (lstrcmp(type, L"Button") == 0 && GetProp(window, L"YAB.Shield")) LayoutShieldButton(window);
+    return TRUE;
+}
+
 static LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
+    if (message == WM_DPICHANGED || message == WM_DPICHANGED_AFTERPARENT) {
+        // DefDlgProc handles the suggested rectangle, fonts and native child
+        // layout in PMv2. Refresh only after that pass, without scaling twice.
+        const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+        PostMessage(window, refreshDpiMessage, 0, 0);
+        return result;
+    }
+    if (message == refreshDpiMessage) {
+        if (window == wizardWindow) ApplyWizardIcons(window);
+        EnumChildWindows(window, RefreshControlDpi, 0);
+        RefreshProgressLayout();
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        return 0;
+    }
     // Keep the real MessageBox layout, text, buttons and return values. Only
     // paint its surface; system message boxes do not inherit the wizard theme.
     if (GetProp(window, L"YAB.MessageBox") && dark && !highContrast) {
@@ -456,6 +564,20 @@ static void ObserveMessageBoxes() {
     if (!messageBoxHook) messageBoxHook = SetWindowsHookEx(WH_CBT, ThemeMessageBox, nullptr, GetCurrentThreadId());
 }
 
+static void ApplyWizardIcons(HWND parent) {
+    if (!parent || !IsWindow(parent)) return;
+    // NSIS stores the configured application icon in group resource 103.
+    // Explicit window icons avoid a class or system fallback in the caption.
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    const UINT dpi = GetDpiForWindow(parent);
+    const auto smallIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(103), IMAGE_ICON,
+        GetSystemMetricsForDpi(SM_CXSMICON, dpi), GetSystemMetricsForDpi(SM_CYSMICON, dpi), LR_SHARED));
+    const auto largeIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(103), IMAGE_ICON,
+        GetSystemMetricsForDpi(SM_CXICON, dpi), GetSystemMetricsForDpi(SM_CYICON, dpi), LR_SHARED));
+    if (smallIcon) SendMessageW(parent, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
+    if (largeIcon) SendMessageW(parent, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(largeIcon));
+}
+
 static void InitializeTheme(HWND parent, StackEntry** stack) {
     dark = Pop(stack) == L"1";
     highContrast = Pop(stack) != L"0";
@@ -478,12 +600,36 @@ static void InitializeTheme(HWND parent, StackEntry** stack) {
         GdiplusStartup(&graphicsToken, &input, nullptr);
     }
     if (!statusBrush) statusBrush = CreateSolidBrush(dark ? RGB(32, 32, 32) : GetSysColor(COLOR_BTNFACE));
-    if (parent && IsWindow(parent)) wizardWindow = parent;
+    if (parent && IsWindow(parent)) {
+        wizardWindow = parent;
+        ApplyWizardIcons(parent);
+    }
     ObserveMessageBoxes();
 }
 
 extern "C" __declspec(dllexport) void Initialize(HWND parent, int, wchar_t*, StackEntry** stack, void*) {
     InitializeTheme(parent, stack);
+}
+
+extern "C" __declspec(dllexport) void Sidebar(HWND, int, wchar_t*, StackEntry** stack, void*) {
+    const HWND window = reinterpret_cast<HWND>(static_cast<UINT_PTR>(std::wcstoull(Pop(stack).c_str(), nullptr, 0)));
+    const std::wstring filename = Pop(stack);
+    if (!IsWindow(window)) return;
+    DWORD_PTR existing = 0;
+    if (GetWindowSubclass(window, SidebarProc, subclassId, &existing)) return;
+    auto* image = new (std::nothrow) SidebarImage;
+    if (!image) return;
+    image->source = static_cast<HBITMAP>(LoadImageW(nullptr, filename.c_str(), IMAGE_BITMAP, 0, 0,
+        LR_LOADFROMFILE | LR_CREATEDIBSECTION));
+    if (!image->source || !SetWindowSubclass(window, SidebarProc, subclassId, reinterpret_cast<DWORD_PTR>(image))) {
+        if (image->source) DeleteObject(image->source);
+        delete image;
+        return;
+    }
+    RECT rect;
+    GetClientRect(window, &rect);
+    image->width = rect.right;
+    image->height = rect.bottom;
 }
 
 extern "C" __declspec(dllexport) void BrowseFolder(HWND parent, int stringSize, wchar_t*, StackEntry** stack, void*) {
