@@ -43,35 +43,43 @@
   }
 </script>
 
-<section class="card web-settings">
+<section class="card settings-card web-settings">
   <h2>{$t('网页访问')}</h2>
   <p class="hint">{$t('适用于所有配置，保存后重启应用生效。')}</p>
   <p class="current">{$t('当前访问地址：')}<a href={window.location.origin} target="_blank" rel="noreferrer">{window.location.origin}</a></p>
   {#if info?.active}
     <p class="hint">{$t('当前监听：')}{info.active.host}:{info.active.port}</p>
   {/if}
-  <label for="web-listen-host">{$t('监听地址')}</label>
-  <input id="web-listen-host" class="input" bind:value={host} placeholder="127.0.0.1" disabled={!info || saving} />
-  <p class="hint">{$t('127.0.0.1 仅允许本机访问；0.0.0.0 允许局域网访问。')}</p>
-  <p class="hint">{$t('局域网访问需要先通过 BAAS_WEBUI_TOKEN 环境变量设置访问密码。')}</p>
-  <label for="web-listen-port">{$t('网页端口')}</label>
-  <input id="web-listen-port" class="input" type="text" inputmode="numeric" bind:value={port} disabled={!info || saving} />
-  {#if info?.port_override}
-    <p class="notice">{$t('当前端口由 BAAS_DESKTOP_PORT 环境变量覆盖，移除后才使用此设置。')}</p>
-  {:else if pending}
-    <p class="notice">{$t('设置已更改，重启应用后生效。')}</p>
-  {/if}
-  <button class="btn" onclick={save} disabled={!$connected || !info || saving}>{$t('保存')}</button>
+  <div class="field">
+    <label for="web-listen-host">{$t('监听地址')}</label>
+    <div class="ctl">
+      <input id="web-listen-host" class="input host" bind:value={host} placeholder="127.0.0.1" disabled={!info || saving} />
+      <p class="hint">{$t('127.0.0.1 仅允许本机访问；0.0.0.0 允许局域网访问。')}</p>
+      <p class="hint">{$t('局域网访问需要先通过 BAAS_WEBUI_TOKEN 环境变量设置访问密码。')}</p>
+    </div>
+  </div>
+  <div class="field">
+    <label for="web-listen-port">{$t('网页端口')}</label>
+    <div class="ctl">
+      <div class="port-row">
+        <input id="web-listen-port" class="input port" type="text" inputmode="numeric" bind:value={port} disabled={!info || saving} />
+        <button class="btn" onclick={save} disabled={!$connected || !info || saving}>{$t('保存')}</button>
+      </div>
+      {#if info?.port_override}
+        <p class="notice">{$t('当前端口由 BAAS_DESKTOP_PORT 环境变量覆盖，移除后才使用此设置。')}</p>
+      {:else if pending}
+        <p class="notice">{$t('设置已更改，重启应用后生效。')}</p>
+      {/if}
+    </div>
+  </div>
 </section>
 
 <style>
-  .web-settings { padding: 18px; }
-  h2 { margin: 0 0 12px; font-size: 16px; }
-  label { display: block; margin: 12px 0 6px; font-size: 13px; color: var(--muted); }
-  .input { width: 100%; max-width: 360px; }
-  .hint { color: var(--faint); font-size: 12px; line-height: 1.6; margin: 5px 0; }
+  .host { --settings-control-width: 240px; }
+  .port { --settings-control-width: 112px; }
+  .port-row { display: flex; gap: 8px; align-items: center; }
+  .port-row .btn { flex: none; }
   .current { font-size: 13px; overflow-wrap: anywhere; }
   a { color: var(--accent); }
-  .notice { font-size: 12px; color: var(--accent); line-height: 1.6; }
-  .btn { margin-top: 14px; }
+  .notice { margin: 0; font-size: 12px; color: var(--accent); line-height: 1.5; overflow-wrap: anywhere; }
 </style>

@@ -39,6 +39,26 @@ app.whenReady().then(async () => {
     window.setSize(width, 640);
     await window.webContents.executeJavaScript("document.getElementById('tool').value='custom'; document.getElementById('tool').dispatchEvent(new Event('change'))");
     await until(window, "!document.getElementById('save').disabled");
+    const geometry = await window.webContents.executeJavaScript(`(() => {
+      const status = document.querySelector('#status');
+      const heading = document.querySelector('.location-heading').getBoundingClientRect();
+      const label = document.querySelector('label[for="location"]').getBoundingClientRect();
+      const read = () => document.querySelector('#index').getBoundingClientRect().top;
+      status.textContent = '';
+      const before = read();
+      status.textContent = '正在检查…';
+      const during = read();
+      const statusRect = status.getBoundingClientRect();
+      status.textContent = '这是一个较长的错误提示，用来检查窄窗口时下方设置不会移动。'.repeat(5);
+      const after = read();
+      const overflow = document.body.scrollWidth > innerWidth;
+      status.textContent = '';
+      return { before, during, after, overflow, sameLine: Math.abs(statusRect.top - label.top) < 8 && statusRect.bottom <= heading.bottom };
+    })()`);
+    assert.equal(geometry.before, geometry.during);
+    assert.equal(geometry.before, geometry.after);
+    assert.equal(geometry.overflow, false);
+    assert.equal(geometry.sameLine, true);
     const state = await window.webContents.executeJavaScript(`(() => {
       const tool = document.getElementById('tool');
       const field = document.getElementById('location');

@@ -30,7 +30,7 @@
 //   2. 读取网页监听设置并检查端口（默认 127.0.0.1:22267）
 //   3. 按优先级找 python / 打包产物，以仓库根为 cwd 拉起 `python -m server`
 //   4. 轮询 GET /api/health，成功后加载主窗口（此前显示 loading 页）
-//   5. 托盘：显示主窗口 / 重新载入页面 / 退出；关窗 = 隐藏到托盘
+//   5. 托盘常驻；关窗按设置隐藏、释放页面或询问
 //   6. 退出时杀后端进程树（Windows: taskkill /T /F，其他: SIGTERM+SIGKILL 兜底）
 //   7. `electron . --smoke` 无窗口冒烟模式，供 CI/无头验证
 //
@@ -47,6 +47,7 @@ const { loadRuntimeSettings } = require('./runtime-settings.cjs');
 const { openRuntimeWindow } = require('./runtime-window.cjs');
 const { StartupProgress, createStartupScreen } = require('./startup.cjs');
 const { showMessage } = require('./message-window.cjs');
+const { WindowMemoryMode, readWindowMode, saveWindowMode, attachWindowSettings } = require('./window-mode.cjs');
 
 const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
 fs.mkdirSync(dataPath, { recursive: true });
@@ -78,6 +79,22 @@ let runtimeFallbackMessage = '';
 const preparation = new AbortController();
 const logLines = []; // 后端 stdout/stderr 环形缓冲
 const startup = new StartupProgress();
+const windowModeFile = path.join(dataPath, 'desktop-settings.json');
+const windowMode = new WindowMemoryMode({
+  canRelease: () => !quitting && backend?.healthy && startup.state.status === 'complete'
+    && !BrowserWindow.getAllWindows().some(window => window !== mainWindow),
+  isQuitting: () => quitting,
+  onHidden: released => notifyHiddenToTray(released),
+  ask: window => showMessage(window, { title: '关闭窗口', message: '关闭窗口后开启轻量模式？',
+    detail: '轻量模式会释放界面，后台任务继续运行。再次打开时会重新加载页面，未保存的输入会丢失。',
+    buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
+    checkboxLabel: '下次不再提示', checkboxChecked: true }),
+  save: action => saveWindowMode(windowModeFile, action),
+  onError: error => showMessage(mainWindow, { type: 'error', message: '无法保存关闭窗口设置',
+    detail: error.message, buttons: ['确定'] }),
+});
+attachWindowSettings(ipcMain, { mode: windowMode, filename: windowModeFile,
+  getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
 
 // ------------------------------ 小工具 ------------------------------
 
@@ -451,10 +468,9 @@ function isAppUrl(url) {
   }
 }
 
-async function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+async function createMainWindow({ restoring = false, state = null } = {}) {
+  const window = new BrowserWindow({
+    ...(state?.bounds || { width: 1280, height: 800 }),
     minWidth: 960,
     minHeight: 640,
     backgroundColor: '#0f1115',
@@ -462,7 +478,7 @@ async function createMainWindow() {
     icon: path.join(__dirname, 'assets', 'logo.ico'),
     title: 'YAB',
     fullscreenable: true,
-    show: true,
+    show: !restoring,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -470,16 +486,13 @@ async function createMainWindow() {
     },
   });
 
-  // 关闭按钮 = 隐藏到托盘；真正的退出只走托盘菜单 / before-quit
-  mainWindow.on('close', (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    mainWindow.hide();
-    notifyHiddenToTray();
-  });
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    startupScreen = null;
+  mainWindow = window;
+  windowMode.attach(window);
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+      startupScreen = null;
+    }
   });
 
   // 外部域名导航交给系统浏览器
@@ -492,23 +505,38 @@ async function createMainWindow() {
     if (!isAppUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  startupScreen = await createStartupScreen(mainWindow, startup, ipcMain);
-  return mainWindow;
+  if (restoring) {
+    // Reconnect the page to the existing service; never prepare or start another backend.
+    try {
+      await window.loadURL(windowMode.pageUrl(mainPageUrl()));
+    } catch (error) {
+      if (window.isDestroyed()) return window;
+      window.destroy();
+      throw error;
+    }
+  } else {
+    startupScreen = await createStartupScreen(window, startup, ipcMain);
+  }
+  return window;
 }
 
-function showMainWindow() {
-  if (!mainWindow) createMainWindow();
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+async function showMainWindow() {
+  if (quitting) return null;
+  try {
+    return await windowMode.show(state => createMainWindow({ restoring: true, state }));
+  } catch (error) {
+    if (!quitting) await showMessage(null, { type: 'error', title: '无法打开主窗口',
+      message: '无法打开主窗口', detail: error.message, buttons: ['确定'] });
+    return null;
+  }
 }
 
 // 首次隐藏到托盘时提示一次
-function notifyHiddenToTray() {
+function notifyHiddenToTray(released = false) {
   if (trayHintShown) return;
   trayHintShown = true;
   const title = 'YAB';
-  const text = 'YAB 已最小化到托盘';
+  const text = released ? '界面已关闭，后台任务继续运行' : 'YAB 已最小化到托盘';
   if (isWindows() && tray) {
     tray.displayBalloon({ iconType: 'info', title, content: text });
   } else {
@@ -526,7 +554,11 @@ function createTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
-      { label: '重新载入页面', click: () => mainWindow && mainWindow.webContents.reload() },
+      { label: '重新载入页面', click: async () => {
+        const existing = mainWindow;
+        const window = await showMainWindow();
+        if (window && window === existing && !window.isDestroyed()) window.webContents.reload();
+      } },
       { label: '在浏览器中打开', click: () => backend?.healthy && shell.openExternal(mainPageUrl()) },
       ...(app.isPackaged ? [{ label: '运行环境', click: async () => {
         try {
@@ -556,6 +588,7 @@ function createTray() {
 async function runGui() {
   await app.whenReady();
   try {
+    windowMode.closeAction = readWindowMode(windowModeFile);
     createTray();
     await createMainWindow();
     repoRoot = await resolveRepoRoot();

@@ -12,7 +12,7 @@ let ready = false;
 let customPath = '';
 
 function updateTool() { locationField.readOnly = tool.value !== 'custom'; }
-function showStatus(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
+function showStatus(text, error = false) { status.textContent = text; status.title = text; status.classList.toggle('error', error); }
 async function action(work) {
   controls.forEach(control => { control.disabled = true; });
   showStatus('正在检查…');

@@ -150,6 +150,54 @@ select.input {
   border-radius: 10px;
 }
 
+/* —— 设置卡片与字段 —— */
+.settings-card {
+  padding: 16px 18px;
+  min-width: 0;
+}
+.settings-card h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-card .field {
+  display: flex;
+  gap: 14px;
+  padding: 7px 0;
+  align-items: flex-start;
+}
+.settings-card .field > label {
+  width: 150px;
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  padding-top: 6px;
+  text-align: right;
+}
+.settings-card .ctl {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-card .ctl .input {
+  width: 100%;
+  min-width: 0;
+  max-width: var(--settings-control-width, 360px);
+}
+.settings-card .hint {
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-card > .hint {
+  margin-bottom: 10px;
+}
+
 /* —— 状态点 —— */
 .dot {
   display: inline-block;

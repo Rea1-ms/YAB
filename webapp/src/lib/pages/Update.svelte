@@ -134,7 +134,7 @@
 </script>
 
 <div class="page">
-  <div class="card sec">
+  <div class="card sec settings-card">
     <h2>{$t('更新设置')}</h2>
     <div class="ver">
       {$t('当前版本：')}<b class="mono">{info?.current_version ?? '…'}</b>
@@ -229,7 +229,7 @@
     </div>
   </div>
 
-  <div class="card sec">
+  <div class="card sec settings-card">
     <h2>{$t('帮助文档')}</h2>
     {#if helpList.length === 0}
       <div class="dim">{$t('暂无帮助文档')}</div>
@@ -281,15 +281,7 @@
     padding: 16px;
     overflow: auto;
   }
-  .sec {
-    padding: 16px 18px;
-  }
-  .sec h2 {
-    margin: 0 0 12px;
-    font-size: 15px;
-    color: var(--accent);
-    font-weight: 600;
-  }
+  .settings-card { --settings-control-width: 420px; }
   .ver {
     font-size: 13px;
     margin-bottom: 12px;
@@ -326,31 +318,6 @@
     border: 1px solid rgba(224, 175, 104, 0.3);
     border-radius: 6px;
     padding: 2px 10px;
-  }
-  .field {
-    display: flex;
-    gap: 14px;
-    padding: 7px 0;
-    align-items: flex-start;
-  }
-  .field label {
-    width: 150px;
-    flex: none;
-    color: var(--muted);
-    font-size: 13px;
-    padding-top: 6px;
-    text-align: right;
-  }
-  .ctl {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .ctl :global(.input) {
-    max-width: 420px;
-    width: 100%;
   }
   .row {
     display: flex;

@@ -2,11 +2,17 @@
 window.yabMessage.get().then(model => {
   document.getElementById('message').textContent = model.message;
   document.getElementById('detail').textContent = model.detail;
+  const checkbox = document.getElementById('remember');
+  if (model.checkboxLabel) {
+    document.getElementById('remember-row').hidden = false;
+    document.getElementById('remember-label').textContent = model.checkboxLabel;
+    checkbox.checked = model.checkboxChecked;
+  }
   let responding = false;
   const respond = async index => {
     if (responding) return;
     responding = true;
-    try { await window.yabMessage.respond(index); } catch { responding = false; }
+    try { await window.yabMessage.respond(index, checkbox.checked); } catch { responding = false; }
   };
   model.buttons.forEach((label, index) => {
     const button = document.createElement('button');

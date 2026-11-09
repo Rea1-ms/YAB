@@ -9,11 +9,13 @@ app.setPath('userData', process.env.YAB_DIALOG_TEST_DATA);
 app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
 async function ready(window) {
-  for (let count = 0; count < 100; count++) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (window.isDestroyed()) throw new Error('Message preview closed before becoming ready');
     if (!window.webContents.isLoading() && await window.webContents.executeJavaScript("document.querySelectorAll('button').length > 0")) return;
     await delay(30);
   }
-  throw new Error('Message preview did not become ready');
+  throw new Error('Message preview did not become ready within 10 seconds');
 }
 app.whenReady().then(async () => {
   const systemDark = nativeTheme.shouldUseDarkColors;

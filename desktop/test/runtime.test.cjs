@@ -274,7 +274,7 @@ test('manifest traversal is rejected before executing a package', async () => {
   assert.equal(f.calls.length, 0);
 });
 
-test('lightweight installation downloads the pinned interpreter and hashed dependencies using the selected mirror', async () => {
+test('lightweight installation checks the shared pinned interpreter and installs hashed dependencies using the selected mirror', async () => {
   for (const index of Object.keys(INDEXES)) {
     const f = await fixture({ online: true });
     const configRoot = path.join(f.data, '../installed/config');
@@ -283,7 +283,9 @@ test('lightweight installation downloads the pinned interpreter and hashed depen
     const install = f.calls.find(call => call.args[0] === 'python');
     assert.equal(install.args.at(-1), '3.11.14');
     assert.ok(install.args.includes('--no-registry'));
-    assert.equal(install.options.env.UV_PYTHON_INSTALL_DIR, path.join(f.data, 'python'));
+    assert.equal(install.options.env.UV_PYTHON_INSTALL_DIR, process.env.UV_PYTHON_INSTALL_DIR);
+    assert.ok(!install.args.includes('--reinstall'));
+    assert.ok(!install.args.includes('--force'));
     const sync = f.calls.find(call => call.args[1] === 'sync');
     assert.equal(sync.args[sync.args.indexOf('--default-index') + 1], INDEXES[index].url);
     assert.ok(sync.args.includes('--require-hashes'));
@@ -364,14 +366,17 @@ test('runtime settings persist per installation and reject unsupported indexes o
 });
 
 test('host uv options cannot override the selected source or make a complete package access the network', () => {
-  const inherited = { PATH: 'preserved', UV_CACHE_DIR: 'shared-cache', UV_OFFLINE: '1', UV_NO_CACHE: '1',
+  const inherited = { PATH: 'preserved', UV_CACHE_DIR: 'shared-cache', UV_PYTHON_INSTALL_DIR: 'managed-python', UV_OFFLINE: '1', UV_NO_CACHE: '1',
     UV_NO_VERIFY_HASHES: '1', UV_INDEX: 'https://other.invalid', UV_PYTHON: 'wrong-python',
     PYTHONPATH: 'unsafe', VIRTUAL_ENV: 'wrong-env' };
   const online = runtimeEnvironment(true, 'user-data', inherited);
   assert.equal(online.UV_CACHE_DIR, 'shared-cache');
+  assert.equal(online.UV_PYTHON_INSTALL_DIR, 'managed-python');
+  assert.equal(runtimeEnvironment(true, 'user-data', {}).UV_PYTHON_INSTALL_DIR, undefined);
   assert.equal(online.PATH, 'preserved');
   for (const key of ['UV_OFFLINE', 'UV_NO_CACHE', 'UV_NO_VERIFY_HASHES', 'UV_INDEX', 'UV_PYTHON', 'PYTHONPATH', 'VIRTUAL_ENV']) assert.equal(online[key], undefined);
   const offline = runtimeEnvironment(false, 'user-data', inherited);
   assert.equal(offline.UV_OFFLINE, '1');
   assert.equal(offline.UV_PYTHON_DOWNLOADS, 'never');
+  assert.equal(offline.UV_PYTHON_INSTALL_DIR, undefined);
 });

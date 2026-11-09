@@ -16,22 +16,29 @@ function showMessage(parent, options = {}, { show = true } = {}) {
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
       preload: path.join(__dirname, 'message-preload.cjs'), additionalArguments: [`--yab-message-channel=${channel}`] } });
   let response = cancelId;
-  ipcMain.handle(channel, (event, action, value) => {
+  let checkboxChecked = Boolean(options.checkboxChecked);
+  ipcMain.handle(channel, (event, action, value, checked) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('无效的消息请求');
     if (action === 'get') return { message: String(options.message || ''), detail: String(options.detail || ''),
-      buttons, defaultId, cancelId };
+      buttons, defaultId, cancelId, checkboxLabel: String(options.checkboxLabel || ''), checkboxChecked };
     if (action !== 'respond' || !Number.isInteger(value) || value < 0 || value >= buttons.length) throw new Error('无效的按钮');
+    if (options.checkboxLabel) {
+      if (typeof checked !== 'boolean') throw new Error('无效的复选框状态');
+      checkboxChecked = checked;
+    }
     response = value;
     setImmediate(() => window.close());
     return true;
   });
   const result = new Promise(resolve => window.once('closed', () => {
     ipcMain.removeHandler(channel);
-    resolve({ response });
+    resolve(options.checkboxLabel ? { response, checkboxChecked } : { response });
   }));
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
-  window.loadFile(path.join(__dirname, 'message.html')).catch(() => window.close());
+  window.loadFile(path.join(__dirname, 'message.html')).catch(() => {
+    if (!window.isDestroyed()) window.close();
+  });
   if (show) window.once('ready-to-show', () => window.show());
   return result;
 }

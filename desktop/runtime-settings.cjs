@@ -75,19 +75,20 @@ async function resolveUv(settings, bundledPath) {
 function runtimeEnvironment(online, userData, inherited = process.env) {
   const env = { ...inherited };
   // Host uv policies must not override the selected index, locked hashes or
-  // offline guarantee. Preserve only the shared cache and download transport.
+  // offline guarantee. Preserve the managed interpreter location and transport.
   for (const key of Object.keys(env)) {
     if (key.toUpperCase().startsWith('UV_')) delete env[key];
   }
-  for (const key of ['UV_PYTHON_INSTALL_MIRROR', 'UV_HTTP_TIMEOUT', 'UV_SYSTEM_CERTS']) {
+  for (const key of ['UV_PYTHON_INSTALL_DIR', 'UV_PYTHON_INSTALL_MIRROR', 'UV_HTTP_TIMEOUT', 'UV_SYSTEM_CERTS']) {
     if (online && inherited[key]) env[key] = inherited[key];
   }
   Object.assign(env, { UV_NO_CONFIG: '1', UV_NO_PROGRESS: '1', UV_LINK_MODE: 'copy',
     UV_CACHE_DIR: inherited.UV_CACHE_DIR || path.join(userData, 'uv-cache'),
     UV_PYTHON_DOWNLOADS: online ? 'automatic' : 'never',
     PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' });
-  if (online) env.UV_PYTHON_INSTALL_DIR = path.join(userData, 'python');
-  else env.UV_OFFLINE = '1';
+  // The normal uv directory reuses the exact pinned interpreter if present.
+  // Keep application dependencies isolated in the dedicated virtual environment.
+  if (!online) env.UV_OFFLINE = '1';
   for (const key of ['PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV']) delete env[key];
   return env;
 }

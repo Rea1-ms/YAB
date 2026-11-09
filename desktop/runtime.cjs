@@ -232,7 +232,7 @@ async function prepareRuntime(bundle, userData, options = {}) {
         const { settings } = await loadRuntimeSettings(configRoot, userData, manifest.uv === 'bundled');
         const uv = await (options.resolveUv || resolveUv)(settings, path.join(runtimeRoot, 'uv.exe'));
         const index = INDEXES[settings.index].url;
-        progress('正在下载或检查解释器…', 32);
+        progress('正在检查或准备解释器…', 32);
         await execute(uv, ['python', 'install', '--no-config', '--no-bin', '--no-registry', manifest.python]);
         progress('正在创建独立运行环境…', 46);
         await execute(uv, ['venv', '--no-config', '--managed-python', '--no-python-downloads',
