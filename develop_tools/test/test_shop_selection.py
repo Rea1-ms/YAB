@@ -2,7 +2,6 @@
 
 import unittest
 from itertools import count
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -11,9 +10,13 @@ import numpy as np
 
 from core import color, position
 from core.exception import RequestHumanTakeOver
+from develop_tools.test.offline_support import (
+    ROOT,
+    load_fixture,
+    record_action,
+    record_frame,
+)
 from module.shop import shop_utils as shop
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 class ShopRecognitionTests(unittest.TestCase):
@@ -27,13 +30,14 @@ class ShopRecognitionTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def worker(self, ratio=1):
-        crop = cv2.imread(str(Path(__file__).with_name('fixtures') / 'global_shop_last_row.png'))
-        self.assertIsNotNone(crop)
+        crop = load_fixture('global_shop_last_row')
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
         frame[350:605, 620:1225] = crop
+        frame = cv2.resize(frame, (int(1280 * ratio), int(720 * ratio)))
+        record_frame(frame)
         return SimpleNamespace(
             server='Global', identifier='Global_en-us', ratio=ratio,
-            latest_img_array=cv2.resize(frame, (int(1280 * ratio), int(720 * ratio))),
+            latest_img_array=frame,
         )
 
     def test_reported_screenshot_recognizes_all_four_bottom_slots(self):
@@ -65,7 +69,9 @@ class ShopRecognitionTests(unittest.TestCase):
 class ShopSelectionTests(unittest.TestCase):
     def worker(self):
         return SimpleNamespace(server='Global', flag_run=True, logger=Mock(),
-                               update_screenshot_array=Mock(), click=Mock())
+                               update_screenshot_array=Mock(),
+                               click=Mock(side_effect=lambda x, y, **options: record_action(
+                                   {'type': 'click', 'position': [x, y], 'options': options})))
 
     def row(self, columns=(0, 1, 2, 3), y=300):
         return ([((col, y), True, 'creditpoints') for col in columns], [(y, len(columns))])

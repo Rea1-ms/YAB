@@ -1,26 +1,31 @@
 """Replay cropped game screenshots without connecting to a device."""
 
-from pathlib import Path
 import runpy
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import cv2
 import numpy as np
 
 from core.Baas_thread import Baas_thread
+
+# isort: split
 from core import image, picture, position
 from core.exception import RequestHumanTakeOver
+from develop_tools.test.offline_support import FrameReplay, ReplayClock, load_fixture
 from module import collect_daily_free_power as free_power
 
-
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = Path(__file__).with_name('fixtures')
 IDENTIFIERS = ('Global_en-us', 'Global_zh-tw', 'Global_ko-kr')
 
 
 class MainPagePopupTests(unittest.TestCase):
     def setUp(self):
+        self.clock = ReplayClock()
+        clock_patch = patch.object(picture, 'time', self.clock)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
         self.templates = {}
         self.ranges = {}
         for identifier in IDENTIFIERS:
@@ -37,17 +42,18 @@ class MainPagePopupTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def frame(self, kind, home_visible=False):
-        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        frame = (load_fixture('global_startup_promo_20261108') if kind == 'promo-capture'
+                 else np.zeros((720, 1280, 3), dtype=np.uint8))
         fixtures = {
             'promo': [('global_startup_close.png', (1143, 48)), ('global_startup_dismiss.png', (78, 622))],
+            'promo-2': [('global_startup_close.png', (1143, 48)), ('global_startup_dismiss_2.png', (78, 622))],
             'news': [('global_news_chrome.png', (35, 84)), ('global_news_close.png', (1180, 15))],
             'launch': [('global_store_login.png', (359, 136)), ('global_store_session.png', (551, 589))],
             'store': [('global_store_login.png', (359, 136)), ('global_store_no_session.png', (551, 589))],
             'checked': [('global_store_login.png', (359, 136)), ('global_store_session.png', (551, 589))],
         }
         for name, (x, y) in fixtures.get(kind, []):
-            crop = cv2.imread(str(FIXTURES / name))
-            self.assertIsNotNone(crop)
+            crop = load_fixture(name)
             height, width = crop.shape[:2]
             frame[y:y + height, x:x + width] = crop
         if kind == 'checked':
@@ -77,15 +83,9 @@ class MainPagePopupTests(unittest.TestCase):
             'reward_acquired': [[(12, 2)], [(4, 4, 5, 5, 6, 6)]],
         }
         frames = [cv2.resize(frame, (int(1280 * ratio), int(720 * ratio))) for frame in frames]
-        cursor = [0]
-
-        def click(*args, **kwargs):
-            if cursor[0] + 1 >= len(frames):
-                self.fail(f'Unexpected extra click: {args}')
-            cursor[0] += 1
-
-        worker.get_screenshot_array = Mock(side_effect=lambda: frames[cursor[0]])
-        worker.click = Mock(side_effect=click)
+        worker.replay = FrameReplay(frames, self.clock)
+        worker.get_screenshot_array = Mock(side_effect=worker.replay.screenshot)
+        worker.click = Mock(side_effect=worker.replay.click)
         worker.latest_img_array = frames[0]
         return worker
 
@@ -106,13 +106,16 @@ class MainPagePopupTests(unittest.TestCase):
         clicks = [call(572, 610, wait_over=True)] if kind == 'launch' else []
         return clicks + [call(886, 165, wait_over=True)]
 
-    def test_startup_promotion_closes_in_all_global_languages_and_resolutions(self):
+    def test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions(self):
         for identifier in IDENTIFIERS:
             for ratio in (.75, 1, 1.5, 2):
-                with self.subTest(identifier=identifier, ratio=ratio):
-                    worker = self.worker([self.frame('promo'), self.frame('home')], identifier, ratio)
-                    worker.to_main_page()
-                    worker.click.assert_called_once_with(1173, 75, wait_over=True)
+                for kind in ('promo', 'promo-2'):
+                    with self.subTest(identifier=identifier, ratio=ratio, kind=kind):
+                        frame = self.frame(kind)
+                        frame[48:104, 1143:1203] = 0
+                        worker = self.worker([frame, self.frame('home')], identifier, ratio)
+                        worker.to_main_page()
+                        worker.click.assert_called_once_with(1173, 75, wait_over=True)
 
     def test_startup_promotion_closes_before_accepting_visible_home_features(self):
         worker = self.worker([self.frame('promo', home_visible=True), self.frame('home')])
@@ -120,14 +123,37 @@ class MainPagePopupTests(unittest.TestCase):
         worker.click.assert_called_once_with(1173, 75, wait_over=True)
         self.assertGreaterEqual(worker.get_screenshot_array.call_count, 2)
 
-    def test_startup_promotion_requires_both_close_and_footer_controls(self):
-        for area in ((1143, 48, 1203, 104), (78, 622, 126, 670)):
-            frame = self.frame('promo')
-            x1, y1, x2, y2 = area
-            frame[y1:y2, x1:x2] = 0
-            worker = self.worker([frame])
-            self.assertFalse(picture.handle_global_main_page_overlay(worker))
-            worker.click.assert_not_called()
+    def test_reported_startup_capture_closes_in_all_languages_and_resolutions(self):
+        for identifier in IDENTIFIERS:
+            for ratio in (.75, 1, 1.5, 2):
+                with self.subTest(identifier=identifier, ratio=ratio):
+                    worker = self.worker([self.frame('promo-capture'), self.frame('home')], identifier, ratio)
+                    worker.to_main_page()
+                    worker.click.assert_called_once_with(1173, 75, wait_over=True)
+
+    def test_missed_promotion_close_waits_before_retrying_on_repeated_frames(self):
+        frame = self.frame('promo-capture')
+        worker = self.worker([frame] * 6 + [self.frame('home')])
+        worker.to_main_page()
+        self.assertEqual(worker.click.call_args_list, [call(1173, 75, wait_over=True)] * 2)
+        self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+        first, second = worker.replay.actions
+        self.assertGreater(second['time'] - first['time'], 2)
+
+    def test_promotion_click_without_a_confirmed_next_screen_cannot_finish(self):
+        worker = self.worker([self.frame('promo-capture')] * 4)
+        with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+            worker.to_main_page()
+        worker.click.assert_called_once_with(1173, 75, wait_over=True)
+
+    def test_startup_promotion_requires_footer_control(self):
+        for kind in ('promo', 'promo-2'):
+            with self.subTest(kind=kind):
+                frame = self.frame(kind)
+                frame[622:670, 78:126] = 0
+                worker = self.worker([frame])
+                self.assertFalse(picture.handle_global_main_page_overlay(worker))
+                worker.click.assert_not_called()
 
     def test_startup_promotion_does_not_depend_on_banner_artwork_or_label(self):
         frame = self.frame('promo')

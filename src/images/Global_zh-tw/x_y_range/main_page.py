@@ -11,6 +11,7 @@ x_y_range = {
     'news-webview-close': (1194, 22, 1235, 64),
     'startup-promo-close': (1148, 52, 1198, 99),
     'startup-promo-dismiss': (82, 626, 122, 666),
+    'startup-promo-dismiss-2': (84, 636, 112, 664),
     'login-feature': (40, 625, 96, 649),
     'news': (50, 102, 96, 144),
     'daily-attendance': (540, 90, 1100, 174),
