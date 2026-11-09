@@ -1,7 +1,7 @@
 {
   "name": "yab-desktop",
   "productName": "YAB",
-  "version": "1.4.3",
+  "version": "0.0.1",
   "private": true,
   "description": "YAB 桌面壳：Electron 系统托盘 + 拉起 WebUI 后端（python -m server）",
   "main": "main.js",

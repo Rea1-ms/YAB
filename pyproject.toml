@@ -1,6 +1,6 @@
 [project]
 name = "yab"
-version = "1.4.3"
+version = "0.0.1"
 description = "用于实现蔚蓝档案自动化"
 authors = [{ name = "pur1fying", email = "2274916027@qq.com" }]
 dependencies = [
@@ -34,3 +34,9 @@ license = { text = "GPL-3.0-only" }
 [dependency-groups]
 # 仅保留给旧版冻结打包脚本，桌面发行不安装此组。
 legacy-build = ["pyinstaller"]
+
+# 仅在同步原仓库后更新此基准，保留原仓库的版本与提交。
+[tool.yab.upstream]
+repository = "https://github.com/pur1fying/blue_archive_auto_script"
+version = "1.4.3"
+commit = "223000d10f3dff73f980cba04ec73fe9755fc75a"

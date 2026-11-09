@@ -1,11 +1,22 @@
 """Identify source distributions without relying on a frozen executable."""
 
 import json
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def project_metadata():
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+    try:
+        with (ROOT / 'pyproject.toml').open('rb') as stream:
+            return tomllib.load(stream)
+    except (OSError, ValueError):
+        return {}
 
 
 def is_distribution(root=None):

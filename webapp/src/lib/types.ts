@@ -183,6 +183,7 @@ export interface AssetsData {
 export interface UpdateInfo {
   has_setup_toml: boolean;
   current_version: string;
+  upstream: { repository: string; version: string; commit: string } | null;
   mirrorc_cdk?: string;
   repo_url_http?: string;
   get_remote_sha_method?: string;

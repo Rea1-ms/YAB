@@ -11,7 +11,7 @@ body:
       label: 启动器版本 ( Installer Version )
       description: BAAS启动器的版本
       options:
-        - 1.4.3 (Latest)
+        - 0.0.1 (Latest)
         - 1.4.2
         - 1.4.1
         - 1.4.0

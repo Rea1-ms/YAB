@@ -1,6 +1,6 @@
 <script lang="ts">
   /** 全局页：更新设置（setup.toml）与帮助文档 */
-  import { callRpc } from '../stores';
+  import { callRpc, connected } from '../stores';
   import { toast } from '../toast';
   import { LOCALES, t, tNow } from '../i18n';
   import { styleHelpDocument } from '../help-document';
@@ -127,6 +127,7 @@
 
   // 挂载时加载（全局页无 dir 依赖）
   $effect(() => {
+    if (!$connected) return;
     void load();
     void loadHelp();
   });
@@ -259,6 +260,15 @@
       </div>
     {/if}
   </div>
+  {#if info?.upstream}
+    <footer class="upstream">
+      {$t('原始仓库：')}
+      <a href={`${info.upstream.repository}/commit/${info.upstream.commit}`}
+        target="_blank" rel="noopener noreferrer" title={info.upstream.commit}>
+        <span class="mono">{info.upstream.version} · {info.upstream.commit.slice(0, 8)}</span>
+      </a>
+    </footer>
+  {/if}
 </div>
 
 <style>
@@ -286,6 +296,25 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+  }
+  .upstream {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .upstream a {
+    color: var(--muted);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .upstream a:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .ver b {
     color: var(--text);

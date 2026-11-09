@@ -51,22 +51,11 @@ def scan_configs():
 
 
 def get_version():
-    from core.distribution import distribution_version
+    from core.distribution import distribution_version, project_metadata
     bundled = distribution_version()
     if bundled:
         return bundled
-    if os.path.exists('./setup.toml'):
-        try:
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib
-            with open('./setup.toml', 'rb') as f:
-                data = tomllib.load(f)
-            return str(data.get('General', {}).get('current_BAAS_version', 'dev'))
-        except Exception:
-            pass
-    return 'dev'
+    return str(project_metadata().get('project', {}).get('version', 'dev'))
 
 
 class BaasService:
@@ -414,16 +403,21 @@ class BaasService:
         return TOML_Config(path)
 
     def update_get(self, _params):
+        from core.distribution import project_metadata
+
         cfg = self._toml_config()
-        if cfg is None:
-            return {'has_setup_toml': False, 'current_version': get_version()}
-        return {
-            'has_setup_toml': True,
+        info = {
+            'has_setup_toml': cfg is not None,
             'current_version': get_version(),
-            'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
-            'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
-            'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
+            'upstream': project_metadata().get('tool', {}).get('yab', {}).get('upstream'),
         }
+        if cfg is not None:
+            info.update({
+                'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
+                'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
+                'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
+            })
+        return info
 
     def update_save(self, params):
         cfg = self._toml_config()

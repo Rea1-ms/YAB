@@ -147,6 +147,7 @@ export default {
     // —— 更新与帮助页 ——
     '更新设置': 'Update Settings',
     '当前版本：': 'Current version: ',
+    '原始仓库：': 'Upstream: ',
     '开发环境，更新设置不可用': 'Dev environment; update settings unavailable',
     'Mirror酱 CDK': 'MirrorChyan CDK',
     'Mirror酱 CDK 已保存': 'MirrorChyan CDK saved',
@@ -346,6 +347,7 @@ export default {
     // —— 更新与帮助页 ——
     '更新设置': '更新設定',
     '当前版本：': '現在のバージョン：',
+    '原始仓库：': '元リポジトリ：',
     '开发环境，更新设置不可用': '開発環境のため、更新設定は使用できません',
     'Mirror酱 CDK': 'MirrorChyan CDK',
     'Mirror酱 CDK 已保存': 'MirrorChyan CDK を保存しました',
@@ -546,6 +548,7 @@ export default {
     // —— 更新与帮助页 ——
     '更新设置': '업데이트 설정',
     '当前版本：': '현재 버전: ',
+    '原始仓库：': '원본 저장소: ',
     '开发环境，更新设置不可用': '개발 환경에서는 업데이트 설정을 사용할 수 없습니다',
     'Mirror酱 CDK': 'MirrorChyan CDK',
     'Mirror酱 CDK 已保存': 'MirrorChyan CDK가 저장되었습니다',
