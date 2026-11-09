@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('prepare', 'web', 'desktop', 'check', 'smoke', 'pack', 'dist')]
+    [ValidateSet('prepare', 'web', 'desktop', 'check', 'smoke', 'pack', 'dist',
+        'pack-lite', 'dist-lite', 'dist-lite-system', 'dist-all')]
     [string] $Task,
     [switch] $Preview
 )
@@ -42,8 +43,17 @@ function Test-YabProject {
     Invoke-YabCommand pnpm.cmd --dir desktop test
 }
 
+function Build-YabDistribution {
+    param([Parameter(Mandatory)][string[]] $BuildScript)
+    Initialize-YabDependencies
+    Test-YabProject
+    foreach ($script in $BuildScript) {
+        Invoke-YabCommand pnpm.cmd --dir desktop run $script
+    }
+}
+
 # 首次发行前，先运行网页入口，等待识别服务准备完成再停止。
-# pack（应用目录）和 dist（完整发行）均先准备依赖、检查，再构建。
+# 完整包和轻量包均先准备依赖、检查，再构建。
 switch ($Task) {
     'prepare' { Initialize-YabDependencies }
     'web' { Invoke-YabCommand uv run python -m server --open }
@@ -56,14 +66,10 @@ switch ($Task) {
         Invoke-YabCommand uv run python -m server.frontend
         Invoke-YabCommand pnpm.cmd --dir desktop run smoke
     }
-    'pack' {
-        Initialize-YabDependencies
-        Test-YabProject
-        Invoke-YabCommand pnpm.cmd --dir desktop run pack
-    }
-    'dist' {
-        Initialize-YabDependencies
-        Test-YabProject
-        Invoke-YabCommand pnpm.cmd --dir desktop run dist
-    }
+    'pack' { Build-YabDistribution pack }
+    'dist' { Build-YabDistribution dist }
+    'pack-lite' { Build-YabDistribution pack:lite }
+    'dist-lite' { Build-YabDistribution dist:lite }
+    'dist-lite-system' { Build-YabDistribution dist:lite:system }
+    'dist-all' { Build-YabDistribution @('dist', 'dist:lite', 'dist:lite:system') }
 }
