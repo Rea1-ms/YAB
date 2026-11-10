@@ -233,6 +233,19 @@ class ConfigNameTests(ScratchTest):
 
 
 class OcrTests(unittest.TestCase):
+    def test_recovered_desktop_service_is_ready_without_autostarting_profiles(self):
+        for recovery in ('', '1'):
+            with self.subTest(recovery=recovery):
+                service = BaasService(FakeHub())
+                service._autostart = Mock()
+                with patch.dict(os.environ, {'YAB_DESKTOP_RECOVERY': recovery}), \
+                        patch('main.Main', return_value=SimpleNamespace(ready=True)), \
+                        patch('server.service.threading.Thread') as thread:
+                    service.init_ocr(['en-us'])
+                    thread.call_args.kwargs['target']()
+                self.assertTrue(service.ocr_ready)
+                self.assertEqual(service._autostart.call_count, 0 if recovery else 1)
+
     def test_core_failure_does_not_become_ready_or_autostart(self):
         import main
         with patch.object(main.Main, 'init_ocr', return_value=False):

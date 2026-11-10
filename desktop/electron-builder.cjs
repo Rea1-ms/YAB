@@ -80,7 +80,7 @@ module.exports = {
   },
   files: ['main.js', 'preload.js', 'runtime.cjs', 'runtime-settings.cjs', 'runtime-window.cjs',
     'runtime-preload.cjs', 'runtime-settings.html', 'runtime-settings-page.js', 'webui.cjs',
-    'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js',
+    'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js', 'backend-recovery.cjs',
     'window-mode.cjs', 'message-window.cjs', 'message-preload.cjs', 'message.html', 'message-page.js', 'assets/**', 'package.json'],
   extraResources: [{ from: backend, to: 'backend' }],
   artifactName: 'YAB-${version}-${arch}' + (process.env.YAB_BUILD_VARIANT?.startsWith('lite') ? '-' + process.env.YAB_BUILD_VARIANT : '') + '.${ext}',

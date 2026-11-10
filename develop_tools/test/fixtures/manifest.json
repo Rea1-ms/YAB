@@ -285,6 +285,52 @@
       "source": {
         "description": "既有裁剪样本，原图来源未记录"
       }
+    },
+    "global_download_essential": {
+      "path": "global_download_essential.png",
+      "sha256": "92b2e1d4736aadde528db72b3c1f6c317b88f150a843a4ee742866e741d77a17",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服英文：必要游戏资源下载确认",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text"
+      ],
+      "source": {
+        "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
+        "filename": "shot-aurora-store-update5.png",
+        "sha256": "92b2e1d4736aadde528db72b3c1f6c317b88f150a843a4ee742866e741d77a17",
+        "redacted_regions": []
+      }
+    },
+    "global_download_additional": {
+      "path": "global_download_additional.png",
+      "sha256": "a8f17c8bfd23c40659b8b4422ccec13bd21c402009dbbc214eaa6f6858f5ff21",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服英文：追加游戏资源下载确认",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text"
+      ],
+      "source": {
+        "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
+        "filename": "shot-aurora-store-update6.png",
+        "sha256": "a8f17c8bfd23c40659b8b4422ccec13bd21c402009dbbc214eaa6f6858f5ff21",
+        "redacted_regions": []
+      }
     }
   }
 }

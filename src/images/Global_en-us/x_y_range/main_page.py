@@ -25,6 +25,8 @@ x_y_range = {
     'store-service-unavailable': (400, 300, 900, 370),
     "net-work-unstable": (400, 280, 900, 400),
     "game-download-resource-notice": (400, 340, 900, 400),
+    # Both download dialogs share this paragraph; the file size above varies.
+    "game-download-resource-notice2": (415, 338, 865, 399),
     "item-expiring-notice": (590, 100, 700, 150),
     "item-expired-notice": (390, 145, 900, 300),
     "request-failed-notice": (440, 300, 850, 370),

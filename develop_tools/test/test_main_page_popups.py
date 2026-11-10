@@ -106,6 +106,47 @@ class MainPagePopupTests(unittest.TestCase):
         clicks = [call(572, 610, wait_over=True)] if kind == 'launch' else []
         return clicks + [call(886, 165, wait_over=True)]
 
+    def test_resource_download_prompts_confirm_at_all_resolutions(self):
+        for name in ('global_download_essential', 'global_download_additional'):
+            for ratio in (.75, 1, 1.5, 2):
+                with self.subTest(name=name, ratio=ratio):
+                    worker = self.worker([load_fixture(name), self.frame('home')], ratio=ratio)
+                    worker.to_main_page()
+                    worker.click.assert_called_once_with(761, 504)
+                    self.assertEqual(worker.replay.index, 1)
+
+    def test_resource_download_sequence_waits_for_home_and_throttles_confirm(self):
+        essential = load_fixture('global_download_essential')
+        additional = load_fixture('global_download_additional')
+        worker = self.worker([essential] * 6 + [self.frame('empty')] * 2
+                             + [additional] * 6 + [self.frame('home')])
+        worker.to_main_page()
+        self.assertEqual(worker.click.call_args_list, [call(761, 504)] * 4)
+        self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 4, 8, 12])
+        self.assertEqual(worker.replay.index, 14)
+
+    def test_resource_download_confirm_without_next_screen_cannot_finish(self):
+        for name in ('global_download_essential', 'global_download_additional'):
+            with self.subTest(name=name):
+                worker = self.worker([load_fixture(name)] * 4)
+                with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+                    worker.to_main_page()
+                worker.click.assert_called_once_with(761, 504)
+
+    def test_resource_download_recognition_ignores_file_size_but_requires_download_text(self):
+        for name in ('global_download_essential', 'global_download_additional'):
+            with self.subTest(name=name):
+                frame = load_fixture(name)
+                frame[260:333, 390:890] = 240  # Synthetic change to download size and description.
+                worker = self.worker([frame, self.frame('home')])
+                worker.to_main_page()
+                worker.click.assert_called_once_with(761, 504)
+                frame[338:399, 415:865] = 240  # A generic Confirm button is insufficient.
+                worker.latest_img_array = frame
+                self.assertFalse(image.compare_image(worker, 'main_page_game-download-resource-notice2'))
+        worker = self.worker([self.frame('store')])
+        self.assertFalse(image.compare_image(worker, 'main_page_game-download-resource-notice2'))
+
     def test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions(self):
         for identifier in IDENTIFIERS:
             for ratio in (.75, 1, 1.5, 2):

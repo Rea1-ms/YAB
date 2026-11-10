@@ -13,6 +13,7 @@
 | 图标、安装侧栏 | generate_assets.py（素材生成工具）、assets（素材目录） | 图标尺寸、实际字体及目标位图尺寸检查 |
 | 复选框原图、许可与多尺寸图片 | generate_checkbox_assets.cjs（素材生成工具）、assets/checkbox（复选框素材）、.gitattributes（换行约定） | 原图、图片及头文件摘要，插件资源与真实控件状态检查 |
 | 网页监听、桌面浏览器入口 | webui.cjs（桌面监听设置）、main.js（主进程）、server/webui_settings.py（后端监听设置） | test/webui.test.cjs（桌面监听回归）、develop_tools/test/test_webui_settings.py（后端监听回归） |
+| 运行期后端崩溃 | backend-recovery.cjs（服务恢复）、main.js（进程管理）、server/service.py（任务服务） | test/backend-recovery.test.cjs（恢复与实际网页回归），核对日志、停止状态及手动启动 |
 | 帮助页配色 | webapp/src/lib/help-document.ts（文档样式处理）、webapp/src/lib/pages/Update.svelte（更新与帮助页） | test/help.test.cjs（隐藏浏览器渲染检查） |
 | 离线环境、配置迁移 | runtime.cjs（运行准备）、bundle.py（后端资源打包） | test/runtime.test.cjs（运行环境回归）及隔离数据下的完整发行验证 |
 | 轻量包、在线依赖、下载源、工具定位 | runtime-settings.cjs（环境设置）、runtime-window.cjs（独立设置窗口）、bundle.py（资源打包） | test/runtime.test.cjs（准备与失败恢复）、test/runtime-window.test.cjs（隐藏窗口）、test/online-smoke.cjs（显式联网验证） |

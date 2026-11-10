@@ -25,7 +25,7 @@ from core.device.emulator_manager import process_api
 from core.device.uiautomator2_client import BAAS_U2_Initer, __atx_agent_version__
 from core.device.uiautomator2_client import U2Client
 from core.exception import RequestHumanTakeOver, FunctionCallTimeout, PackageIncorrect, LogTraceback
-from core.notification import notify, toast
+from core.notification import toast
 from core.pushkit import push
 from core.scheduler import Scheduler
 
@@ -466,7 +466,6 @@ class Baas_thread:
                         self.logger.info("Game was closed during wait, relaunch it for the due task")
                         if not self.solve('restart'):
                             self.signal_stop()
-                            notify(title='', body='任务已停止')
                             return
                         self._game_closed = False
                     self.genScheduleLog(nextTask)
@@ -489,7 +488,6 @@ class Baas_thread:
                             self.next_time = 0
                         if not self.solve(task):
                             self.signal_stop()
-                            notify(title='', body='任务已停止')
                             return
                         if flg:
                             currentTaskNextTime = self.next_time
@@ -546,18 +544,28 @@ class Baas_thread:
             execute the task by call the corresponding function in func_dict
         """
         for i in range(0, 3):
+            if not self.flag_run:
+                return True
             if i != 0:
                 self.logger.info("Retry Task " + activity + " " + str(i))
             try:
                 return func_dict[activity](self)
             except FunctionCallTimeout:
+                if not self.flag_run:
+                    return True
                 if not self.deal_with_func_call_timeout():
+                    if not self.flag_run:
+                        return True
                     self.push_and_log_error_msg("Function Call Timeout",
                                                 "Failed to Restart Game when function call timeout")
                     return False
             except PackageIncorrect as e:
+                if not self.flag_run:
+                    return True
                 pkg = e.message
                 if not self.deal_with_package_incorrect(pkg):
+                    if not self.flag_run:
+                        return True
                     self.push_and_log_error_msg("Package Incorrect", "Failed to Restart Game when package incorrect")
                     return False
             except Exception:
@@ -570,12 +578,16 @@ class Baas_thread:
         """
             1. no exception
         """
+        if not self.flag_run:
+            return False
         self.logger.info("Handle package incorrect")
         self.logger.warning("Package incorrect")
         self.logger.warning("Expected: " + self.package_name)
         self.logger.warning("Get     : " + curr_pkg)
         self.logger.warning("Restarting game")
         for i in range(0, 3):
+            if not self.flag_run:
+                return False
             if i != 0:  # skip first time check
                 package = self.connection.get_current_package()
                 if package == self.package_name:
@@ -597,6 +609,8 @@ class Baas_thread:
             2.current app is not target app --> call task restart
             3.this func will not raise exception
         """
+        if not self.flag_run:
+            return False
         self.logger.info("Handle function call timeout")
         package = self.connection.get_current_package()
         if package != self.package_name:

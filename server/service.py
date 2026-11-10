@@ -118,7 +118,8 @@ class BaasService:
                 self.ocr_error = None
                 self.hub.push('Meta', 'set', {'ocr_ready': True, 'ocr_error': None})
                 self.hub.push_full('ConfigScan')
-                self._autostart()
+                if os.environ.get('YAB_DESKTOP_RECOVERY') != '1':
+                    self._autostart()
             except Exception as e:
                 self.ocr_ready = False
                 self.ocr_error = str(e)

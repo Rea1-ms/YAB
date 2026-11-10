@@ -12,6 +12,12 @@ const desktopInfo = {
   ...(process.isMainFrame && /^https?:$/.test(location.protocol) ? {
     getCloseAction: () => ipcRenderer.invoke('yab-desktop:close-action:get'),
     setCloseAction: action => ipcRenderer.invoke('yab-desktop:close-action:set', action),
+    getBackendState: () => ipcRenderer.invoke('yab-backend:get'),
+    onBackendState: callback => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on('yab-backend:update', listener);
+      return () => ipcRenderer.removeListener('yab-backend:update', listener);
+    },
   } : {}),
   versions: {
     electron: versions.electron,

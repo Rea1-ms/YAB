@@ -48,6 +48,7 @@ const { openRuntimeWindow } = require('./runtime-window.cjs');
 const { StartupProgress, createStartupScreen } = require('./startup.cjs');
 const { showMessage } = require('./message-window.cjs');
 const { WindowMemoryMode, readWindowMode, saveWindowMode, attachWindowSettings } = require('./window-mode.cjs');
+const { BackendRecovery, attachBackendRecovery } = require('./backend-recovery.cjs');
 
 const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
 fs.mkdirSync(dataPath, { recursive: true });
@@ -94,6 +95,18 @@ const windowMode = new WindowMemoryMode({
     detail: error.message, buttons: ['确定'] }),
 });
 attachWindowSettings(ipcMain, { mode: windowMode, filename: windowModeFile,
+  getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
+const backendRecovery = new BackendRecovery({
+  isQuitting: () => quitting,
+  log,
+  restart: async () => {
+    await killBackendTree();
+    if (quitting) return;
+    try { await launchBackend(repoRoot, serverPort, { recovery: true }); }
+    catch (error) { await killBackendTree(); throw error; }
+  },
+});
+attachBackendRecovery(ipcMain, { recovery: backendRecovery,
   getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
 
 // ------------------------------ 小工具 ------------------------------
@@ -237,7 +250,7 @@ function backendCandidates(root) {
 }
 
 // 尝试 spawn 一个候选。spawn 失败（如 ENOENT）返回 null 交给下一个候选。
-function trySpawnCandidate(candidate, listenArgs, root) {
+function trySpawnCandidate(candidate, listenArgs, root, { recovery = false } = {}) {
   return new Promise((resolve) => {
     let child;
     let settled = false;
@@ -248,6 +261,7 @@ function trySpawnCandidate(candidate, listenArgs, root) {
         env: { ...process.env,
           ...(packagedRuntime?.configRoot ? { YAB_CONFIG_DIR: packagedRuntime.configRoot } : {}),
           YAB_DESKTOP_PORT_OVERRIDE: process.env.BAAS_DESKTOP_PORT ? '1' : '',
+          YAB_DESKTOP_RECOVERY: recovery ? '1' : '',
           PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
@@ -286,13 +300,14 @@ function trySpawnCandidate(candidate, listenArgs, root) {
 }
 
 // 拉起后端并等待就绪：健康检查通过 / 进程提前退出 / 90s 超时
-async function launchBackend(root, port) {
+async function launchBackend(root, port, options = {}) {
+  if (quitting) throw new StartupError('应用正在退出');
   showPreparation('正在启动后端服务…', 84);
   const listenArgs = ['--host', serverHost, '--port', String(port)];
   const attempted = [];
   for (const candidate of backendCandidates(root)) {
     attempted.push(candidate.cmd);
-    const started = await trySpawnCandidate(candidate, listenArgs, root);
+    const started = await trySpawnCandidate(candidate, listenArgs, root, options);
     if (started) {
       backend = { child: started.child, label: started.label, healthy: false };
       break;
@@ -309,12 +324,13 @@ async function launchBackend(root, port) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   showPreparation('正在等待后端和识别服务就绪…', 88);
   while (Date.now() < deadline) {
+    if (quitting) throw new StartupError('应用正在退出');
     if (backendExit) {
       throw new StartupError(
         `后端进程提前退出（code=${backendExit.code} signal=${backendExit.signal}）。后端输出尾部：\n${logTail()}`,
       );
     }
-    if (await healthCheck(port)) {
+    if (await healthCheck(port, Boolean(packagedRuntime) || options.recovery)) {
       backend.healthy = true;
       log(`后端就绪: ${mainPageUrl()}`);
       return;
@@ -326,12 +342,12 @@ async function launchBackend(root, port) {
   );
 }
 
-function healthCheck(port) {
+function healthCheck(port, waitForOcr = Boolean(packagedRuntime)) {
   return new Promise((resolve, reject) => {
     const token = process.env.BAAS_WEBUI_TOKEN;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const req = http.get({ host: connectHost, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
-      if (!packagedRuntime) { res.resume(); resolve(res.statusCode === 200); return; }
+      if (!waitForOcr) { res.resume(); resolve(res.statusCode === 200); return; }
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
@@ -641,15 +657,12 @@ app.on('before-quit', (event) => {
   killBackendTree().finally(() => app.exit(0));
 });
 
-// 后端运行期意外退出：报错并退出（而不是留一个连不上后端的空窗口）。
-// 注意不能在这里清空 backend——fatalExit → killBackendTree 还需要它拿到子进程句柄。
+// 运行期崩溃保留窗口和日志，只恢复服务；任务等待用户手动启动。
 if (!SMOKE_MODE) {
   const watchBackendHealth = setInterval(() => {
     if (backend && backend.healthy && backendExit && !quitting) {
-      fatalExit(
-        'YAB 后端已退出',
-        `后端进程意外退出（code=${backendExit.code} signal=${backendExit.signal}）。后端输出尾部：\n${logTail()}`,
-      );
+      backend.healthy = false;
+      void backendRecovery.recover(backendExit, logTail());
     }
   }, 1000);
   watchBackendHealth.unref();

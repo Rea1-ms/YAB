@@ -30,7 +30,7 @@ SUITES = {
     'shop': ('develop_tools.test.test_shop_selection',),
     'drill': ('develop_tools.test.test_joint_firing_drill',),
     'version': ('develop_tools.test.test_version_info',),
-    'infrastructure': ('develop_tools.test.test_offline_runner',),
+    'infrastructure': ('develop_tools.test.test_offline_runner', 'develop_tools.test.test_task_errors'),
 }
 
 

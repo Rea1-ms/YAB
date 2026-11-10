@@ -2,6 +2,7 @@ import { get, writable, type Writable } from 'svelte/store';
 import { ws } from './ws';
 import { toast } from './toast';
 import { tNow } from './i18n';
+import { desktopBackend } from './backend';
 import type {
   ConfigArgs,
   ConfigEntry,
@@ -53,6 +54,24 @@ export interface DirStores {
 const dirStores = new Map<string, DirStores>();
 const trackedUnsubs = new Map<string, () => void>();
 let activeDir: string | null = null;
+let failedGeneration = 0;
+desktopBackend.subscribe((backend) => {
+  if (backend.generation <= failedGeneration) return;
+  failedGeneration = backend.generation;
+  for (const stores of dirStores.values()) {
+    stores.state.set({ running: false, button: '启动', current: '', waiting: [] });
+  }
+});
+
+function mergeLogs(previous: LogEntry[], incoming: LogEntry[]): LogEntry[] {
+  const seen = new Set<string>();
+  return [...previous, ...incoming].sort((a, b) => a.t - b.t).filter((entry) => {
+    const key = JSON.stringify([entry.t, entry.l, entry.m]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(-LOG_MAX);
+}
 
 function subDir(dir: string, s: DirStores): void {
   const logKey = `Log:${dir}`;
@@ -61,7 +80,9 @@ function subDir(dir: string, s: DirStores): void {
       logKey,
       ws.subscribe(logKey, (msg) => {
         if (msg.o === 'full') {
-          s.log.set(Array.isArray(msg.v) ? (msg.v as LogEntry[]).slice(-LOG_MAX) : []);
+          const incoming = Array.isArray(msg.v) ? (msg.v as LogEntry[]) : [];
+          s.log.update((previous) => failedGeneration
+            ? mergeLogs(previous, incoming) : incoming.slice(-LOG_MAX));
         } else if (msg.o === 'add') {
           s.log.update((cur) => {
             const add = Array.isArray(msg.v) ? (msg.v as LogEntry[]) : [msg.v as LogEntry];
