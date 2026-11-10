@@ -1,7 +1,8 @@
-"""Replay cropped game screenshots without connecting to a device."""
+"""Replay full and cropped game screenshots without connecting to a device."""
 
 import runpy
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
@@ -99,6 +100,35 @@ class MainPagePopupTests(unittest.TestCase):
             menu[y1:y2, x1:x2] = cv2.resize(template, (x2 - x1, y2 - y1))
         return menu
 
+    @contextmanager
+    def android_download_worker(self, frames, ratio=1):
+        worker = self.worker(frames, ratio=ratio)
+        worker.is_android_device = True
+        worker.resolution = (int(1280 * ratio), int(720 * ratio))
+        worker.package_name = 'com.nexon.bluearchive'
+        worker.activity_name = '.MainActivity'
+        worker.u2 = Mock()
+        worker.u2.app_current.return_value = {'package': 'com.android.launcher3'}
+        worker.connection = Mock()
+        worker.connection.get_current_package.return_value = worker.package_name
+        worker.control = Mock(method='nemu')
+        worker.control.click.side_effect = worker.replay.click
+        worker.screenshot = Mock()
+        worker.screenshot.screenshot.side_effect = worker.replay.screenshot
+        worker.button_signal = Mock()
+        worker.push_and_log_error_msg = Mock()
+        worker.current_game_activity = worker.dailyGameActivity = None
+        # Restore production screenshot normalization and device coordinate conversion.
+        del worker.click
+        del worker.get_screenshot_array
+        identifier = worker.identifier
+        with (patch.dict(position.initialized_image, {identifier: False}),
+              patch.dict(position.image_dic, {identifier: {}}),
+              patch.dict(position.image_x_y_range, {identifier: {}}),
+              patch('core.Baas_thread.np.random.uniform', return_value=0)):
+            self.assertTrue(worker.init_image_resource())
+            yield worker
+
     def login_frames(self, kind):
         return [self.frame('launch'), self.frame('checked')] if kind == 'launch' else [self.frame(kind)]
 
@@ -146,6 +176,59 @@ class MainPagePopupTests(unittest.TestCase):
                 self.assertFalse(image.compare_image(worker, 'main_page_game-download-resource-notice2'))
         worker = self.worker([self.frame('store')])
         self.assertFalse(image.compare_image(worker, 'main_page_game-download-resource-notice2'))
+
+    def test_android_start_confirms_both_downloads_with_scaled_device_clicks(self):
+        frames = ([load_fixture('global_download_essential')] * 3 + [self.frame('empty')] * 2
+                  + [load_fixture('global_download_additional')] * 3 + [self.frame('home')])
+        for ratio in (.75, 1, 1.5, 2):
+            with self.subTest(ratio=ratio), self.android_download_worker(frames, ratio) as worker:
+                self.assertTrue(worker.solve('restart'))
+                worker.u2.app_start.assert_called_once_with(worker.package_name, worker.activity_name)
+                worker.u2.app_stop.assert_not_called()
+                worker.connection.close_current_app.assert_not_called()
+                self.assertEqual(worker.control.click.call_args_list,
+                                 [call(int(761 * ratio), int(504 * ratio))] * 2)
+                self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+                self.assertEqual(worker.replay.index, len(frames) - 1)
+                self.assertEqual(worker.screenshot.screenshot.call_count, len(frames))
+                worker.push_and_log_error_msg.assert_not_called()
+
+    def test_android_download_stop_prevents_more_clicks_and_restart_errors(self):
+        frames = ([load_fixture('global_download_essential')] * 3 + [self.frame('empty')] * 2
+                  + [load_fixture('global_download_additional')] * 3 + [self.frame('home')])
+        for stop_frame in (0, 5):
+            with self.subTest(stop_frame=stop_frame), self.android_download_worker(frames) as worker:
+                def screenshot_and_stop(stop_frame=stop_frame):
+                    frame = worker.replay.screenshot()
+                    if worker.replay.index == stop_frame:
+                        worker.signal_stop()
+                    return frame
+
+                worker.screenshot.screenshot.side_effect = screenshot_and_stop
+                self.assertTrue(worker.solve('restart'))
+                self.assertFalse(worker.flag_run)
+                worker.button_signal.emit.assert_called_once_with('启动')
+                self.assertEqual(worker.control.click.call_args_list,
+                                 [] if stop_frame == 0 else [call(761, 504)])
+                self.assertEqual(worker.replay.index, stop_frame)
+                worker.u2.app_start.assert_called_once_with(worker.package_name, worker.activity_name)
+                worker.u2.app_stop.assert_not_called()
+                worker.connection.close_current_app.assert_not_called()
+                worker.push_and_log_error_msg.assert_not_called()
+
+    def test_android_downloads_cannot_complete_with_only_legacy_templates(self):
+        for name in ('global_download_essential', 'global_download_additional'):
+            with self.subTest(name=name), self.android_download_worker([load_fixture(name)] * 3) as worker:
+                legacy = {key: value for key, value in position.image_dic[worker.identifier].items()
+                          if key != 'main_page_game-download-resource-notice2'}
+                self.assertIn('main_page_game-download-resource-notice', legacy)
+                with patch.dict(position.image_dic, {worker.identifier: legacy}):
+                    self.assertFalse(worker.solve('restart'))
+                self.assertNotIn(call(761, 504), worker.control.click.call_args_list)
+                self.assertEqual(worker.replay.index, 3)
+                worker.u2.app_start.assert_called_once_with(worker.package_name, worker.activity_name)
+                worker.push_and_log_error_msg.assert_called_once()
+                self.assertIn('回放帧已用完', worker.push_and_log_error_msg.call_args.args[1])
 
     def test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions(self):
         for identifier in IDENTIFIERS:

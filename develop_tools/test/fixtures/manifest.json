@@ -300,7 +300,10 @@
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
-        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text"
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_start_confirms_both_downloads_with_scaled_device_clicks",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_download_stop_prevents_more_clicks_and_restart_errors",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_downloads_cannot_complete_with_only_legacy_templates"
       ],
       "source": {
         "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
@@ -323,7 +326,10 @@
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
         "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
-        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text"
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_start_confirms_both_downloads_with_scaled_device_clicks",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_download_stop_prevents_more_clicks_and_restart_errors",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_downloads_cannot_complete_with_only_legacy_templates"
       ],
       "source": {
         "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
