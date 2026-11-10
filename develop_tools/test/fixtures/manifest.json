@@ -1,0 +1,290 @@
+{
+  "version": 1,
+  "fixtures": {
+    "cn_drill_sweep_notice": {
+      "path": "cn_drill_sweep_notice.png",
+      "sha256": "050b513094de0b41c0f15b8d0c84911bba9d5c25dc56f4f06957b9a7912608f3",
+      "size": [
+        320,
+        140
+      ],
+      "scene": "国服联合火力演习：扫荡确认弹窗标题",
+      "server": "CN",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_joint_firing_drill.JointFiringDrillTest.test_cn_quick_battle_confirmation_is_recognized"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "cn_drill_sweep_title": {
+      "path": "cn_drill_sweep_title.png",
+      "sha256": "a8d6df504a92c102730a9359b973cb93b8548828d2e1927b6200c07dd325b32d",
+      "size": [
+        310,
+        120
+      ],
+      "scene": "国服联合火力演习：快速战斗弹窗标题",
+      "server": "CN",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_joint_firing_drill.JointFiringDrillTest.test_cn_quick_battle_dialog_is_recognized"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_news_chrome": {
+      "path": "global_news_chrome.png",
+      "sha256": "c80ba4ff6694ebbbec4df516b1896d8c01de11b2debbaec645d5b2cba88a91d7",
+      "size": [
+        71,
+        571
+      ],
+      "scene": "国际服公告网页：左侧工具栏",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_requires_both_toolbar_and_close_button",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_ui_is_recognized_independently_of_game_language_and_resolution"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_news_close": {
+      "path": "global_news_close.png",
+      "sha256": "79d8b0e45527b102b2aa4ede815e97df7789dbd70791ad5c638cb4a43004d16c",
+      "size": [
+        75,
+        62
+      ],
+      "scene": "国际服公告网页：关闭按钮",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_requires_both_toolbar_and_close_button",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_ui_is_recognized_independently_of_game_language_and_resolution"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_shop_last_row": {
+      "path": "global_shop_last_row.png",
+      "sha256": "10e70c9dea72aff6ad48884088fbd3b7c784b724d2cf20553fcb5cecc1a51c59",
+      "size": [
+        605,
+        255
+      ],
+      "scene": "国际服商店：底部四列商品，用于漏项与编号回归",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_shop_selection.ShopRecognitionTests.test_missing_currency_is_not_guessed_from_neighboring_slots",
+        "develop_tools.test.test_shop_selection.ShopRecognitionTests.test_reported_screenshot_recognizes_all_four_bottom_slots",
+        "develop_tools.test.test_shop_selection.ShopRecognitionTests.test_second_column_is_recovered_when_its_color_probe_misses"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_startup_close": {
+      "path": "global_startup_close.png",
+      "sha256": "2af0fad65f19a45fe8cbc82bd7049d8fd4ff00f9451d8395e258e3b50b9cd966",
+      "size": [
+        60,
+        56
+      ],
+      "scene": "国际服进游戏前活动提示：关闭按钮裁剪，验证识别不依赖此按钮",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_other_servers_do_not_use_global_overlay_buttons",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_does_not_depend_on_banner_artwork_or_label",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_does_not_repeat_click_on_a_stale_frame",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_requires_footer_control"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_startup_dismiss": {
+      "path": "global_startup_dismiss.png",
+      "sha256": "620a8a5561185fe9df1cf0dff904117b8118a526ebcb41770327d7a6063bbd5d",
+      "size": [
+        48,
+        48
+      ],
+      "scene": "国际服进游戏前活动提示：旧版左下角不再显示图标",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_other_servers_do_not_use_global_overlay_buttons",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_does_not_depend_on_banner_artwork_or_label",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_does_not_repeat_click_on_a_stale_frame",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_requires_footer_control"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_startup_dismiss_2": {
+      "path": "global_startup_dismiss_2.png",
+      "sha256": "d02b9d8e4bedb3a708bdde7fb2dc1e1d59dc9d9c7fa603ed8c86136af7ef3839",
+      "size": [
+        48,
+        48
+      ],
+      "scene": "国际服进游戏前活动提示：本次卡住画面的左下角不再显示图标",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_closes_without_close_control_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_startup_promotion_requires_footer_control"
+      ],
+      "source": {
+        "filename": "shot-ba-stuck-popup.png",
+        "sha256": "40f299854c45a723866016f965f60d9f8ba7480291886b6e432ba4bb7a5b9c17",
+        "registered_on": "2026-11-08",
+        "captured_on": null,
+        "language": "zh-tw",
+        "crop": [
+          78,
+          622,
+          126,
+          670
+        ]
+      }
+    },
+    "global_startup_promo_20261108": {
+      "path": "global_startup_promo_20261108.png",
+      "sha256": "ff5ac90f8d8bcddf77a35fe165dc2023f84ddf7c16ff1001cba7521eb2d5a854",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：本次卡住的完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_missed_promotion_close_waits_before_retrying_on_repeated_frames",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_promotion_click_without_a_confirmed_next_screen_cannot_finish",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_reported_startup_capture_closes_in_all_languages_and_resolutions",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_attachment_error_does_not_hide_the_original_failure",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_changed_screenshot_is_an_error",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_click_does_not_advance_observations_and_exhaustion_fails",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_failure_retains_screenshot_actions_and_expected_result",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_missing_screenshot_is_an_error",
+        "develop_tools.test.test_offline_runner.OfflineRunnerTests.test_undecodable_or_wrong_size_screenshot_is_an_error"
+      ],
+      "source": {
+        "filename": "shot-ba-stuck-popup.png",
+        "sha256": "40f299854c45a723866016f965f60d9f8ba7480291886b6e432ba4bb7a5b9c17",
+        "registered_on": "2026-11-08",
+        "captured_on": null,
+        "language": "zh-tw"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_store_login": {
+      "path": "global_store_login.png",
+      "sha256": "d4cfc00bde810c1d4afe9467bf4a88ba667d04a10393a50f214a8084032f1b6b",
+      "size": [
+        559,
+        445
+      ],
+      "scene": "国际服应用商店：未登录提示主体",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_checkbox_can_also_dismiss_the_launch_prompt_immediately",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_checked_prompt_is_not_toggled_off",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_claim_guard_starts_after_the_actual_free_product_click",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_duplicate_frames_do_not_use_up_another_login_dismissal",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_late_startup_prompt_after_store_entry_still_allows_collection",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_launch_prompt_checks_suppression_then_closes_without_logging_in",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_navigation_stages_dismiss_a_delayed_login_before_continuing",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_optional_home_prompt_without_checkbox_is_closed",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_other_servers_do_not_use_global_overlay_buttons",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_repeated_session_checkbox_also_stops_before_another_retry",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_same_frame_does_not_click_checkbox_twice",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_task_stops_on_login_after_claim_without_dismissing_or_restarting",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_task_stops_when_login_repeatedly_blocks_store_entry"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_store_no_session": {
+      "path": "global_store_no_session.png",
+      "sha256": "ca1e45031ddba4aaa25d8dac3ccf6a5c91476721654454c6c1eca75c2ae66f31",
+      "size": [
+        378,
+        45
+      ],
+      "scene": "国际服应用商店：不带会话勾选框的提示下方区域",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_claim_guard_starts_after_the_actual_free_product_click",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_duplicate_frames_do_not_use_up_another_login_dismissal",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_late_startup_prompt_after_store_entry_still_allows_collection",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_navigation_stages_dismiss_a_delayed_login_before_continuing",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_optional_home_prompt_without_checkbox_is_closed",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_task_stops_on_login_after_claim_without_dismissing_or_restarting",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_task_stops_when_login_repeatedly_blocks_store_entry"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_store_session": {
+      "path": "global_store_session.png",
+      "sha256": "5132ee3b97b653ba3752842eb6cc5174c1c04a632ca75a325c61fd81107efa00",
+      "size": [
+        378,
+        45
+      ],
+      "scene": "国际服应用商店：会话勾选框未选中的提示下方区域",
+      "server": "Global",
+      "kind": "capture_crop",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_checkbox_can_also_dismiss_the_launch_prompt_immediately",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_checked_prompt_is_not_toggled_off",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_claim_guard_starts_after_the_actual_free_product_click",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_duplicate_frames_do_not_use_up_another_login_dismissal",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_late_startup_prompt_after_store_entry_still_allows_collection",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_launch_prompt_checks_suppression_then_closes_without_logging_in",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_navigation_stages_dismiss_a_delayed_login_before_continuing",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_other_servers_do_not_use_global_overlay_buttons",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_repeated_session_checkbox_also_stops_before_another_retry",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_same_frame_does_not_click_checkbox_twice",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_task_stops_on_login_after_claim_without_dismissing_or_restarting"
+      ],
+      "source": {
+        "description": "既有裁剪样本，原图来源未记录"
+      }
+    }
+  }
+}

@@ -5,6 +5,9 @@
   import Switch from '../components/Switch.svelte';
   import TextField from '../components/TextField.svelte';
   import PanelAccordion from '../components/fields/PanelAccordion.svelte';
+  import WebServerSettings from '../components/WebServerSettings.svelte';
+  import DesktopSettings from '../components/DesktopSettings.svelte';
+  import PushSettings from '../components/PushSettings.svelte';
   import type { Meta } from '../types';
 
   let { dir }: { dir: string } = $props();
@@ -80,19 +83,6 @@
         { key: 'emulatorMultiInstanceNumber', label: '多开编号', kind: 'text' },
       ],
     },
-    {
-      title: '推送通知',
-      fields: [
-        { key: 'push_after_error', label: '出错时推送', kind: 'switch' },
-        { key: 'push_after_completion', label: '完成后推送', kind: 'switch' },
-        { key: 'push_serverchan', label: 'Server酱 SendKey', kind: 'text' },
-        { key: 'push_feishu', label: '飞书 Webhook', kind: 'text' },
-        { key: 'push_wecom', label: '企业微信 Webhook', kind: 'text' },
-        { key: 'push_telegram_bot_token', label: 'Telegram Bot Token', kind: 'text' },
-        { key: 'push_telegram_chat_id', label: 'Telegram Chat ID', kind: 'text' },
-        { key: 'push_telegram_api', label: 'Telegram API', kind: 'text' },
-      ],
-    },
   ];
 
   function save(key: string, value: unknown): void {
@@ -159,8 +149,10 @@
 
 <div class="page">
   <div class="cards">
+    <WebServerSettings />
+    <DesktopSettings />
     {#each SECTIONS as sec (sec.title)}
-      <div class="card sec">
+      <div class="card sec settings-card">
         <h2>{$t(sec.title)}</h2>
         {#if sec.hint}
           <p class="hint">{$t(sec.hint)}</p>
@@ -211,6 +203,7 @@
         {/if}
       </div>
     {/each}
+    <PushSettings {dir} />
   </div>
 
   {#if settingsPanels.length > 0}
@@ -239,45 +232,6 @@
     grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
     gap: 12px;
     align-items: start;
-  }
-  .sec {
-    padding: 16px 18px;
-  }
-  .sec h2 {
-    margin: 0 0 12px;
-    font-size: 15px;
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .field {
-    display: flex;
-    gap: 14px;
-    padding: 7px 0;
-    align-items: flex-start;
-  }
-  .field label {
-    width: 150px;
-    flex: none;
-    color: var(--muted);
-    font-size: 13px;
-    padding-top: 6px;
-    text-align: right;
-  }
-  .ctl {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .ctl :global(.input) {
-    max-width: 360px;
-    width: 100%;
-  }
-  .hint {
-    color: var(--faint);
-    font-size: 12px;
-    line-height: 1.5;
   }
   .adb-tools {
     display: flex;

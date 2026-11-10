@@ -1,17 +1,21 @@
 {
-  "name": "baas-desktop",
-  "version": "1.4.3",
+  "name": "yab-desktop",
+  "productName": "YAB",
+  "version": "0.0.1",
   "private": true,
-  "description": "BAAS 桌面壳：Electron 系统托盘 + 拉起 WebUI 后端（python -m server）",
+  "description": "YAB 桌面壳：Electron 系统托盘 + 拉起 WebUI 后端（python -m server）",
   "main": "main.js",
   "license": "GPL-3.0-only",
-  "author": "BAAS contributors",
+  "author": "YAB contributors",
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",
-    "test": "node --test test/*.test.cjs",
+    "test": "node --test --test-concurrency=1 test/*.test.cjs",
     "pack": "node build.cjs --dir",
-    "dist": "node build.cjs"
+    "dist": "node build.cjs",
+    "pack:lite": "node build.cjs --lite --dir",
+    "dist:lite": "node build.cjs --lite",
+    "dist:lite:system": "node build.cjs --lite --system-uv"
   },
   "devDependencies": {
     "electron": "^45.2.1",

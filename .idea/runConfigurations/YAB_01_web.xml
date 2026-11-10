@@ -1,0 +1,6 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="YAB · 01 启动网页" type="PowerShellRunType" factoryName="PowerShell" folderName="YAB" scriptUrl="$PROJECT_DIR$/.idea/yab-tasks.ps1" workingDirectory="$PROJECT_DIR$" scriptParameters="-Task web" executablePath="D:/Program Files/PowerShell/7/pwsh.exe" commandOptions="-NoLogo -NoProfile">
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>

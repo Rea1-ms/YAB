@@ -190,12 +190,11 @@ def co_detect(
 def handle_global_main_page_overlay(self, before_reaction=None):
     if self.server != 'Global':
         return False
-    # Startup promotions have a different frame from the news webview. Match
-    # the close control and footer icon, which do not depend on the artwork
-    # or the language of the "Don't show again today" label.
+    # Recognize startup promotions by the footer icon and click the fixed close
+    # position. The close icon can vary with the banner artwork.
     if (image.compare_image(self, 'main_page_startup-promo-dismiss')
-            and image.compare_image(self, 'main_page_startup-promo-close')):
-        feature, click = 'main_page_startup-promo-close', (1173, 75)
+            or image.compare_image(self, 'main_page_startup-promo-dismiss-2')):
+        feature, click = 'main_page_startup-promo-dismiss', (1173, 75)
     elif (image.compare_image(self, 'main_page_news-webview')
             and image.compare_image(self, 'main_page_news-webview-close')):
         feature, click = 'main_page_news-webview', (1214, 43)

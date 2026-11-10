@@ -25,33 +25,37 @@
   }
 }
 
-// BAAS 桌面壳（Electron 主进程）：
+// YAB 桌面壳（Electron 主进程）：
 //   1. 单实例锁；二次启动聚焦已有窗口
-//   2. 选端口（BAAS_DESKTOP_PORT 或 net.listen(0) 拿空闲端口）
+//   2. 读取网页监听设置并检查端口（默认 127.0.0.1:22267）
 //   3. 按优先级找 python / 打包产物，以仓库根为 cwd 拉起 `python -m server`
 //   4. 轮询 GET /api/health，成功后加载主窗口（此前显示 loading 页）
-//   5. 托盘：显示主窗口 / 重新载入页面 / 退出；关窗 = 隐藏到托盘
+//   5. 托盘常驻；关窗按设置隐藏、释放页面或询问
 //   6. 退出时杀后端进程树（Windows: taskkill /T /F，其他: SIGTERM+SIGKILL 兜底）
 //   7. `electron . --smoke` 无窗口冒烟模式，供 CI/无头验证
 //
 // 零构建、无 TypeScript、CommonJS。
 
-const { app, BrowserWindow, Tray, Menu, dialog, shell, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, Notification, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const net = require('net');
+const { readWebSettings, probePort } = require('./webui.cjs');
 const { spawn } = require('child_process');
-const { prepareRuntime } = require('./runtime.cjs');
+const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings, verifyBundle } = require('./runtime.cjs');
+const { loadRuntimeSettings } = require('./runtime-settings.cjs');
+const { openRuntimeWindow } = require('./runtime-window.cjs');
+const { StartupProgress, createStartupScreen } = require('./startup.cjs');
+const { showMessage } = require('./message-window.cjs');
+const { WindowMemoryMode, readWindowMode, saveWindowMode, attachWindowSettings } = require('./window-mode.cjs');
 
-if (process.env.BAAS_DESKTOP_DATA) {
-  const dataPath = path.resolve(process.env.BAAS_DESKTOP_DATA);
-  fs.mkdirSync(dataPath, { recursive: true });
-  app.setPath('userData', dataPath);
-}
+const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
+fs.mkdirSync(dataPath, { recursive: true });
+app.setPath('userData', dataPath);
 
 const SMOKE_MODE = process.argv.includes('--smoke');
-const HOST = '127.0.0.1';
+let serverHost = '127.0.0.1';
+let connectHost = '127.0.0.1';
 const HEALTH_PATH = '/api/health';
 const READY_TIMEOUT_MS = 90 * 1000; // 后端就绪总预算（首次启动含前端构建时会紧张，见 README）
 const POLL_INTERVAL_MS = 500;
@@ -61,6 +65,7 @@ const LOG_RING_SIZE = 200; // 后端输出环形缓冲行数，出错时展示�
 // ------------------------------ 全局状态 ------------------------------
 
 let mainWindow = null;
+let startupScreen = null;
 let tray = null;
 let backend = null; // { child, label, healthy }
 let backendExit = null; // { code, signal }，后端退出时记录
@@ -68,7 +73,28 @@ let quitting = false;
 let trayHintShown = false;
 let repoRoot = null;
 let serverPort = null;
+let packagedRuntime = null;
+let previousRuntime = null;
+let runtimeFallbackMessage = '';
+const preparation = new AbortController();
 const logLines = []; // 后端 stdout/stderr 环形缓冲
+const startup = new StartupProgress();
+const windowModeFile = path.join(dataPath, 'desktop-settings.json');
+const windowMode = new WindowMemoryMode({
+  canRelease: () => !quitting && backend?.healthy && startup.state.status === 'complete'
+    && !BrowserWindow.getAllWindows().some(window => window !== mainWindow),
+  isQuitting: () => quitting,
+  onHidden: released => notifyHiddenToTray(released),
+  ask: window => showMessage(window, { title: '关闭窗口', message: '关闭窗口后开启轻量模式？',
+    detail: '轻量模式会释放界面，后台任务继续运行。再次打开时会重新加载页面，未保存的输入会丢失。',
+    buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
+    checkboxLabel: '下次不再提示', checkboxChecked: true }),
+  save: action => saveWindowMode(windowModeFile, action),
+  onError: error => showMessage(mainWindow, { type: 'error', message: '无法保存关闭窗口设置',
+    detail: error.message, buttons: ['确定'] }),
+});
+attachWindowSettings(ipcMain, { mode: windowMode, filename: windowModeFile,
+  getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
 
 // ------------------------------ 小工具 ------------------------------
 
@@ -76,12 +102,14 @@ const isWindows = () => process.platform === 'win32';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function log(message) {
-  console.log(`[baas-desktop] ${message}`);
+  console.log(`[yab-desktop] ${message}`);
+  startup.append(`[启动] ${message}\n`);
 }
 
 function pushBackendLog(chunk) {
   const text = chunk.toString();
   process.stdout.write(text); // 转发到控制台
+  startup.append(text);
   for (const line of text.split(/\r?\n/)) {
     if (line.length === 0) continue;
     logLines.push(line);
@@ -98,7 +126,7 @@ class StartupError extends Error {}
 
 // ------------------------------ 路径与端口 ------------------------------
 
-// 判断某个目录是否像 BAAS 仓库根 / 发行包根
+// 判断某个目录是否像 YAB 仓库根 / 发行包根
 function looksLikeRepoRoot(dir) {
   if (!dir || typeof dir !== 'string') return false;
   try {
@@ -117,8 +145,46 @@ async function resolveRepoRoot() {
   if (app.isPackaged) {
     const bundle = path.join(process.resourcesPath, 'backend');
     if (fs.existsSync(path.join(bundle, 'bundle.json'))) {
-      const userData = process.env.BAAS_DESKTOP_DATA || app.getPath('userData');
-      return prepareRuntime(bundle, userData);
+      const userData = app.getPath('userData');
+      const configRoot = path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config'));
+      previousRuntime = await readActiveRuntime(userData);
+      // A rollback must use the same configuration location as the candidate.
+      if (previousRuntime?.configRoot !== configRoot) previousRuntime = null;
+      let online = false;
+      let windowOptions;
+      for (;;) try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
+        showPreparation('正在校验发行文件…', 2);
+        await verifyBundle(bundle, manifest, fraction => showPreparation('正在校验发行文件…', 2 + fraction * 14));
+        online = manifest.format === 3;
+        windowOptions = { parent: mainWindow, configRoot, userData, bundle, bundled: manifest.uv === 'bundled' };
+        if (online && !SMOKE_MODE) {
+          const { configured } = await loadRuntimeSettings(configRoot, userData, windowOptions.bundled)
+            .catch(() => ({ configured: false }));
+          if (!configured) {
+            showPreparation('请选择运行环境工具和下载源…', 18);
+            if (!await openRuntimeWindow({ ...windowOptions, initial: true })) throw new Error('已取消运行环境准备');
+          }
+        }
+        packagedRuntime = await prepareRuntime(bundle, userData, {
+          configRoot, signal: preparation.signal, progress: showPreparation, output: pushBackendLog,
+        });
+        break;
+      } catch (error) {
+        if (SMOKE_MODE || preparation.signal.aborted) throw error;
+        startup.fail(error.message);
+        if (online) {
+          const choice = await showMessage(mainWindow, { type: 'error', message: '运行环境准备失败',
+            detail: error.message, buttons: ['调整设置并重试', previousRuntime ? '使用上一版本' : '退出'], defaultId: 0, cancelId: 1 });
+          if (choice.response === 0 && await openRuntimeWindow({ ...windowOptions, initial: true })) continue;
+        }
+        if (!previousRuntime) throw error;
+        packagedRuntime = previousRuntime;
+        runtimeFallbackMessage = `新版本准备失败，已使用上一版本。\n${error.message}`;
+        log(runtimeFallbackMessage);
+        break;
+      }
+      return packagedRuntime.root;
     }
     const exeDir = path.dirname(app.getPath('exe'));
     const candidates = [
@@ -137,31 +203,23 @@ async function resolveRepoRoot() {
   return path.resolve(__dirname, '..');
 }
 
-// 端口：BAAS_DESKTOP_PORT 优先，否则向系统要一个空闲端口
+// The shell and external browsers use the same persisted HTTP listener.
 async function acquirePort() {
-  const raw = (process.env.BAAS_DESKTOP_PORT || '').trim();
-  if (raw) {
-    const port = Number.parseInt(raw, 10);
-    if (Number.isInteger(port) && port > 0 && port < 65536) {
-      return port;
-    }
-    log(`BAAS_DESKTOP_PORT="${raw}" 不是有效端口，改为自动选择空闲端口`);
-  }
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', (err) => reject(new StartupError(`探测空闲端口失败：${err.message}`)));
-    probe.listen(0, HOST, () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
+  const settings = readWebSettings(repoRoot, packagedRuntime?.configRoot);
+  serverHost = settings.host;
+  connectHost = serverHost === '0.0.0.0' ? '127.0.0.1' : serverHost === '::' ? '::1' : serverHost;
+  await probePort(settings);
+  return settings.port;
 }
 
 // ------------------------------ 后端可执行文件候选 ------------------------------
 
-// 优先级：①BAAS_PYTHON ②仓库根 .venv 的 python ③仓库根 webui.exe / BAAS.exe ④系统 python。
+// 优先级：①BAAS_PYTHON ②仓库根 .venv 的 python ③仓库根 webui.exe / YAB.exe ④系统 python。
 // python 系候选用 `-m server`；打包 exe 候选是 webui.py 冻结产物，CLI 相同但没有 `-m server`。
 function backendCandidates(root) {
+  if (packagedRuntime) {
+    return [{ cmd: packagedRuntime.python, serverArgs: ['-E', '-s', '-B', '-u', '-X', 'utf8', '-m', 'server'], label: '内置独立 Python 环境' }];
+  }
   const candidates = [];
   const envPython = (process.env.BAAS_PYTHON || '').trim();
   if (envPython) {
@@ -171,7 +229,7 @@ function backendCandidates(root) {
     ? path.join(root, '.venv', 'Scripts', 'python.exe')
     : path.join(root, '.venv', 'bin', 'python');
   candidates.push({ cmd: venvPython, serverArgs: ['-m', 'server'], label: `仓库 .venv python (${venvPython})` });
-  for (const name of isWindows() ? ['webui.exe', 'BAAS.exe'] : ['webui', 'BAAS']) {
+  for (const name of isWindows() ? ['webui.exe', 'YAB.exe', 'BAAS.exe'] : ['webui', 'YAB', 'BAAS']) {
     candidates.push({ cmd: path.join(root, name), serverArgs: [], label: `仓库根打包产物 (${name})` });
   }
   candidates.push({ cmd: isWindows() ? 'python' : 'python3', serverArgs: ['-m', 'server'], label: '系统 python (PATH)' });
@@ -187,7 +245,10 @@ function trySpawnCandidate(candidate, listenArgs, root) {
     try {
       child = spawn(candidate.cmd, args, {
         cwd: root, // server 以仓库根为 cwd（读 config/、src/ 等相对路径）
-        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        env: { ...process.env,
+          ...(packagedRuntime?.configRoot ? { YAB_CONFIG_DIR: packagedRuntime.configRoot } : {}),
+          YAB_DESKTOP_PORT_OVERRIDE: process.env.BAAS_DESKTOP_PORT ? '1' : '',
+          PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -219,12 +280,15 @@ function trySpawnCandidate(candidate, listenArgs, root) {
     });
     child.stdout.on('data', pushBackendLog);
     child.stderr.on('data', pushBackendLog);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
   });
 }
 
 // 拉起后端并等待就绪：健康检查通过 / 进程提前退出 / 90s 超时
 async function launchBackend(root, port) {
-  const listenArgs = ['--host', HOST, '--port', String(port)];
+  showPreparation('正在启动后端服务…', 84);
+  const listenArgs = ['--host', serverHost, '--port', String(port)];
   const attempted = [];
   for (const candidate of backendCandidates(root)) {
     attempted.push(candidate.cmd);
@@ -236,13 +300,14 @@ async function launchBackend(root, port) {
   }
   if (!backend) {
     throw new StartupError(
-      '没有找到可用的 BAAS 后端可执行文件。尝试过：\n' +
+      '没有找到可用的 YAB 后端可执行文件。尝试过：\n' +
         attempted.map((cmd) => `  - ${cmd}`).join('\n') +
-        '\n可设置环境变量 BAAS_PYTHON 指向 BAAS 的 python 解释器（需已安装依赖）。',
+        '\n可设置环境变量 BAAS_PYTHON 指向 YAB 的 python 解释器（需已安装依赖）。',
     );
   }
 
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  showPreparation('正在等待后端和识别服务就绪…', 88);
   while (Date.now() < deadline) {
     if (backendExit) {
       throw new StartupError(
@@ -251,27 +316,56 @@ async function launchBackend(root, port) {
     }
     if (await healthCheck(port)) {
       backend.healthy = true;
-      log(`后端就绪: http://${HOST}:${port}/`);
+      log(`后端就绪: ${mainPageUrl()}`);
       return;
     }
     await sleep(POLL_INTERVAL_MS);
   }
   throw new StartupError(
-    `等待后端就绪超时（${READY_TIMEOUT_MS / 1000}s，http://${HOST}:${port}${HEALTH_PATH}）。后端输出尾部：\n${logTail()}`,
+    `等待后端就绪超时（${READY_TIMEOUT_MS / 1000}s，${mainPageUrl()}api/health）。后端输出尾部：\n${logTail()}`,
   );
 }
 
 function healthCheck(port) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const token = process.env.BAAS_WEBUI_TOKEN;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const req = http.get({ host: HOST, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
-      res.resume();
-      resolve(res.statusCode === 200);
+    const req = http.get({ host: connectHost, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
+      if (!packagedRuntime) { res.resume(); resolve(res.statusCode === 200); return; }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; });
+      res.on('error', () => resolve(false));
+      res.on('end', () => {
+        try {
+          const state = JSON.parse(body);
+          if (state.ocr_error) reject(new StartupError(`识别服务初始化失败：${state.ocr_error}`));
+          else {
+            if (res.statusCode === 200 && state.ocr_ready === false) showPreparation('正在初始化识别服务…', 92);
+            resolve(res.statusCode === 200 && state.ocr_ready === true);
+          }
+        } catch { resolve(false); }
+      });
     });
     req.on('timeout', () => req.destroy(new Error('request timeout')));
     req.on('error', () => resolve(false)); // 连接被拒 = 还没起来，继续轮询
   });
+}
+
+async function launchPreparedBackend() {
+  try {
+    await launchBackend(repoRoot, serverPort);
+    if (packagedRuntime) await activateRuntime(app.getPath('userData'), packagedRuntime);
+  } catch (error) {
+    if (SMOKE_MODE || !packagedRuntime || !previousRuntime || packagedRuntime.root === previousRuntime.root) throw error;
+    await killBackendTree();
+    await restoreSettings(app.getPath('userData'), packagedRuntime);
+    packagedRuntime = previousRuntime;
+    repoRoot = previousRuntime.root;
+    await launchBackend(repoRoot, serverPort);
+    runtimeFallbackMessage = `新版本启动失败，已使用上一版本。\n${error.message}`;
+    log(runtimeFallbackMessage);
+  }
 }
 
 // ------------------------------ 退出清理 ------------------------------
@@ -335,7 +429,11 @@ async function fatalExit(title, message, code = 1) {
     console.error(message);
   } else {
     try {
-      dialog.showErrorBox(title, message);
+      startup.fail(message);
+      if (startup.state.status === 'failed' && mainWindow && !mainWindow.isDestroyed() && !startupScreen) {
+        startupScreen = await createStartupScreen(mainWindow, startup, ipcMain);
+      }
+      await showMessage(mainWindow, { type: 'error', title, message: title, detail: message, buttons: ['退出'] });
     } catch (err) {
       console.error(`弹窗失败: ${err.message}\n${message}`);
     }
@@ -350,68 +448,51 @@ async function fatalExit(title, message, code = 1) {
 
 // ------------------------------ 窗口 / 托盘 ------------------------------
 
-function loadingPageUrl() {
-  const html =
-    '<!doctype html><html><head><meta charset="utf-8"><title>BAAS</title><style>' +
-    'html,body{margin:0;height:100%;background:#0f1115;color:#e6e8ec;' +
-    'font-family:"Segoe UI",system-ui,-apple-system,sans-serif}' +
-    '.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}' +
-    '.spin{width:38px;height:38px;border-radius:50%;border:3px solid #262b36;border-top-color:#4f8cff;' +
-    'animation:baas-spin 0.9s linear infinite}' +
-    '@keyframes baas-spin{to{transform:rotate(360deg)}}' +
-    'p{margin:0;font-size:14px;color:#9aa3b2;letter-spacing:0.5px}' +
-    '</style></head><body><div class="wrap"><div class="spin"></div><p>BAAS 启动中…</p></div></body></html>';
-  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+function showPreparation(message, percent) {
+  if (startup.state.message !== message) console.log(`[启动] ${message}`);
+  startup.report(message, percent);
 }
 
 function mainPageUrl() {
-  return `http://${HOST}:${serverPort}/`;
+  return `http://${connectHost.includes(':') ? `[${connectHost}]` : connectHost}:${serverPort}/`;
 }
 
-// 是否是本壳自己的页面（loading data: 页 / 后端本机地址）
+// 是否是本壳自己的页面（本地启动页 / 后端本机地址）
 function isAppUrl(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true; // data:, about: 等
-    const host = parsed.hostname;
-    if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && parsed.port === String(serverPort)) {
-      return true;
-    }
-    return false;
+    return parsed.origin === new URL(mainPageUrl()).origin;
   } catch {
     return true;
   }
 }
 
-function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+async function createMainWindow({ restoring = false, state = null } = {}) {
+  const window = new BrowserWindow({
+    ...(state?.bounds || { width: 1280, height: 800 }),
     minWidth: 960,
     minHeight: 640,
     backgroundColor: '#0f1115',
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'assets', 'logo.ico'),
-    title: 'BAAS',
+    title: 'YAB',
     fullscreenable: true,
-    show: true,
+    show: !restoring,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  mainWindow.loadURL(loadingPageUrl());
 
-  // 关闭按钮 = 隐藏到托盘；真正的退出只走托盘菜单 / before-quit
-  mainWindow.on('close', (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    mainWindow.hide();
-    notifyHiddenToTray();
-  });
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  mainWindow = window;
+  windowMode.attach(window);
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+      startupScreen = null;
+    }
   });
 
   // 外部域名导航交给系统浏览器
@@ -424,22 +505,38 @@ function createMainWindow() {
     if (!isAppUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  return mainWindow;
+  if (restoring) {
+    // Reconnect the page to the existing service; never prepare or start another backend.
+    try {
+      await window.loadURL(windowMode.pageUrl(mainPageUrl()));
+    } catch (error) {
+      if (window.isDestroyed()) return window;
+      window.destroy();
+      throw error;
+    }
+  } else {
+    startupScreen = await createStartupScreen(window, startup, ipcMain);
+  }
+  return window;
 }
 
-function showMainWindow() {
-  if (!mainWindow) createMainWindow();
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+async function showMainWindow() {
+  if (quitting) return null;
+  try {
+    return await windowMode.show(state => createMainWindow({ restoring: true, state }));
+  } catch (error) {
+    if (!quitting) await showMessage(null, { type: 'error', title: '无法打开主窗口',
+      message: '无法打开主窗口', detail: error.message, buttons: ['确定'] });
+    return null;
+  }
 }
 
 // 首次隐藏到托盘时提示一次
-function notifyHiddenToTray() {
+function notifyHiddenToTray(released = false) {
   if (trayHintShown) return;
   trayHintShown = true;
-  const title = 'BAAS';
-  const text = 'BAAS 已最小化到托盘';
+  const title = 'YAB';
+  const text = released ? '界面已关闭，后台任务继续运行' : 'YAB 已最小化到托盘';
   if (isWindows() && tray) {
     tray.displayBalloon({ iconType: 'info', title, content: text });
   } else {
@@ -453,11 +550,32 @@ function notifyHiddenToTray() {
 
 function createTray() {
   tray = new Tray(path.join(__dirname, 'assets', 'logo.ico'));
-  tray.setToolTip('BAAS');
+  tray.setToolTip('YAB');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
-      { label: '重新载入页面', click: () => mainWindow && mainWindow.webContents.reload() },
+      { label: '重新载入页面', click: async () => {
+        const existing = mainWindow;
+        const window = await showMainWindow();
+        if (window && window === existing && !window.isDestroyed()) window.webContents.reload();
+      } },
+      { label: '在浏览器中打开', click: () => backend?.healthy && shell.openExternal(mainPageUrl()) },
+      ...(app.isPackaged ? [{ label: '运行环境', click: async () => {
+        try {
+          const bundle = path.join(process.resourcesPath, 'backend');
+          const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
+          if (manifest.format !== 3) {
+            await showMessage(mainWindow, { message: '完整包使用内置离线环境，无需设置下载源。' });
+            return;
+          }
+          await openRuntimeWindow({ parent: mainWindow, bundle, bundled: manifest.uv === 'bundled',
+            configRoot: packagedRuntime?.configRoot || path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config')),
+            userData: app.getPath('userData') });
+        } catch (error) {
+          await showMessage(mainWindow, { type: 'error', title: '无法打开运行环境设置',
+            message: '无法打开运行环境设置', detail: error.message, buttons: ['确定'] });
+        }
+      } }] : []),
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
     ]),
@@ -470,16 +588,22 @@ function createTray() {
 async function runGui() {
   await app.whenReady();
   try {
+    windowMode.closeAction = readWindowMode(windowModeFile);
+    createTray();
+    await createMainWindow();
     repoRoot = await resolveRepoRoot();
+    if (packagedRuntime) startup.setEnvironment(path.dirname(path.dirname(packagedRuntime.python)));
     serverPort = await acquirePort();
     log(`仓库根: ${repoRoot}`);
     log(`端口: ${serverPort}`);
-    createTray();
-    createMainWindow(); // 先显示 loading 页，就绪后再加载主页
-    await launchBackend(repoRoot, serverPort);
-    if (mainWindow) mainWindow.loadURL(mainPageUrl());
+    await launchPreparedBackend();
+    showPreparation('正在打开主界面…', 96);
+    if (mainWindow) await mainWindow.loadURL(mainPageUrl());
+    if (startupScreen) await startupScreen.finish();
+    startupScreen = null;
+    if (runtimeFallbackMessage) await showMessage(mainWindow, { type: 'warning', message: '已继续使用上一版本', detail: runtimeFallbackMessage });
   } catch (err) {
-    await fatalExit('BAAS 启动失败', String((err && err.message) || err));
+    await fatalExit('YAB 启动失败', String((err && err.message) || err));
   }
 }
 
@@ -491,8 +615,8 @@ async function runSmoke() {
     serverPort = await acquirePort();
     console.log(`[smoke] repoRoot=${repoRoot}`);
     console.log(`[smoke] port=${serverPort}`);
-    await launchBackend(repoRoot, serverPort);
-    console.log(`[smoke] health OK: http://${HOST}:${serverPort}${HEALTH_PATH}`);
+    await launchPreparedBackend();
+    console.log(`[smoke] health OK: ${mainPageUrl()}api/health`);
     console.log('SMOKE OK');
     await killBackendTree();
     app.exit(0);
@@ -508,6 +632,7 @@ async function runSmoke() {
 app.on('before-quit', (event) => {
   if (quitting) return;
   quitting = true;
+  preparation.abort();
   event.preventDefault();
   if (tray) {
     tray.destroy();
@@ -522,7 +647,7 @@ if (!SMOKE_MODE) {
   const watchBackendHealth = setInterval(() => {
     if (backend && backend.healthy && backendExit && !quitting) {
       fatalExit(
-        'BAAS 后端已退出',
+        'YAB 后端已退出',
         `后端进程意外退出（code=${backendExit.code} signal=${backendExit.signal}）。后端输出尾部：\n${logTail()}`,
       );
     }
@@ -539,6 +664,6 @@ if (SMOKE_MODE) {
   app.on('second-instance', () => showMainWindow());
   runGui();
 } else {
-  log('已有 BAAS 实例在运行，本次启动只聚焦已有窗口');
+  log('已有 YAB 实例在运行，本次启动只聚焦已有窗口');
   app.quit();
 }

@@ -378,6 +378,75 @@ class FrontendTests(ScratchTest):
         with patch.object(frontend.sys, 'frozen', True, create=True), self.assertRaises(RuntimeError):
             frontend.ensure_frontend(self.scratch)
 
+    def test_source_distribution_uses_built_assets_without_developer_tools(self):
+        webapp = self.source()
+        (self.scratch / 'distribution.json').write_text('{"version":"1.4.3"}', encoding='utf-8')
+        (webapp / 'dist').mkdir()
+        (webapp / 'dist/index.html').write_text('网页', encoding='utf-8')
+        newer = (webapp / 'dist/index.html').stat().st_mtime + 2
+        os.utime(webapp / 'package.json', (newer, newer))
+        with patch.object(frontend.shutil, 'which') as which, patch.object(frontend.subprocess, 'run') as run:
+            frontend.ensure_frontend(self.scratch)
+        which.assert_not_called()
+        run.assert_not_called()
+
+    def test_incomplete_source_distribution_never_installs_frontend_dependencies(self):
+        self.source()
+        (self.scratch / 'distribution.json').write_text('{}', encoding='utf-8')
+        with patch.object(frontend.subprocess, 'run') as run, self.assertRaisesRegex(RuntimeError, '发行包缺少'):
+            frontend.ensure_frontend(self.scratch)
+        run.assert_not_called()
+
+
+class DistributionTests(ScratchTest):
+    def test_ocr_initializes_an_existing_empty_config_directory(self):
+        from core.ocr.baas_ocr_client.Client import BaasOcrClient, ServerConfig
+        ocr = self.scratch / 'ocr'
+        (ocr / 'config').mkdir(parents=True)
+        (ocr / 'resource').mkdir()
+        defaults = {'ocr': {'server': {'host': '127.0.0.1', 'port': 8000}}}
+        (ocr / 'resource/global_setting.json').write_text(json.dumps(defaults), encoding='utf-8')
+        with patch.object(BaasOcrClient, 'server_folder_path', str(ocr)):
+            config = ServerConfig()
+        self.assertEqual(config.config, defaults)
+        self.assertEqual(json.loads((ocr / 'config/global_setting.json').read_text()), defaults)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows directory junction regression')
+    def test_desktop_config_junctions_allow_first_start_and_preserve_settings(self):
+        import _winapi
+        from core.config.config_init import check_config
+        from core.config.config_set import ConfigSet
+        from core.ocr.baas_ocr_client.Client import BaasOcrClient, ServerConfig
+
+        # Match the desktop layout: both mutable directories are shared junctions.
+        shared = self.scratch / 'backend'
+        version = self.scratch / 'versions' / 'test-version'
+        ocr_relative = Path('core/ocr/baas_ocr_client/bin')
+        ocr = version / ocr_relative
+        ocr.mkdir(parents=True)
+        for relative in (Path('config'), ocr_relative / 'config'):
+            target = shared / relative
+            target.mkdir(parents=True)
+            _winapi.CreateJunction(str(target), str(version / relative))
+        (ocr / 'resource').mkdir()
+        defaults = {'ocr': {'server': {'host': '127.0.0.1', 'port': 8000}}}
+        (ocr / 'resource/global_setting.json').write_text(json.dumps(defaults), encoding='utf-8')
+
+        os.chdir(version)
+        with patch.object(ConfigSet, 'static_config', None), \
+                patch.object(BaasOcrClient, 'server_folder_path', str(ocr)):
+            check_config(['default_config'])
+            ConfigSet('default_config').set('name', '保留我的配置')
+            config = ServerConfig()
+            self.assertEqual(config.config, defaults)
+            config.config['ocr']['server']['port'] = 9000
+            config.save()
+            check_config(['default_config'])
+            self.assertEqual(ServerConfig().port, 9000)
+            self.assertEqual(ConfigSet('default_config').get('name'), '保留我的配置')
+        self.assertEqual(json.loads((shared / ocr_relative / 'config/global_setting.json').read_text())
+                         ['ocr']['server']['port'], 9000)
+
 
 class CliTests(unittest.TestCase):
     def test_api_only_skips_frontend_build(self):
@@ -389,7 +458,7 @@ class CliTests(unittest.TestCase):
                 patch('server.__main__.uvicorn.run'):
             main()
         build.assert_not_called()
-        app.assert_called_once_with(serve_webapp=False)
+        app.assert_called_once_with(serve_webapp=False, listener={'host': '127.0.0.1', 'port': 22267})
 
     def test_remote_binding_requires_environment_password(self):
         from server.__main__ import main

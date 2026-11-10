@@ -1,0 +1,164 @@
+{
+  "repository": "https://github.com/microsoft/fluentui-system-icons",
+  "revision": "e15fc0de25fab983e3e42bac8798be69a85c23bf",
+  "license": "MIT",
+  "sizes": [
+    16,
+    20,
+    24,
+    28,
+    32,
+    40,
+    48,
+    56,
+    64
+  ],
+  "states": [
+    "unchecked",
+    "checked",
+    "indeterminate"
+  ],
+  "sources": {
+    "unchecked.svg": "474c2b224afeec2a522542335ab93bf5cdf0dda6b3b525347eec254be0cb44b1",
+    "checked.svg": "9539f7f8206b840ed7e1d2b66f3234f4636c204bb132ab787928a787b7bb0514",
+    "indeterminate.svg": "ce525c87f896954f3f155d90b5fc6f1e8d570413eeda646830963c220b2e27c2"
+  },
+  "resources": [
+    {
+      "id": 2000,
+      "file": "unchecked-16.png",
+      "sha256": "4e637d07e400b5eb99acaf44d2324d558825a4985e777176a573e7955b2caa23"
+    },
+    {
+      "id": 2001,
+      "file": "unchecked-20.png",
+      "sha256": "05c4fb24b6cc1c907d63842082cd8944689b1ebdc8aad2a4ab0dafd8a4684e11"
+    },
+    {
+      "id": 2002,
+      "file": "unchecked-24.png",
+      "sha256": "6001683c4e8cfa077d4c1f6f58c9311ac132f1d276e4adc57439bf7db853f5b7"
+    },
+    {
+      "id": 2003,
+      "file": "unchecked-28.png",
+      "sha256": "7ca01129cbe3c670f3958ab3cc775639503905eab5e4772854e79ba090ee7483"
+    },
+    {
+      "id": 2004,
+      "file": "unchecked-32.png",
+      "sha256": "e206d9dc063a5a1b5a3345ec6920cb15d044d322dd6bda521f37ab5638155ff6"
+    },
+    {
+      "id": 2005,
+      "file": "unchecked-40.png",
+      "sha256": "59b73b4f003d2e81a09344ef58ac0aea991b735671acdd9a0db0eaef060eaa92"
+    },
+    {
+      "id": 2006,
+      "file": "unchecked-48.png",
+      "sha256": "01098a912aa3fa18e8a2c166c986d6016087ed5037809dc538e9a02ca9eb3c8a"
+    },
+    {
+      "id": 2007,
+      "file": "unchecked-56.png",
+      "sha256": "5e9007d026f8206ed28ce2fd5a63ac7649aaa9f7fa3db7e164b70e6473ba7511"
+    },
+    {
+      "id": 2008,
+      "file": "unchecked-64.png",
+      "sha256": "6cf5415607eeb8d08f9cb1976efeb2bbcae22d071e3291e2d23ca520ceb4b659"
+    },
+    {
+      "id": 2009,
+      "file": "checked-16.png",
+      "sha256": "0b7d96260f807aae9edbe4663943c5c65bb50076d7a92239483504425512d773"
+    },
+    {
+      "id": 2010,
+      "file": "checked-20.png",
+      "sha256": "20e80e78268a676832b38c8b81fddae7a5ba73ea60f75ce6a2692cf3f6c64f8d"
+    },
+    {
+      "id": 2011,
+      "file": "checked-24.png",
+      "sha256": "6ff6ba610e4db35f05d38498acad35650b84299b229203bee9bc102817328915"
+    },
+    {
+      "id": 2012,
+      "file": "checked-28.png",
+      "sha256": "f87f8bf0f46aa235291b381a65f23586eb0b790d8077f712ae6fe19c38876649"
+    },
+    {
+      "id": 2013,
+      "file": "checked-32.png",
+      "sha256": "772ec043f0fceded3def7a985244d7ee8cbbf6a8567725a0ca8f1e2d2d3db50f"
+    },
+    {
+      "id": 2014,
+      "file": "checked-40.png",
+      "sha256": "3bfbea5248c7354ad1f685419cfaca587039d6621e9c4d991acb17dccef3d98c"
+    },
+    {
+      "id": 2015,
+      "file": "checked-48.png",
+      "sha256": "d860ee6290559fe656a96fd92f45eea0e52e8e886eab6d6df15be4d4e8c2599e"
+    },
+    {
+      "id": 2016,
+      "file": "checked-56.png",
+      "sha256": "42ce98cbb080dd132b2b21bb5ab463a38fba7e19ef593c9dc42ee7dbcf7fd268"
+    },
+    {
+      "id": 2017,
+      "file": "checked-64.png",
+      "sha256": "9d3438ea472a39fbfe0360dc48cb86866854a7b29925c2d213b35db43d1aee4d"
+    },
+    {
+      "id": 2018,
+      "file": "indeterminate-16.png",
+      "sha256": "5a8d41e4fb51960c86a4419a43658ea550f3d04089b8866d190d05be83efcdb4"
+    },
+    {
+      "id": 2019,
+      "file": "indeterminate-20.png",
+      "sha256": "a48cb77b53d08212dbf5838cbbcded8cb95c55d7498cf5ed27088292d85d2f96"
+    },
+    {
+      "id": 2020,
+      "file": "indeterminate-24.png",
+      "sha256": "5af00b8bd77984f526abfd558067bccc9705838f04585e1eacd9e893b7e7f26d"
+    },
+    {
+      "id": 2021,
+      "file": "indeterminate-28.png",
+      "sha256": "6bd3bb94c44d431e99d4a4dd5f12c45aeeefc770fa95cd322c32a65573e9f86c"
+    },
+    {
+      "id": 2022,
+      "file": "indeterminate-32.png",
+      "sha256": "37416e32de61703ee564a9216081a2c33cd87b60a6cf0adfca9483b6e8bedc34"
+    },
+    {
+      "id": 2023,
+      "file": "indeterminate-40.png",
+      "sha256": "d0e8cba3c241f07753b2dcde1a13390d2d69935629714a0c5ddb3adb452ee358"
+    },
+    {
+      "id": 2024,
+      "file": "indeterminate-48.png",
+      "sha256": "28c82690ee8a97c5036ceace0a52d47bc351c87db0bff4e2cbfcbe9254b06252"
+    },
+    {
+      "id": 2025,
+      "file": "indeterminate-56.png",
+      "sha256": "434f9cc5ec2d673f0727f331af99c5b74d07fd50ca5765181063f69f8b782bd6"
+    },
+    {
+      "id": 2026,
+      "file": "indeterminate-64.png",
+      "sha256": "3a2f8bb47fb5c2e805998f9f48fce636e6d306d4962cce8fa5bf8634dfe9f4f5"
+    }
+  ],
+  "headerSha256": "4e712b62996f90c955fd71cf114f1bde8b64a143df832dd3747da7170529225a"
+}

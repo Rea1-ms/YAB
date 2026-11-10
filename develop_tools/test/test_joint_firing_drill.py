@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from core import image, position
-
+from develop_tools.test.offline_support import load_fixture, record_frame
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,8 +22,7 @@ class JointFiringDrillTest(unittest.TestCase):
 
     def check_dialog(self, feature, fixture, area):
         # Real 2560x1440 screenshot, cropped to the title only (1280x720 coordinates).
-        title = cv2.imread(str(Path(__file__).with_name("fixtures") / fixture))
-        self.assertIsNotNone(title)
+        title = load_fixture(fixture)
         coordinates = runpy.run_path(str(ROOT / "src/images/CN/x_y_range/joint_firing_drill.py"))
         template = cv2.imread(str(ROOT / "src/images/CN/joint_firing_drill" / (feature + ".png")))
 
@@ -39,6 +38,7 @@ class JointFiringDrillTest(unittest.TestCase):
                         interpolation=cv2.INTER_AREA,
                     )
                     thread = SimpleNamespace(identifier="CN", ratio=ratio, latest_img_array=screenshot)
+                    record_frame(screenshot)
                     self.assertTrue(image.compare_image(thread, name))
 
 

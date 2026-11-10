@@ -199,7 +199,7 @@ class NemuClient:
             self.logger.error(f'None of the following path exists')
             for path in list_dll:
                 self.logger.error(f'{path}')
-            raise NemuIpcIncompatible("Please check your MuMu Player 12 version and install path in BAAS settings.")
+            raise NemuIpcIncompatible("Please check your MuMu Player 12 version and install path in YAB settings.")
 
         self.logger.info('NemuIpcImpl init')
         self.logger.info(f'nemu_folder = {nemu_folder}')

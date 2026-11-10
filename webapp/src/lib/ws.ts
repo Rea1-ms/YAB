@@ -91,7 +91,7 @@ class WebsocketManager {
   }
 
   /** RPC 调用：e 非 null 时 reject，超时 15s */
-  rpc<T = unknown>(topic: string, fn: string, args: Record<string, unknown> = {}): Promise<T> {
+  rpc<T = unknown>(topic: string, fn: string, args: Record<string, unknown> = {}, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
     const socket = this.ws;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error(tNow()('未连接到后端服务')));
@@ -101,7 +101,7 @@ class WebsocketManager {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(tNow()('RPC 超时：{0}').replace('{0}', () => `${topic}.${fn}`)));
-      }, RPC_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       this.rawSend({ t: topic, o: 'rpc', f: fn, v: args, i: id });
     });

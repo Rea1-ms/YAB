@@ -39,7 +39,11 @@ class ConfigSet:
 
     def _init_config(self):
         with open(os.path.join(self.config_dir, "config.json"), 'r', encoding='utf-8') as f:
-            self.config = Config(**json.load(f))
+            data = json.load(f)
+        if 'push_onepush' not in data:
+            from core.push_config import legacy_channels
+            data['push_onepush'] = legacy_channels(data)
+        self.config = Config(**data)
         self.server_mode = self.get_server_mode(self.config.server)
         prices = self.static_config.tactical_challenge_shop_price_list
         if self.server_mode in prices:
@@ -67,7 +71,10 @@ class ConfigSet:
     def set(self, key, value):
         self._init_config()
         prices = self.static_config.tactical_challenge_shop_price_list
-        if key == 'TacticalChallengeShopList':
+        if key == 'push_onepush':
+            from core.push_config import validate_channels
+            value = validate_channels(value)
+        elif key == 'TacticalChallengeShopList':
             validate_tactical_shop_list(value, prices[self.server_mode])
         elif key == 'server':
             server = self.get_server_mode(value)

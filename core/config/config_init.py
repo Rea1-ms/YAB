@@ -67,6 +67,9 @@ def check_and_update_user_config(dir_path='./default_config'):
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        from core.push_config import legacy_channels
+        if 'push_onepush' not in data:
+            data['push_onepush'] = legacy_channels(data)
         data = update_config_reserve_old(data, json.loads(default_config.DEFAULT_CONFIG))
         server = ConfigSet.get_server_mode(data['server'])
         prices = json.loads(default_config.STATIC_DEFAULT_CONFIG)['tactical_challenge_shop_price_list']

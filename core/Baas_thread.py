@@ -262,7 +262,7 @@ class Baas_thread:
 
     def start_check_emulator_stat(self, emulator_strat_stat, wait_time):
         if emulator_strat_stat:
-            self.logger.info(f"-- BAAS Check Emulator Start --")
+            self.logger.info(f"-- YAB Check Emulator Start --")
             if self.config.emulatorIsMultiInstance:
                 name = self.config.multiEmulatorName
                 num = self.config.emulatorMultiInstanceNumber
@@ -498,7 +498,7 @@ class Baas_thread:
                         next_tick = self.scheduler.systole(nextTask['current_task'], currentTaskNextTime)
                         self.logger.info(nextTask['current_task'] + " next_time : " + str(next_tick))
                     else:
-                        self.logger.info("BAAS Exited, Reason : Human Take Over")
+                        self.logger.info("YAB Exited, Reason : Human Take Over")
                         self.signal_stop()
                 else:
                     if self.task_finish_to_main_page:
@@ -990,7 +990,7 @@ class Baas_thread:
         self.signal_stop()  # avoid rerunning then action in case of error
 
     def exit_emulator(self):
-        self.logger.info(f"-- BAAS Exit Emulator --")
+        self.logger.info(f"-- YAB Exit Emulator --")
         if self.config.emulatorIsMultiInstance:
             name = self.config.multiEmulatorName
             num = self.config.emulatorMultiInstanceNumber
@@ -1010,7 +1010,7 @@ class Baas_thread:
             self.exit_signal.emit(0)
 
     def close_game(self):
-        self.logger.info("-- BAAS Close Game --")
+        self.logger.info("-- YAB Close Game --")
         if self.is_android_device:
             package_name = self.connection.get_package_name()
             if not package_name:
@@ -1046,7 +1046,7 @@ class Baas_thread:
     def shutdown(self):
         try:
             self.start_shutdown()
-            answer = toast(title='BAAS: Cancel Shutdown?',
+            answer = toast(title='YAB: Cancel Shutdown?',
                            body='All tasks have been completed: shutting down. Do you want to cancel?',
                            button='Cancel',
                            duration='long'

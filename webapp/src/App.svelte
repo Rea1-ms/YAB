@@ -98,9 +98,9 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">BA</div>
+      <img class="logo" src="/favicon.ico" alt="" width="38" height="38" />
       <div>
-        <div class="brand-name">BAAS</div>
+        <div class="brand-name">YAB</div>
         <div class="brand-ver">{$meta?.version ?? '…'}</div>
       </div>
     </div>
@@ -244,13 +244,8 @@
     width: 38px;
     height: 38px;
     border-radius: 9px;
-    background: var(--accent);
-    color: #0f1115;
-    font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
+    display: block;
+    object-fit: contain;
     flex: none;
   }
   .brand-name {

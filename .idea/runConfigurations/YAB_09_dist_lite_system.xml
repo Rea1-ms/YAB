@@ -1,0 +1,6 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="YAB · 09 构建轻量安装包与压缩包（系统工具）" type="PowerShellRunType" factoryName="PowerShell" folderName="YAB" scriptUrl="$PROJECT_DIR$/.idea/yab-tasks.ps1" workingDirectory="$PROJECT_DIR$" scriptParameters="-Task dist-lite-system" executablePath="D:/Program Files/PowerShell/7/pwsh.exe" commandOptions="-NoLogo -NoProfile">
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>

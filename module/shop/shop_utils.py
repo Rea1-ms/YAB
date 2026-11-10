@@ -1,6 +1,7 @@
 import time
 
-from core import picture, image, color
+from core import color, image, picture
+from core.exception import RequestHumanTakeOver
 from core.utils import build_possible_string_dict_and_length, most_similar_string
 
 SHOP_ITEM_ROW_X = {
@@ -91,40 +92,64 @@ def buy(self, buy_list, shop_type="common_shop"):
     last_checked_y = 0  # item with y > last_checked_y should be considered not checked
     total_item = buy_list.sum()
     count = 0
+    incomplete_retries = 0
+    stalled_swipes = 0
     while last_checked_idx < length:
+        if not self.flag_run:
+            raise RequestHumanTakeOver
         count += 1
+        if count > max(12, length * 2):
+            raise RuntimeError(f"商店商品检查未能完成，已停止购买；下一个待检查商品为第 {last_checked_idx + 1} 件。")
         items, item_lines_y = get_item_position(self, shop_type)
-        for i in range(1, len(item_lines_y)):
-            if item_lines_y[i - 1][1] < item_lines_y[i][1]:
-                self.logger.warning("Item num detected might be wrong, higher y has more items.")
-        temp = 0
         self.logger.info("Detect Item Row y : " + str(item_lines_y))
         self.logger.info("Last   Checked  y : " + str(last_checked_y))
-        for i in range(0, len(item_lines_y)):
-            if item_lines_y[i][0] - last_checked_y <= 10:
-                temp += item_lines_y[i][1]
+        missing = []
+        for line_y, _ in item_lines_y:
+            if line_y - last_checked_y <= 10:
                 continue
+            row_items = [item for item in items if item[0][1] == line_y]
+            # 商品编号按固定列位置计算，漏识别一件不能让后续商品整体前移。
+            columns = min(len(SHOP_ITEM_ROW_X[self.server]), length - last_checked_idx)
+            detected_columns = {item[0][0] for item in row_items}
+            missing = [last_checked_idx + col + 1 for col in range(columns) if col not in detected_columns]
+            if missing:
+                break
             need_buy_list = []
-            for j in range(0, item_lines_y[i][1]):
-                curr_idx = last_checked_idx + items[temp + j][0][0]
+            for item in row_items:
+                curr_idx = last_checked_idx + item[0][0]
+                if curr_idx >= length:
+                    continue
                 if not buy_list[curr_idx]:
                     continue
 
-                if not items[temp + j][1]:
+                if not item[1]:
                     self.logger.warning("Item at [ " + str(curr_idx + 1) + " ] is not purchasable.")
                 else:
-                    need_buy_list.append(items[temp + j])
+                    need_buy_list.append(item)
                 total_item -= 1
             ensure_choose(self, need_buy_list)
-            temp += item_lines_y[i][1]
-            last_checked_idx += item_lines_y[i][1]
-            last_checked_y = item_lines_y[i][0]
+            last_checked_idx += columns
+            last_checked_y = line_y
+            if total_item == 0 or last_checked_idx >= length:
+                break
         if total_item == 0:
             self.logger.info("All Required Items Bought.")
             break
         if last_checked_idx >= length:
             break
-        last_checked_y -= swipe_get_y_diff(self, item_lines_y)
+        if missing or not item_lines_y:
+            incomplete_retries += 1
+            if incomplete_retries >= 3:
+                detail = "第 " + "、".join(map(str, missing)) + " 件" if missing else "商品列表"
+                raise RuntimeError(f"连续三次无法识别商店{detail}，已停止购买，避免商品编号错位。")
+            self.update_screenshot_array()
+            continue
+        incomplete_retries = 0
+        y_diff = swipe_get_y_diff(self, item_lines_y)
+        stalled_swipes = stalled_swipes + 1 if y_diff <= 5 else 0
+        if stalled_swipes >= 3:
+            raise RuntimeError(f"商店连续三次滑动没有进展，已停止购买；下一个待检查商品为第 {last_checked_idx + 1} 件。")
+        last_checked_y -= y_diff
 
 def get_item_position(self, shop_type="common_shop"):
     """
@@ -154,7 +179,7 @@ def get_item_position(self, shop_type="common_shop"):
 
     def record_line_y(curr_y):
         y = curr_y
-        for i in range(0, len(recorded_y)):
+        for i in range(len(recorded_y)):
             # close to existing y, consider as same line
             if abs(curr_y - recorded_y[i][0]) <= 5:
                 y = recorded_y[i][0]
@@ -164,7 +189,7 @@ def get_item_position(self, shop_type="common_shop"):
             recorded_y.append((curr_y, 1))
         return y
 
-    for k in range(0, len(x)):
+    for k in range(len(x)):
         possibles_x = x[k]
         curr_y = 127
         while curr_y <= y_end:
@@ -190,14 +215,26 @@ def get_item_position(self, shop_type="common_shop"):
             else:
                 curr_y += 1
 
-    state = sorted(state, key=lambda t: t[0][1])
+    # 单点颜色可能受高亮或压缩影响；已知行内的缺失列再用货币模板确认。
+    for line_y, _ in recorded_y:
+        for k, possibles_x in enumerate(x):
+            if any(item[0] == (k, line_y) for item in state):
+                continue
+            area = (possibles_x - 14, line_y - 15, possibles_x + 50, line_y + 50)
+            for purchasable in (True, False):
+                currency_type = match_currency(area, purchasable)
+                if currency_type is not None:
+                    y = record_line_y(line_y)
+                    state.append(((k, y), purchasable, currency_type))
+                    break
+
+    state = sorted(state, key=lambda t: (t[0][1], t[0][0]))
     recorded_y = sorted(recorded_y, key=lambda t: t[0])
     return state, recorded_y
 
 def ensure_choose(self, items):
-    for item in items:
-        if item[0][1] <= 252:
-            items.remove(item)
+    if any(item[0][1] <= 252 for item in items):
+        raise RuntimeError("商店商品未完整显示，已停止选择。")
     x = SHOP_ITEM_ROW_X[self.server]
     areas = []
     click_centers = []
@@ -207,25 +244,33 @@ def ensure_choose(self, items):
         areas.append((x[item[0][0]] - 30, item[0][1] - 140, x[item[0][0]] + 20, item[0][1] - 71))
         click_centers.append((x[item[0][0]] + 38, item[0][1] - 60))
 
-    last_click_t = 0
-    last_screenshot_t = time.time()
+    last_click_t = float('-inf')
+    deadline = time.monotonic() + 15
+    attempts = [0] * len(items)
     while len(unchecked) > 0:
+        if not self.flag_run:
+            raise RequestHumanTakeOver
+        now = time.monotonic()
+        if now >= deadline:
+            raise RuntimeError("商店商品勾选状态在 15 秒内未能确认，已停止购买。")
         clicked = False
 
-        for i in unchecked:
+        for i in unchecked[:]:
             area = areas[i]
             click_center = click_centers[i]
             if not image.search_in_area(self, "shop_item-chosen", area=area, threshold=0.8):
                 # slow down click
-                if last_screenshot_t - last_click_t > 0.5:
+                if now - last_click_t > 0.5:
+                    if attempts[i] >= 3:
+                        raise RuntimeError("商店商品连续三次勾选后仍无法确认，已停止购买。")
                     self.click(click_center[0], click_center[1], wait_over=True)
+                    attempts[i] += 1
                     clicked = True
             else:
                 unchecked.remove(i)
         if clicked:
-            last_click_t = time.time()
+            last_click_t = time.monotonic()
         self.update_screenshot_array()
-        last_screenshot_t = time.time()
 
 
 
@@ -253,5 +298,5 @@ def swipe_get_y_diff(self, item_lines_y):
                                           )
     if position is False:
         self.logger.warning("Swipe Failed.")
-        raise
+        raise RuntimeError("商店滑动后无法定位商品，已停止购买。")
     return area[1] - position[1]

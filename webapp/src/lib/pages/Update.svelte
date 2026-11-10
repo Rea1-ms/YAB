@@ -1,8 +1,9 @@
 <script lang="ts">
   /** 全局页：更新设置（setup.toml）与帮助文档 */
-  import { callRpc } from '../stores';
+  import { callRpc, connected } from '../stores';
   import { toast } from '../toast';
   import { LOCALES, t, tNow } from '../i18n';
+  import { styleHelpDocument } from '../help-document';
   import type { CdkTestResult, HelpLangEntry, ShaTestResult, UpdateInfo } from '../types';
 
   // —— 更新设置 ——
@@ -122,20 +123,18 @@
     }
   }
 
-  // 暗色主题注入：白色文字 + 透明背景
-  const styledHtml = $derived(
-    helpHtml ? '<style>body{color:#e6e6e6;background:transparent}</style>' + helpHtml : '',
-  );
+  const styledHtml = $derived(styleHelpDocument(helpHtml));
 
   // 挂载时加载（全局页无 dir 依赖）
   $effect(() => {
+    if (!$connected) return;
     void load();
     void loadHelp();
   });
 </script>
 
 <div class="page">
-  <div class="card sec">
+  <div class="card sec settings-card">
     <h2>{$t('更新设置')}</h2>
     <div class="ver">
       {$t('当前版本：')}<b class="mono">{info?.current_version ?? '…'}</b>
@@ -230,7 +229,7 @@
     </div>
   </div>
 
-  <div class="card sec">
+  <div class="card sec settings-card">
     <h2>{$t('帮助文档')}</h2>
     {#if helpList.length === 0}
       <div class="dim">{$t('暂无帮助文档')}</div>
@@ -252,7 +251,8 @@
         </div>
         <div class="doc">
           {#if helpHtml}
-            <iframe title={helpName || $t('帮助文档')} class="doc-frame" srcdoc={styledHtml}></iframe>
+            <iframe title={helpName || $t('帮助文档')} class="doc-frame"
+              sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc={styledHtml}></iframe>
           {:else}
             <div class="dim doc-empty">{$t('从左侧选择文档查看')}</div>
           {/if}
@@ -260,6 +260,15 @@
       </div>
     {/if}
   </div>
+  {#if info?.upstream}
+    <footer class="upstream">
+      {$t('原始仓库：')}
+      <a href={`${info.upstream.repository}/commit/${info.upstream.commit}`}
+        target="_blank" rel="noopener noreferrer" title={info.upstream.commit}>
+        <span class="mono">{info.upstream.version} · {info.upstream.commit.slice(0, 8)}</span>
+      </a>
+    </footer>
+  {/if}
 </div>
 
 <style>
@@ -272,21 +281,32 @@
     padding: 16px;
     overflow: auto;
   }
-  .sec {
-    padding: 16px 18px;
-  }
-  .sec h2 {
-    margin: 0 0 12px;
-    font-size: 15px;
-    color: var(--accent);
-    font-weight: 600;
-  }
+  .settings-card { --settings-control-width: 420px; }
   .ver {
     font-size: 13px;
     margin-bottom: 12px;
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+  }
+  .upstream {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .upstream a {
+    color: var(--muted);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .upstream a:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .ver b {
     color: var(--text);
@@ -298,31 +318,6 @@
     border: 1px solid rgba(224, 175, 104, 0.3);
     border-radius: 6px;
     padding: 2px 10px;
-  }
-  .field {
-    display: flex;
-    gap: 14px;
-    padding: 7px 0;
-    align-items: flex-start;
-  }
-  .field label {
-    width: 150px;
-    flex: none;
-    color: var(--muted);
-    font-size: 13px;
-    padding-top: 6px;
-    text-align: right;
-  }
-  .ctl {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .ctl :global(.input) {
-    max-width: 420px;
-    width: 100%;
   }
   .row {
     display: flex;

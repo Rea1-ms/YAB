@@ -1,10 +1,10 @@
 # Telegram 推送
 
-BAAS 支持把 **运行出错** 和 **任务完成** 的通知推送到 Telegram 机器人会话，适合挂机时用手机接收状态。
+YAB 支持把 **运行出错** 和 **任务完成** 的通知推送到 Telegram（电报）机器人会话，适合挂机时用手机接收状态。现在统一使用 OnePush（多渠道推送库），完整设置说明见 [推送通知](notifications.md)。
 
 ## 功能入口
 
-GUI: 主界面 -> 设置 -> **推送配置**，在底部四个 Telegram 字段中填写：
+主界面 → 设置 → **推送通知**，添加 Telegram（电报）渠道，填写访问令牌和接收会话编号；代理地址直接填在渠道内，自定义接口放在「更多参数」的 `api_url`（接口地址）中。已有四个旧字段会自动迁移：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -13,7 +13,7 @@ GUI: 主界面 -> 设置 -> **推送配置**，在底部四个 Telegram 字段�
 | Telegram 代理 | 形如 `http://127.0.0.1:7890`；国内直连通常不可达，一般需要填 |
 | Telegram API 地址 | 自定义 API 域名，留空使用 `https://api.telegram.org` |
 
-只有 **Bot Token 和 Chat ID 同时填写** 时，Telegram 推送才会生效；其他推送渠道（Server酱 / 飞书 / 企业微信）互不影响，可以同时启用。
+只有访问令牌和接收会话编号同时填写时，电报推送才会生效；其他推送渠道互不影响，可以同时启用。
 
 ## 获取 Bot Token
 
@@ -39,7 +39,7 @@ GUI: 主界面 -> 设置 -> **推送配置**，在底部四个 Telegram 字段�
 .venv\Scripts\python.exe develop_tools\demo_telegram_push.py --token <TOKEN> --chat-id <CHAT_ID> --proxy http://127.0.0.1:7890
 ```
 
-凭证来源优先级：命令行参数 > 环境变量（`BAAS_TELEGRAM_BOT_TOKEN` / `BAAS_TELEGRAM_CHAT_ID` / `BAAS_TELEGRAM_PROXY` / `BAAS_TELEGRAM_API`）> `config/<region>/config.json`。
+此旧版演示工具仍读取旧字段，凭证来源优先级：命令行参数 > 环境变量（`BAAS_TELEGRAM_BOT_TOKEN` / `BAAS_TELEGRAM_CHAT_ID` / `BAAS_TELEGRAM_PROXY` / `BAAS_TELEGRAM_API`）> `config/<region>/config.json`。验证新渠道请使用设置页的「发送测试通知」。
 
 跑离线单元测试（不需要网络）：
 

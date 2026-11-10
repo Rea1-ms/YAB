@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+from core.distribution import is_distribution
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -23,14 +25,17 @@ def ensure_frontend(root=None, force=False):
     root = Path(root) if root is not None else PROJECT_ROOT
     webapp = root / 'webapp'
     index = webapp / 'dist' / 'index.html'
+    if is_distribution(root):
+        if not index.is_file():
+            raise RuntimeError('发行包缺少网页资源，请重新下载完整发行包')
+        return
     inputs = [webapp / name for name in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html',
                                          'vite.config.ts', 'svelte.config.js', 'tsconfig.json')]
     inputs.extend((webapp / 'src').rglob('*'))
+    inputs.extend((webapp / 'public').rglob('*'))
     if (not force and index.is_file()
             and all(path.stat().st_mtime <= index.stat().st_mtime for path in inputs if path.is_file())):
         return
-    if getattr(sys, 'frozen', False):
-        raise RuntimeError('发行包缺少网页资源，请重新下载完整发行包')
     if not (webapp / 'package.json').is_file():
         raise RuntimeError('缺少网页源文件，请使用完整源码或发行包')
     node = shutil.which('node')
@@ -50,6 +55,6 @@ def ensure_frontend(root=None, force=False):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='准备 BAAS 网页资源')
+    parser = argparse.ArgumentParser(description='准备 YAB 网页资源')
     parser.add_argument('--force', action='store_true', help='重新构建网页资源')
     ensure_frontend(force=parser.parse_args().force)

@@ -49,8 +49,9 @@ locale.subscribe((v) => {
 
 /** 翻译函数：以中文原文为 key，缺失时回退原文。模板中用 {$t('中文')} */
 export const t = derived(locale, (l) => (src: string): string => {
-  if (l === 'zh_CN') return src;
-  return DICTS[l]?.[src] ?? src;
+  // Keep stored option values and generated translation keys compatible with old configs.
+  const label = l === 'zh_CN' ? src : (DICTS[l]?.[src] ?? src);
+  return label.replace(/\bBAAS\b/gi, 'YAB').replace(/Blue Archive Auto Script/g, 'YAB');
 });
 
 /** 在脚本代码中取当前翻译函数 */

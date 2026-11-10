@@ -380,6 +380,7 @@ DEFAULT_CONFIG = """
     "bannerVisibility": true,
     "push_after_error":false,
     "push_after_completion":false,
+    "push_onepush":[],
     "push_json":"",
     "push_serverchan":"",
     "push_feishu": "",

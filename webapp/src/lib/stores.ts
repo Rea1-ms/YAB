@@ -125,9 +125,10 @@ export async function callRpc<T = unknown>(
   topic: string,
   fn: string,
   args: Record<string, unknown> = {},
+  timeoutMs?: number,
 ): Promise<T | undefined> {
   try {
-    return await ws.rpc<T>(topic, fn, args);
+    return await ws.rpc<T>(topic, fn, args, timeoutMs);
   } catch (err) {
     toast('error', tNow()(err instanceof Error ? err.message : String(err)));
     return undefined;

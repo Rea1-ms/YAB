@@ -128,7 +128,7 @@ class TelegramPushTest(unittest.TestCase):
         logger = CapturingLogger()
         config = FakeTelegramConfig(push_telegram_chat_id="")
 
-        with patch.object(pushkit, "push_telegram") as mock_push:
+        with patch('requests.Session.request') as mock_push:
             pushkit.push(logger, config)
 
         mock_push.assert_not_called()
@@ -141,16 +141,16 @@ class TelegramPushTest(unittest.TestCase):
             push_telegram_api="https://tlg.example.com",
         )
 
-        with patch.object(pushkit, "push_telegram", return_value=None) as mock_push:
+        with patch.object(pushkit, "send_channels", return_value=[]) as mock_push:
             pushkit.push(logger, config)
 
         mock_push.assert_called_once_with(
             logger,
-            BOT_TOKEN,
-            CHAT_ID,
-            {"title": "Baas Completed", "desp": "all activities finished"},
-            "http://127.0.0.1:7890",
-            "https://tlg.example.com",
+            [{"provider": "telegram", "enabled": True,
+              "params": {"token": BOT_TOKEN, "userid": CHAT_ID, "api_url": "https://tlg.example.com"},
+              "proxy": "http://127.0.0.1:7890"}],
+            "YAB Completed",
+            "all activities finished",
         )
 
 

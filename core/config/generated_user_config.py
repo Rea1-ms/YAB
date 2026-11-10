@@ -45,6 +45,7 @@ class Config:
     bannerVisibility: bool
     push_after_error: bool
     push_after_completion: bool
+    push_onepush: list
     push_json: str
     push_serverchan: str
     push_feishu: str

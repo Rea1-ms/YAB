@@ -51,18 +51,11 @@ def scan_configs():
 
 
 def get_version():
-    if os.path.exists('./setup.toml'):
-        try:
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib
-            with open('./setup.toml', 'rb') as f:
-                data = tomllib.load(f)
-            return str(data.get('General', {}).get('current_BAAS_version', 'dev'))
-        except Exception:
-            pass
-    return 'dev'
+    from core.distribution import distribution_version, project_metadata
+    bundled = distribution_version()
+    if bundled:
+        return bundled
+    return str(project_metadata().get('project', {}).get('version', 'dev'))
 
 
 class BaasService:
@@ -82,6 +75,17 @@ class BaasService:
         self.states = {}  # config -> dict(running, button, current, waiting)
         self._control_lock = threading.RLock()
         self._stop_events = {}
+        self.listener = None
+
+    def webui_get(self):
+        from server.webui_settings import load_settings
+        return {'saved': load_settings(), 'active': self.listener,
+                'port_override': bool(os.environ.get('YAB_DESKTOP_PORT_OVERRIDE'))}
+
+    def webui_save(self, params):
+        from server.webui_settings import save_settings
+        save_settings(params)
+        return self.webui_get()
 
     # ---------- state helpers ----------
 
@@ -154,7 +158,7 @@ class BaasService:
 
     def _on_exit(self, config, code):
         self._on_button(config, '启动')
-        self.hub.log(config, 1, '-- BAAS Exited --')
+        self.hub.log(config, 1, '-- YAB Exited --')
 
     # ---------- script control ----------
 
@@ -210,7 +214,7 @@ class BaasService:
                 t.send('stop')
                 return
             if task is None:
-                self.hub.log(config, 1, 'Starting Blue Archive Auto Script...')
+                self.hub.log(config, 1, 'Starting YAB...')
                 t.send('start')
             else:
                 self._set_state(config, current=task)
@@ -241,6 +245,14 @@ class BaasService:
         return self._launch(config, task)
 
     # ---------- config management ----------
+
+    def push_test(self, config, params):
+        from core.push_config import validate_channels
+        from core.push_onepush import send_channel
+        config_path(config)
+        channel = params.get('channel')
+        validate_channels([channel], require_complete=True)
+        return send_channel(channel, 'YAB 通知测试', '收到这条消息，说明推送渠道配置成功。')
 
     def config_set(self, config, params):
         from core.config.config_set import ConfigSet
@@ -399,16 +411,21 @@ class BaasService:
         return TOML_Config(path)
 
     def update_get(self, _params):
+        from core.distribution import project_metadata
+
         cfg = self._toml_config()
-        if cfg is None:
-            return {'has_setup_toml': False, 'current_version': get_version()}
-        return {
-            'has_setup_toml': True,
+        info = {
+            'has_setup_toml': cfg is not None,
             'current_version': get_version(),
-            'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
-            'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
-            'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
+            'upstream': project_metadata().get('tool', {}).get('yab', {}).get('upstream'),
         }
+        if cfg is not None:
+            info.update({
+                'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
+                'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
+                'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
+            })
+        return info
 
     def update_save(self, params):
         cfg = self._toml_config()

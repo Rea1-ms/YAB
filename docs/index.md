@@ -4,8 +4,8 @@ layout: home
 
 hero:
   
-  name: '<span style="font-size: 4rem; white-space: nowrap; ">BlueArchiveAutoScript</span>'
-  text: '<em><strong>BAAS</strong></em>'
+  name: '<span style="font-size: 4rem; white-space: nowrap; ">YAB</span>'
+  text: '<em><strong>Yet Another BAAS</strong></em>'
   tagline: '接管一切蔚蓝档案任务'
   actions:
     - theme: brand
@@ -53,9 +53,9 @@ features:
     details: "一键活动推剧情，任务，挑战，走格子"
     link: /usage_doc/activity
   - title: "自动更新"
-    details: "如何更新BAAS"
+    details: "如何更新YAB"
     link: /usage_doc/update
   - title: "致谢"
-    details: "感谢所有对BAAS做出贡献的人"
+    details: "感谢所有对YAB做出贡献的人"
     link: /thanks
 ---
