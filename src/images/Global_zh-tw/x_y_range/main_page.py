@@ -12,6 +12,8 @@ x_y_range = {
     'startup-promo-close': (1148, 52, 1198, 99),
     'startup-promo-dismiss': (82, 626, 122, 666),
     'startup-promo-dismiss-2': (84, 636, 112, 664),
+    'startup-promo-dismiss-light': (92, 632, 120, 660),
+    'startup-promo-dismiss-dark': (92, 632, 120, 660),
     'login-feature': (40, 625, 96, 649),
     'news': (50, 102, 96, 144),
     'daily-attendance': (540, 90, 1100, 174),

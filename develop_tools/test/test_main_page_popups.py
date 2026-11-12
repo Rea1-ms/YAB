@@ -19,6 +19,12 @@ from module import collect_daily_free_power as free_power
 
 ROOT = Path(__file__).resolve().parents[2]
 IDENTIFIERS = ('Global_en-us', 'Global_zh-tw', 'Global_ko-kr')
+REPORTED_PROMOTIONS = (
+    'global_startup_promo_livestream',
+    'global_startup_promo_fest_character_background',
+    'global_startup_promo_fest_city_background',
+    'global_startup_promo_preregistration',
+)
 
 
 class MainPagePopupTests(unittest.TestCase):
@@ -101,8 +107,8 @@ class MainPagePopupTests(unittest.TestCase):
         return menu
 
     @contextmanager
-    def android_download_worker(self, frames, ratio=1):
-        worker = self.worker(frames, ratio=ratio)
+    def android_worker(self, frames, ratio=1, identifier='Global_en-us'):
+        worker = self.worker(frames, identifier=identifier, ratio=ratio)
         worker.is_android_device = True
         worker.resolution = (int(1280 * ratio), int(720 * ratio))
         worker.package_name = 'com.nexon.bluearchive'
@@ -181,7 +187,7 @@ class MainPagePopupTests(unittest.TestCase):
         frames = ([load_fixture('global_download_essential')] * 3 + [self.frame('empty')] * 2
                   + [load_fixture('global_download_additional')] * 3 + [self.frame('home')])
         for ratio in (.75, 1, 1.5, 2):
-            with self.subTest(ratio=ratio), self.android_download_worker(frames, ratio) as worker:
+            with self.subTest(ratio=ratio), self.android_worker(frames, ratio) as worker:
                 self.assertTrue(worker.solve('restart'))
                 worker.u2.app_start.assert_called_once_with(worker.package_name, worker.activity_name)
                 worker.u2.app_stop.assert_not_called()
@@ -197,7 +203,7 @@ class MainPagePopupTests(unittest.TestCase):
         frames = ([load_fixture('global_download_essential')] * 3 + [self.frame('empty')] * 2
                   + [load_fixture('global_download_additional')] * 3 + [self.frame('home')])
         for stop_frame in (0, 5):
-            with self.subTest(stop_frame=stop_frame), self.android_download_worker(frames) as worker:
+            with self.subTest(stop_frame=stop_frame), self.android_worker(frames) as worker:
                 def screenshot_and_stop(stop_frame=stop_frame):
                     frame = worker.replay.screenshot()
                     if worker.replay.index == stop_frame:
@@ -218,7 +224,7 @@ class MainPagePopupTests(unittest.TestCase):
 
     def test_android_downloads_cannot_complete_with_only_legacy_templates(self):
         for name in ('global_download_essential', 'global_download_additional'):
-            with self.subTest(name=name), self.android_download_worker([load_fixture(name)] * 3) as worker:
+            with self.subTest(name=name), self.android_worker([load_fixture(name)] * 3) as worker:
                 legacy = {key: value for key, value in position.image_dic[worker.identifier].items()
                           if key != 'main_page_game-download-resource-notice2'}
                 self.assertIn('main_page_game-download-resource-notice', legacy)
@@ -254,6 +260,90 @@ class MainPagePopupTests(unittest.TestCase):
                     worker = self.worker([self.frame('promo-capture'), self.frame('home')], identifier, ratio)
                     worker.to_main_page()
                     worker.click.assert_called_once_with(1173, 75, wait_over=True)
+
+    def test_new_startup_captures_close_in_all_languages_and_resolutions(self):
+        for name in REPORTED_PROMOTIONS:
+            frame = load_fixture(name)
+            for identifier in IDENTIFIERS:
+                for ratio in (.75, 1, 1.5, 2):
+                    with self.subTest(name=name, identifier=identifier, ratio=ratio):
+                        worker = self.worker([frame, self.frame('home')], identifier, ratio)
+                        worker.to_main_page()
+                        worker.click.assert_called_once_with(1173, 75, wait_over=True)
+                        self.assertEqual(worker.replay.index, 1)
+
+    def test_new_startup_captures_require_footer_but_not_close_artwork(self):
+        for name in REPORTED_PROMOTIONS:
+            frame = load_fixture(name)
+            for identifier in IDENTIFIERS:
+                for ratio in (.75, 1, 1.5, 2):
+                    with self.subTest(name=name, identifier=identifier, ratio=ratio):
+                        no_close = frame.copy()
+                        no_close[48:104, 1143:1203] = 0
+                        worker = self.worker([no_close, self.frame('home')], identifier, ratio)
+                        worker.to_main_page()
+                        worker.click.assert_called_once_with(1173, 75, wait_over=True)
+                        self.assertEqual(worker.replay.index, 1)
+
+                        no_footer = frame.copy()
+                        no_footer[622:670, 78:310] = 0
+                        worker = self.worker([no_footer], identifier, ratio)
+                        self.assertFalse(picture.handle_global_main_page_overlay(worker))
+                        worker.click.assert_not_called()
+                        self.assertEqual(worker.replay.index, -1)
+
+    def test_new_startup_captures_close_before_visible_home_features(self):
+        for name in REPORTED_PROMOTIONS:
+            with self.subTest(name=name):
+                frame = load_fixture(name)
+                frame[:6, :6] = (3, 2, 1)
+                worker = self.worker([frame, self.frame('home')])
+                worker.to_main_page()
+                worker.click.assert_called_once_with(1173, 75, wait_over=True)
+                self.assertEqual(worker.replay.index, 1)
+
+    def test_new_startup_captures_retry_only_after_close_cooldown(self):
+        for name in REPORTED_PROMOTIONS:
+            with self.subTest(name=name):
+                worker = self.worker([load_fixture(name)] * 6 + [self.frame('home')])
+                worker.to_main_page()
+                self.assertEqual(worker.click.call_args_list, [call(1173, 75, wait_over=True)] * 2)
+                self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+                first, second = worker.replay.actions
+                self.assertGreater(second['time'] - first['time'], 2)
+                self.assertEqual(worker.replay.index, 6)
+
+    def test_new_startup_captures_cannot_finish_without_home(self):
+        for name in REPORTED_PROMOTIONS:
+            with self.subTest(name=name):
+                worker = self.worker([load_fixture(name)] * 6)
+                with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+                    worker.to_main_page()
+                self.assertEqual(worker.click.call_args_list, [call(1173, 75, wait_over=True)] * 2)
+                self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+
+    def test_android_new_startup_sequence_scales_close_and_waits_for_home(self):
+        # Captures are real; their order, repeats and final home marker are synthetic.
+        frames = [frame for name in REPORTED_PROMOTIONS for frame in [load_fixture(name)] * 6]
+        frames.append(self.frame('home'))
+        for identifier in IDENTIFIERS:
+            for ratio in (.75, 1, 1.5, 2):
+                with (self.subTest(identifier=identifier, ratio=ratio),
+                      self.android_worker(frames, ratio, identifier) as worker):
+                    worker.to_main_page()
+                    click = call(int(1173 * ratio), int(75 * ratio))
+                    self.assertEqual(worker.control.click.call_args_list, [click] * 5)
+                    self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5, 10, 15, 20])
+                    self.assertEqual(worker.replay.index, 24)
+
+    def test_new_startup_captures_do_not_apply_to_other_servers(self):
+        for name in REPORTED_PROMOTIONS:
+            for server in ('CN', 'JP'):
+                with self.subTest(name=name, server=server):
+                    worker = self.worker([load_fixture(name)])
+                    worker.server = server
+                    self.assertFalse(picture.handle_global_main_page_overlay(worker))
+                    worker.click.assert_not_called()
 
     def test_missed_promotion_close_waits_before_retrying_on_repeated_frames(self):
         frame = self.frame('promo-capture')

@@ -337,6 +337,170 @@
         "sha256": "a8f17c8bfd23c40659b8b4422ccec13bd21c402009dbbc214eaa6f6858f5ff21",
         "redacted_regions": []
       }
+    },
+    "global_startup_promo_livestream": {
+      "path": "global_startup_promo_livestream.png",
+      "sha256": "fc118e785dfedfbf7c8b19748cddf79a58946e0f940b87f46c5958fb0b86186c",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：直播预告，蓝色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-ba-stuck-popup-again.png",
+        "sha256": "608a61820e650c1fc3db487c7a310fa97e911bfb4632ce360cbd1ccc142c4780",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_fest_character_background": {
+      "path": "global_startup_promo_fest_character_background.png",
+      "sha256": "0f0818ad79ae77efdff19c125a49941f2f099af62488d540de4a683b9bac3ce7",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：学生自选券，角色背景与浅色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-stuck-1.png",
+        "sha256": "405bb912b487254ab4d36f91b14dbc0edfb3a5717c38c30a1554b5b2bcbd62c9",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_fest_city_background": {
+      "path": "global_startup_promo_fest_city_background.png",
+      "sha256": "a8a70e5c9737ced313e844430184f6b0bb6dff72b110c3d6a3b9cee9cdfacabe",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：学生自选券，城市背景与浅色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-popup-1111.png",
+        "sha256": "69bc6f1d0848bc2b4237462d5d5ba7ee7224981e05a43a1e61c4be9afaedb1c9",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_preregistration": {
+      "path": "global_startup_promo_preregistration.png",
+      "sha256": "f6f34a2ff29767169d681869a7ad373e353d860c54e4192687c605ca28dbdb21",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：周年预约奖励，深色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-popup-1111-2.png",
+        "sha256": "8a2640dc2e249cd8cd205d4acd8cea1bbbed0e02c4fe29d6ed3c4145d011217b",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
     }
   }
 }
