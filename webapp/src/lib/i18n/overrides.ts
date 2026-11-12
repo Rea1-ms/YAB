@@ -4,6 +4,12 @@
 
 export default {
   en_US: {
+    '支持本机系统通知和多个远程渠道。旧推送配置会自动沿用。': 'Use local system notifications and multiple remote channels. Existing push settings are carried over automatically.',
+    '本机系统通知': 'Local system notification',
+    '完成后推送包括一轮日常任务完成，以及剧情推进、活动一键执行中的单次任务完成；手动停止不会发送完成通知。': 'Notify when a daily task batch finishes or a story or event action completes. Manual stops do not send completion notifications.',
+    '使用 Windows（视窗系统）通知，无需填写参数；通知显示在运行脚本的电脑上，关闭网页后仍可接收。': 'Uses Windows notifications without extra parameters. Notifications appear on the computer running the script, even after this page is closed.',
+    '已提交系统通知': 'System notification submitted',
+    '本机系统通知不可用，请在 Windows（视窗系统）上安装通知组件后重试': 'Local system notifications are unavailable. Install the notification component on Windows and try again.',
     '使用 OnePush，可同时配置多个渠道。旧推送配置会自动沿用。': 'OnePush supports multiple channels. Existing push settings are carried over automatically.',
     '推送渠道': 'Push channel', '启用渠道': 'Enable channel', '移除渠道': 'Remove channel',
     '渠道类型': 'Channel type', '添加渠道': 'Add channel', '保存推送设置': 'Save push settings',
@@ -235,6 +241,12 @@ export default {
     'RPC 超时：{0}': 'RPC timeout: {0}',
   },
   ja_JP: {
+    '支持本机系统通知和多个远程渠道。旧推送配置会自动沿用。': 'ローカルのシステム通知と複数の外部通知先に対応しています。既存の設定は自動で引き継がれます。',
+    '本机系统通知': 'ローカルのシステム通知',
+    '完成后推送包括一轮日常任务完成，以及剧情推进、活动一键执行中的单次任务完成；手动停止不会发送完成通知。': '日常タスクの一巡、ストーリー進行やイベントの単発タスク完了時に通知します。手動停止では完了通知を送りません。',
+    '使用 Windows（视窗系统）通知，无需填写参数；通知显示在运行脚本的电脑上，关闭网页后仍可接收。': '追加設定不要の Windows 通知です。実行中のパソコンに表示され、このページを閉じた後も受信できます。',
+    '已提交系统通知': 'システム通知を送信しました',
+    '本机系统通知不可用，请在 Windows（视窗系统）上安装通知组件后重试': 'システム通知を利用できません。Windows に通知コンポーネントをインストールして再試行してください。',
     '使用 OnePush，可同时配置多个渠道。旧推送配置会自动沿用。': 'OnePush で複数の通知先を設定できます。既存の設定は自動で引き継がれます。',
     '推送渠道': '通知先', '启用渠道': '通知先を有効化', '移除渠道': '通知先を削除',
     '渠道类型': '通知先の種類', '添加渠道': '通知先を追加', '保存推送设置': '通知設定を保存',
@@ -464,6 +476,12 @@ export default {
     'RPC 超时：{0}': 'RPC タイムアウト：{0}',
   },
   ko_KR: {
+    '支持本机系统通知和多个远程渠道。旧推送配置会自动沿用。': '로컬 시스템 알림과 여러 원격 채널을 지원합니다. 기존 알림 설정은 자동으로 유지됩니다.',
+    '本机系统通知': '로컬 시스템 알림',
+    '完成后推送包括一轮日常任务完成，以及剧情推进、活动一键执行中的单次任务完成；手动停止不会发送完成通知。': '일일 작업 한 차례 또는 스토리·이벤트 단일 작업이 완료되면 알립니다. 수동으로 중지하면 완료 알림을 보내지 않습니다.',
+    '使用 Windows（视窗系统）通知，无需填写参数；通知显示在运行脚本的电脑上，关闭网页后仍可接收。': '추가 설정 없이 Windows 알림을 사용합니다. 스크립트를 실행하는 컴퓨터에 표시되며 이 페이지를 닫아도 받을 수 있습니다.',
+    '已提交系统通知': '시스템 알림을 요청했습니다',
+    '本机系统通知不可用，请在 Windows（视窗系统）上安装通知组件后重试': '로컬 시스템 알림을 사용할 수 없습니다. Windows에 알림 구성 요소를 설치한 후 다시 시도하세요.',
     '使用 OnePush，可同时配置多个渠道。旧推送配置会自动沿用。': 'OnePush로 여러 알림 채널을 설정할 수 있습니다. 기존 설정은 자동으로 유지됩니다.',
     '推送渠道': '알림 채널', '启用渠道': '채널 활성화', '移除渠道': '채널 제거',
     '渠道类型': '채널 종류', '添加渠道': '채널 추가', '保存推送设置': '알림 설정 저장',

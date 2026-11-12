@@ -20,17 +20,17 @@ def get_root_path():
 
 
 def notify(title=None, body=None):
-    root_path = get_root_path()
     if _notify is None:
-        print(f"{title}: {body}")
-        return
+        return False
 
+    root_path = get_root_path()
     _notify(
         title=title,
         body=body,
         app_id=app_id,
         icon=root_path + icon_path,
     )
+    return True
 
 
 def toast(title=None, body=None, button=None, duration=None):

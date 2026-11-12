@@ -69,6 +69,16 @@ func_dict = {
 }
 
 
+SINGLE_RUN_COMPLETION_TASKS = {
+    'main_story': '推主线剧情',
+    'group_story': '推小组剧情',
+    'mini_story': '推支线剧情',
+    'explore_activity_story': '推活动剧情',
+    'explore_activity_mission': '推活动任务',
+    'explore_activity_challenge': '推活动挑战',
+}
+
+
 class Baas_thread:
 
     def __init__(self, config, logger_signal=None, button_signal=None, update_signal=None, exit_signal=None):
@@ -440,7 +450,10 @@ class Baas_thread:
                 self.button_signal.emit("启动")
             self.flag_run = False
         elif msg == "solve":
-            return self.solve(task)
+            result = self.solve(task)
+            if result and self.flag_run and task in SINGLE_RUN_COMPLETION_TASKS:
+                push(self.logger, self.config, task_name=SINGLE_RUN_COMPLETION_TASKS[task])
+            return result
 
     def thread_starter(self):
         """

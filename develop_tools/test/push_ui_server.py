@@ -36,8 +36,14 @@ def main():
         response.json.return_value = {'code': 0, 'ok': True}
         return response
 
+    def native_delivery(**kwargs):
+        calls.append({'method': 'system', 'title': kwargs['title'], 'body': kwargs['body'],
+                      'app_id': kwargs['app_id']})
+        (scratch / 'deliveries.json').write_text(json.dumps(calls), encoding='utf-8')
+
     with socket.socket() as listener, patch('server.service.BaasService.init_ocr'), \
-            patch('requests.Session.request', side_effect=deliver):
+            patch('requests.Session.request', side_effect=deliver), \
+            patch('core.notification._notify', side_effect=native_delivery):
         listener.bind(('127.0.0.1', 0))
         listener.listen()
         port = listener.getsockname()[1]

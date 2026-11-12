@@ -1,9 +1,13 @@
-import requests
+from __future__ import annotations
+
 import json
-from core.utils import Logger
+
+import requests
+
 from core.config.generated_user_config import Config
 from core.push_config import legacy_channels
 from core.push_onepush import send_channels
+from core.utils import Logger
 serverchan_url = 'https://sctapi.ftqq.com/{KEY}.send'
 
 headers = {
@@ -11,7 +15,7 @@ headers = {
 }
 
 
-def push(logger: Logger, config: Config, error: str = None):
+def push(logger: Logger, config: Config, error: str | None = None, *, task_name: str | None = None):
     data = {}
     if error and config.push_after_error:
         data['title'] = "YAB Error"
@@ -20,6 +24,10 @@ def push(logger: Logger, config: Config, error: str = None):
     if not error and config.push_after_completion:
         data['title'] = "YAB Completed"
         data['desp'] = "all activities finished"
+        if task_name:
+            data['title'] = 'YAB 任务完成'
+            name = getattr(config, 'name', '')
+            data['desp'] = f'{name}：{task_name}已执行完成。' if name else f'{task_name}已执行完成。'
 
     if data:
         channels = getattr(config, 'push_onepush', None)

@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
+from core import notification
 from core.config.config_init import check_and_update_user_config
 from core.config.config_set import ConfigSet
 from core.config.default_config import DEFAULT_CONFIG, STATIC_DEFAULT_CONFIG
@@ -48,11 +49,16 @@ class DeliveryTests(unittest.TestCase):
                 params.update(host='mail.invalid', user='test@example.invalid')
             with self.subTest(provider=provider['id']), \
                     patch('requests.Session.request', return_value=response()) as request, \
-                    patch('smtplib.SMTP') as smtp:
+                    patch('smtplib.SMTP') as smtp, \
+                    patch('core.notification._notify') as native:
                 smtp.return_value.__enter__.return_value.send_message.return_value = {}
                 result = send_channel(channel(provider['id'], **params), '离线标题', '离线正文')
                 self.assertTrue(result['success'], result)
-                if provider['id'] == 'smtp':
+                if provider['id'] == 'system':
+                    native.assert_called_once()
+                    request.assert_not_called()
+                    smtp.assert_not_called()
+                elif provider['id'] == 'smtp':
                     self.assertEqual(smtp.call_args.kwargs['timeout'], REQUEST_TIMEOUT)
                 else:
                     self.assertTrue(request.called)
@@ -124,6 +130,58 @@ class DeliveryTests(unittest.TestCase):
             with self.subTest(error=error), patch('requests.Session.request', return_value=response()) as request:
                 push(Mock(), config, error)
                 self.assertIn(expected, request.call_args.kwargs['data']['text'])
+
+    def test_system_channel_needs_no_credentials_and_keeps_native_identity(self):
+        settings = channel('system')
+        self.assertEqual(validate_channels([settings], require_complete=True), [settings])
+        with patch('core.notification._notify') as native, patch('requests.Session.request') as request:
+            result = send_channel(settings, '离线标题', '离线正文')
+        self.assertTrue(result['success'])
+        native.assert_called_once_with(title='离线标题', body='离线正文', app_id='YAB',
+                                       icon=notification.get_root_path() + '/assets/logo.png')
+        request.assert_not_called()
+
+    def test_unavailable_system_notifications_do_not_claim_success(self):
+        with patch('core.notification._notify', None), patch('requests.Session.request') as request:
+            result = send_channel(channel('system'), '标题', '正文')
+        self.assertFalse(result['success'])
+        self.assertIn('不可用', result['message'])
+        request.assert_not_called()
+
+    def test_native_failure_does_not_prevent_remote_delivery(self):
+        logger = Mock()
+        with patch('core.notification._notify', side_effect=RuntimeError('private details')), \
+                patch('requests.Session.request', return_value=response()) as request:
+            results = send_channels(logger, [channel('system'), channel(token='offline-token', userid='1')],
+                                    '标题', '正文')
+        self.assertEqual([item['success'] for item in results], [False, True])
+        self.assertNotIn('private details', str(results) + str(logger.mock_calls))
+        request.assert_called_once()
+
+    def test_system_channel_obeys_trigger_switches_and_channel_disable(self):
+        config = SimpleNamespace(push_onepush=[channel('system')], push_after_error=False,
+                                 push_after_completion=False)
+        with patch('core.notification._notify') as native:
+            self.assertEqual(push(Mock(), config), [])
+            self.assertEqual(push(Mock(), config, 'error'), [])
+            native.assert_not_called()
+            config.push_after_completion = True
+            self.assertTrue(push(Mock(), config)[0]['success'])
+            config.push_after_error = True
+            self.assertTrue(push(Mock(), config, 'error')[0]['success'])
+            self.assertEqual(native.call_count, 2)
+            config.push_onepush[0]['enabled'] = False
+            self.assertEqual(push(Mock(), config), [])
+            self.assertEqual(push(Mock(), config, 'error'), [])
+            self.assertEqual(native.call_count, 2)
+
+    def test_shutdown_notification_keeps_interaction_and_return_value(self):
+        answer = {'arguments': 'http:Cancel', 'user_input': {}}
+        with patch('core.notification._toast', return_value=answer) as native:
+            self.assertEqual(notification.toast('关机', '正文', 'Cancel', 'long'), answer)
+        native.assert_called_once_with(title='关机', body='正文', app_id='YAB',
+                                       icon=notification.get_root_path() + '/assets/logo.png',
+                                       button='Cancel', duration='long')
 
 
 class MigrationAndProtocolTests(unittest.TestCase):

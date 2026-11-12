@@ -17,7 +17,7 @@ PROVIDER_LABELS = {
 
 
 def provider_catalog():
-    result = []
+    result = [{'id': 'system', 'label': '本机系统通知', 'required': [], 'optional': []}]
     for name in onepush.all_providers():
         notifier = onepush.get_notifier(name)
         params = notifier.params
