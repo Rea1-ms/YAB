@@ -412,6 +412,36 @@ class FrontendTests(ScratchTest):
 
 
 class DistributionTests(ScratchTest):
+    def test_bundled_ocr_uses_platform_binary_without_downloading(self):
+        from core.ocr.baas_ocr_client import server_installer
+
+        for platform, executable in (('win32', 'BAAS_ocr_server.exe'), ('linux', 'BAAS_ocr_server')):
+            with self.subTest(platform=platform):
+                directory = self.scratch / platform
+                directory.mkdir()
+                (directory / executable).write_bytes(b'packaged executable')
+                with patch.object(server_installer, 'SERVER_BIN_DIR', str(directory)), \
+                        patch.object(server_installer, 'is_distribution', return_value=True), \
+                        patch.object(server_installer.sys, 'platform', platform), \
+                        patch.object(server_installer, 'clone_repo') as clone, \
+                        patch.object(server_installer.porcelain, 'ls_remote') as remote:
+                    server_installer.check_git(Mock())
+                    clone.assert_not_called()
+                    remote.assert_not_called()
+
+    def test_linux_bundle_rejects_windows_ocr_binary(self):
+        from core.exception import OcrInternalError
+        from core.ocr.baas_ocr_client import server_installer
+
+        (self.scratch / 'BAAS_ocr_server.exe').write_bytes(b'wrong platform')
+        with patch.object(server_installer, 'SERVER_BIN_DIR', str(self.scratch)), \
+                patch.object(server_installer, 'is_distribution', return_value=True), \
+                patch.object(server_installer.sys, 'platform', 'linux'), \
+                patch.object(server_installer, 'clone_repo') as clone, \
+                self.assertRaises(OcrInternalError):
+            server_installer.check_git(Mock())
+        clone.assert_not_called()
+
     def test_ocr_initializes_an_existing_empty_config_directory(self):
         from core.ocr.baas_ocr_client.Client import BaasOcrClient, ServerConfig
         ocr = self.scratch / 'ocr'

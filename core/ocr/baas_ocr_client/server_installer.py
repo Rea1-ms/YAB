@@ -47,7 +47,8 @@ branch = branch[arch]
 
 def check_git(logger):
     if is_distribution():
-        if not os.path.isfile(os.path.join(SERVER_BIN_DIR, 'BAAS_ocr_server.exe')):
+        executable = 'BAAS_ocr_server.exe' if sys.platform == 'win32' else 'BAAS_ocr_server'
+        if not os.path.isfile(os.path.join(SERVER_BIN_DIR, executable)):
             raise OcrInternalError('发行包缺少识别程序，请重新下载完整发行包')
         logger.info('Using bundled OCR server.')
         return

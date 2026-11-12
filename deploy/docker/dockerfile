@@ -1,37 +1,76 @@
-# Use the official Debian image as the base
-FROM hub.atomgit.com/amd64/debian:latest
+# syntax=docker/dockerfile:1
 
-# Remove the original mirror
-RUN rm -rf /etc/apt/sources.list.d && apt-get clean && apt-get update --fix-missing
+FROM node:24-bookworm-slim AS webapp
+WORKDIR /build/webapp
+RUN npm install --global pnpm
+COPY webapp/package.json webapp/pnpm-lock.yaml webapp/pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=yab-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir /pnpm/store
+COPY webapp/ ./
+RUN pnpm run check && pnpm run build --emptyOutDir false
 
-# Alter the source to tsinghua mirror
-RUN echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware\ndeb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware\ndeb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware\ndeb https://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware" > /etc/apt/sources.list
+FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
+FROM python:3.11-slim-bookworm AS prepare
+ARG TARGETARCH
+RUN test "$TARGETARCH" = "amd64" || \
+    (echo 'YAB currently requires linux/amd64 OCR binaries.' >&2; exit 1)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates git
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+# Legacy Android libraries still need pkg_resources during isolated builds.
+RUN printf 'setuptools==69.5.1\nwheel==0.45.1\n' > /build/constraints.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --locked --no-dev --no-default-groups --no-emit-project \
+    --no-header --no-annotate -o /build/requirements.txt > /dev/null && \
+    uv venv /opt/venv --python /usr/local/bin/python && \
+    uv pip sync --python /opt/venv/bin/python --require-hashes \
+    --build-constraints /build/constraints.txt /build/requirements.txt
 
-# Install Git Env
-RUN apt-get update && apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget libglib2.0-dev git
+# Pin the Linux OCR program and models; runtime startup never updates source.
+ARG OCR_REVISION=05991fb8cd267fe409daf3f1b7d782bbc91fffd7
+RUN git init /opt/ocr && \
+    git -C /opt/ocr remote add origin https://gitee.com/pur1fy/baas_-cpp_prebuild.git && \
+    git -C /opt/ocr fetch --depth=1 origin "$OCR_REVISION" && \
+    git -C /opt/ocr checkout --detach FETCH_HEAD && \
+    chmod +x /opt/ocr/BAAS_ocr_server
 
-# Install GL Runtime
-RUN apt-get install -y libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libsm6 libxkbcommon-x11-0 libdbus-1-3
-
-# Hard to Install due to the network. if you can't pass, please comment it.
-# RUN apt-get install -y libqt5pdf5 libtiff5-dev --fix-missing
-
-# Install Python Environment
-RUN wget https://mirrors.aliyun.com/python-release/source/Python-3.9.18.tar.xz
-RUN tar -xvJf Python-3.9.18.tar.xz
-RUN cd Python-3.9.18 && ./configure --enable-optimizations
-RUN cd Python-3.9.18 && make -j $(nproc) && make altinstall
-RUN rm -rf Python-3.9.18.tar.xz Python-3.9.18
-
-
-# Set the working directory in the container
+FROM python:3.11-slim-bookworm
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    adb ca-certificates libgl1 libglib2.0-0 libgomp1 tzdata
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LD_LIBRARY_PATH=/app/core/ocr/baas_ocr_client/bin \
+    TZ=Asia/Shanghai
 WORKDIR /app
-
-# Copy the requirements file to the container
-COPY requirements.txt .
-
-# Copy the rest of the application code to the container
-COPY . .
-
-# Set the command to run the application
-CMD ["bash", "entrypoint.sh"]
+RUN useradd --uid 1000 --create-home yab
+COPY --from=prepare /opt/venv /opt/venv
+COPY --chown=1000:1000 core/ ./core/
+COPY --chown=1000:1000 module/ ./module/
+COPY --chown=1000:1000 server/ ./server/
+COPY --chown=1000:1000 src/ ./src/
+COPY --chown=1000:1000 assets/ ./assets/
+COPY --chown=1000:1000 main.py webui.py pyproject.toml LICENSE README.md ./
+COPY --chown=1000:1000 deploy/docker/entrypoint.sh deploy/docker/healthcheck.py ./deploy/docker/
+COPY --from=prepare --chown=1000:1000 /opt/ocr/BAAS_ocr_server /opt/ocr/*.so* ./core/ocr/baas_ocr_client/bin/
+COPY --from=prepare --chown=1000:1000 /opt/ocr/resource/ ./core/ocr/baas_ocr_client/bin/resource/
+COPY --from=webapp --chown=1000:1000 /build/webapp/dist/ ./webapp/dist/
+RUN python -c "import json, tomllib; from pathlib import Path; metadata = tomllib.loads(Path('pyproject.toml').read_text()); Path('distribution.json').write_text(json.dumps({'format': 1, 'version': metadata['project']['version']}))" && \
+    install -d -o yab -g yab /app/config /home/yab/.android \
+    /app/core/ocr/baas_ocr_client/bin/config /app/core/ocr/baas_ocr_client/bin/output && \
+    chown yab:yab /app && \
+    python -c "import main; from server.frontend import ensure_frontend; ensure_frontend()" && \
+    ldd core/ocr/baas_ocr_client/bin/BAAS_ocr_server > /tmp/ocr-libraries.txt && \
+    ! grep -q 'not found' /tmp/ocr-libraries.txt
+USER yab
+EXPOSE 22267
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD ["python", "-B", "deploy/docker/healthcheck.py"]
+ENTRYPOINT ["sh", "/app/deploy/docker/entrypoint.sh"]
+CMD ["python", "-m", "server", "--host", "0.0.0.0", "--port", "22267"]
