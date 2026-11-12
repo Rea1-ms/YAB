@@ -107,7 +107,7 @@ class MainPagePopupTests(unittest.TestCase):
         return menu
 
     @contextmanager
-    def android_worker(self, frames, ratio=1, identifier='Global_en-us'):
+    def android_worker(self, frames, ratio=1, identifier='Global_en-us', activity=None):
         worker = self.worker(frames, identifier=identifier, ratio=ratio)
         worker.is_android_device = True
         worker.resolution = (int(1280 * ratio), int(720 * ratio))
@@ -123,7 +123,8 @@ class MainPagePopupTests(unittest.TestCase):
         worker.screenshot.screenshot.side_effect = worker.replay.screenshot
         worker.button_signal = Mock()
         worker.push_and_log_error_msg = Mock()
-        worker.current_game_activity = worker.dailyGameActivity = None
+        worker.current_game_activity = activity
+        worker.dailyGameActivity = None
         # Restore production screenshot normalization and device coordinate conversion.
         del worker.click
         del worker.get_screenshot_array

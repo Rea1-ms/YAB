@@ -27,6 +27,7 @@ from develop_tools.test.offline_support import (
 
 SUITES = {
     'popups': ('develop_tools.test.test_main_page_popups',),
+    'activity': ('develop_tools.test.test_current_activity',),
     'shop': ('develop_tools.test.test_shop_selection',),
     'drill': ('develop_tools.test.test_joint_firing_drill',),
     'version': ('develop_tools.test.test_version_info',),

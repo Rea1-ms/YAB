@@ -501,6 +501,115 @@
           80
         ]
       ]
+    },
+    "global_makoto_activity_home": {
+      "path": "global_makoto_activity_home.png",
+      "sha256": "41d43ab6590e782f76c163f03f6aedf1464545a27c94f3f3603f4541aefeece6",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：主页右上角入口，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_entry_matches_in_all_languages_and_resolutions",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_legacy_activity_does_not_match_new_entry",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_home_entry_waits_for_story_page_and_retries_missed_clicks",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_clicked_entry_without_observed_event_page_cannot_finish",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_missing_entry_artwork_never_clicks_the_activity_position",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-1.png",
+        "sha256": "0d073770ad85dc876ed99688085174c0dca4ab90e422a620a0bfad7acac82649",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          76,
+          18,
+          248,
+          52
+        ],
+        [
+          500,
+          16,
+          1035,
+          56
+        ]
+      ]
+    },
+    "global_makoto_activity_story": {
+      "path": "global_makoto_activity_story.png",
+      "sha256": "74750d2667d5f8b79b115c5d5e1ba00e22e6ed5ef120a797e09fa26df4b7cf05",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：故事标签选中，无独立挑战页，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_home_entry_waits_for_story_page_and_retries_missed_clicks",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_retries_without_accepting_stale_story_page",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_to_story_uses_the_two_tab_layout",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_without_observed_selection_cannot_finish",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-2.png",
+        "sha256": "6226db43491d8e8c399225a60bdcc2775c8948535f7528156bb9187e1ba32664",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          478,
+          0,
+          1118,
+          42
+        ]
+      ]
+    },
+    "global_makoto_activity_quest": {
+      "path": "global_makoto_activity_quest.png",
+      "sha256": "686f77fdd3ea2da5dff12ee294381536156c937fe9252f9a1255bb83e500a9c4",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：任务标签选中，无独立挑战页，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_retries_without_accepting_stale_story_page",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_to_story_uses_the_two_tab_layout",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-3.png",
+        "sha256": "3f2805409fc2ff39fbba9122aad3f40bd4528c6986d451966b93d9682d4e9cfb",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          478,
+          0,
+          1118,
+          42
+        ]
+      ]
     }
   }
 }
