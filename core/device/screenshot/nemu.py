@@ -1,5 +1,8 @@
 import os.path
-from core.device.nemu_client import NemuClient, NemuIpcIncompatible, NemuIpcError
+
+import numpy as np
+
+from core.device.nemu_client import NemuClient, NemuIpcError, NemuIpcIncompatible
 
 
 class NemuScreenshot:
@@ -41,13 +44,22 @@ class NemuScreenshot:
             raise Exception("Invalid serial. Unable to use Init NemuScreenshot.")
 
     def screenshot(self):
+        last_error = None
         for i in range(3):
             try:
                 if i > 0:
                     self.logger.warning("Retry : " + str(i))
-                return self.nemu_client.screenshot()
+                image = self.nemu_client.screenshot()
+                if (not isinstance(image, np.ndarray) or image.ndim != 3
+                        or image.shape[2] != 3 or image.size == 0):
+                    raise NemuIpcError("MuMu 截图未返回有效画面")
+                return image
             except Exception as e:
+                last_error = e
                 self.logger.warning("Fail to call nemu screenshot.")
                 self.logger.warning(e.__str__())
+        raise NemuIpcError(
+            "MuMu 截图连续 3 次失败，请检查模拟器是否正常运行，或改用 adb（安卓调试截图）后重新启动任务。"
+        ) from last_error
 
 

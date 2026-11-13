@@ -610,6 +610,41 @@
           42
         ]
       ]
+    },
+    "global_home_mumu_20261113": {
+      "path": "global_home_mumu_20261113.png",
+      "sha256": "0c1b5c483812987350c9153b6ea1368b12f1ccd920402b8bcd3b5d2ed19d2d55",
+      "size": [
+        2560,
+        1440
+      ],
+      "scene": "国际服繁体中文主页：MuMu 原生截图颜色与主页识别",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reported_home_is_recognized_through_native_capture",
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reference_rgb_and_yab_bgr_preserve_the_same_colors"
+      ],
+      "source": {
+        "description": "用户提供的 MuMu-20261113-142253-591.zip 中的同名截图；保留原尺寸，遮盖账号名、等级与资源数值",
+        "archive_entry": "MuMu-20261113-142253-591.png",
+        "original_sha256": "c07b49c3823bc126016ddd212955e0b48d85a16f1fdc419ce8d703e5e6fa133b",
+        "captured_at": null,
+        "redacted_regions": [
+          [
+            0,
+            0,
+            560,
+            165
+          ],
+          [
+            1000,
+            0,
+            2095,
+            115
+          ]
+        ]
+      }
     }
   }
 }

@@ -187,8 +187,11 @@ class Baas_thread:
         return self.normalize_screenshot(self.screenshot.screenshot())
 
     def normalize_screenshot(self, img):
-        if img is None or img.ndim < 2:
-            return img
+        if (not isinstance(img, np.ndarray) or img.ndim != 3
+                or img.shape[2] != 3 or img.size == 0):
+            raise RequestHumanTakeOver(
+                "截图失败：未获得有效画面，请检查模拟器是否正常运行，或切换截图方式后重新启动任务。"
+            )
         height, width = img.shape[:2]
         if self.is_android_device and height > width:
             self.logger.warning(
