@@ -1,6 +1,8 @@
 """MuMu screenshots preserve colors and stop safely when capture fails."""
 
 import ctypes
+import json
+import struct
 import threading
 import unittest
 from types import SimpleNamespace
@@ -13,12 +15,38 @@ from core import color, position
 from core.Baas_thread import Baas_thread
 from core.device.nemu_client import NemuClient, NemuIpcError
 from core.device.Screenshot import Screenshot
+from core.device.screenshot.adb_nc import AdbNcScreenshot, ImageTruncated
 from core.device.screenshot.nemu import NemuScreenshot
 from core.exception import RequestHumanTakeOver
 from develop_tools.test.offline_support import ROOT, load_fixture
 
 
 class ScreenshotFailureTests(unittest.TestCase):
+    def test_adb_nc_home_colors_match_png_for_supported_pixel_formats(self):
+        frame = load_fixture('global_home_mumu_20261113')
+        height, width = frame.shape[:2]
+        features = json.loads((ROOT / 'src/rgb_feature/Global_zh-tw.json').read_text(encoding='utf-8'))['rgb_feature']
+        for pixel_format in (1, 2, 5):
+            conversion = cv2.COLOR_BGR2BGRA if pixel_format == 5 else cv2.COLOR_BGR2RGBA
+            pixels = cv2.cvtColor(frame, conversion).tobytes()
+            for extra_header in (b'', struct.pack('<I', 0)):
+                with self.subTest(pixel_format=pixel_format, header_size=12 + len(extra_header)):
+                    data = struct.pack('<III', width, height, pixel_format) + extra_header + pixels
+                    decoded = AdbNcScreenshot._load_screencap(data)
+                    np.testing.assert_array_equal(decoded, frame)
+                    worker = SimpleNamespace(latest_img_array=decoded, ratio=width / 1280, rgb_feature=features)
+                    self.assertTrue(color.match_rgb_feature(worker, 'main_page'))
+
+    def test_adb_nc_rejects_unknown_pixel_formats(self):
+        data = struct.pack('<III', 2, 2, 42) + bytes(16)
+        with self.assertRaisesRegex(ImageTruncated, 'pixel format'):
+            AdbNcScreenshot._load_screencap(data)
+
+    def test_adb_nc_rejects_missing_pixels_instead_of_using_header_bytes(self):
+        data = struct.pack('<III', 2, 2, 1) + bytes(12)
+        with self.assertRaisesRegex(ImageTruncated, 'pixel buffer'):
+            AdbNcScreenshot._load_screencap(data)
+
     def client(self, capture=None):
         with patch('core.device.nemu_client.os.path.exists', return_value=True), \
                 patch('core.device.nemu_client.ctypes.CDLL', return_value=SimpleNamespace(

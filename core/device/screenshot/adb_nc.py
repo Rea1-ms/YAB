@@ -203,16 +203,28 @@ class AdbNcScreenshot:
         if len(data) < 16:
             raise ImageTruncated('Empty image after reading from buffer')
         header = np.frombuffer(data[0:12], dtype='<u4')
-        channel = 4  # screencap sends a RGBA image
-        width, height, _ = header
+        channel = 4  # All pixel formats supported below use four bytes per pixel.
+        width, height, pixel_format = (int(value) for value in header)
         if not (0 < width <= 8192 and 0 < height <= 8192):
             raise ImageTruncated(f'Invalid screencap header: {tuple(header)}')
+        # Android formats 1/2 are RGBA/RGBX; 5 is BGRA. Unlike SRC, YAB
+        # stores BGR internally, so merely removing alpha from RGBA swaps
+        # red and blue in recognition and in saved screenshots.
+        conversions = {
+            1: cv2.COLOR_RGBA2BGR,
+            2: cv2.COLOR_RGBA2BGR,
+            5: cv2.COLOR_BGRA2BGR,
+        }
+        if pixel_format not in conversions:
+            raise ImageTruncated(f'Unsupported screencap pixel format: {pixel_format}')
+        if len(data) < 12 + width * height * channel:
+            raise ImageTruncated('Incomplete screencap pixel buffer')
         image = np.frombuffer(data, dtype=np.uint8)
         try:
             image = image[-int(width * height * channel):].reshape(height, width, channel)
         except ValueError as e:
             raise ImageTruncated(str(e))
-        image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        image = cv2.cvtColor(image, conversions[pixel_format])
         if image is None:
             raise ImageTruncated('Empty image after cv2.cvtColor')
         return image

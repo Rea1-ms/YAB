@@ -623,7 +623,8 @@
       "kind": "redacted_capture",
       "used_by": [
         "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reported_home_is_recognized_through_native_capture",
-        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reference_rgb_and_yab_bgr_preserve_the_same_colors"
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reference_rgb_and_yab_bgr_preserve_the_same_colors",
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_adb_nc_home_colors_match_png_for_supported_pixel_formats"
       ],
       "source": {
         "description": "用户提供的 MuMu-20261113-142253-591.zip 中的同名截图；保留原尺寸，遮盖账号名、等级与资源数值",
