@@ -52,7 +52,8 @@ app.whenReady().then(async () => {
     await other.loadURL('data:text/html,<html><body>untrusted window</body></html>');
     assert.equal(await other.webContents.executeJavaScript("window.yabMessage.get().then(() => false, error => error.message.includes('无效的消息请求'))"), true);
     other.destroy();
-    await window.webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    // Return from evaluation before the action closes its renderer.
+    await window.webContents.executeJavaScript("setTimeout(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 0)");
     assert.equal((await result).response, 1);
     const next = showMessage(owner, { message: '启动失败', buttons: ['确定'] }, { show: false });
     const single = BrowserWindow.getAllWindows().find(value => value !== owner);
@@ -63,7 +64,7 @@ app.whenReady().then(async () => {
     const contrast = await single.webContents.executeJavaScript("({bg:getComputedStyle(document.documentElement).backgroundColor,fg:getComputedStyle(document.documentElement).color})");
     assert.notEqual(contrast.bg, contrast.fg);
     single.webContents.debugger.detach();
-    await single.webContents.executeJavaScript("document.querySelector('button').click()");
+    await single.webContents.executeJavaScript("setTimeout(() => document.querySelector('button').click(), 0)");
     assert.equal((await next).response, 0);
     const closed = showMessage(owner, { message: '已继续使用上一版本', buttons: ['确定', '取消'] }, { show: false });
     const closing = BrowserWindow.getAllWindows().find(value => value !== owner);

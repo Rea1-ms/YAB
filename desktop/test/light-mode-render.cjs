@@ -6,6 +6,7 @@ const path = require('path');
 const http = require('http');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { WindowMemoryMode, attachWindowSettings, readWindowMode } = require('../window-mode.cjs');
+const { BackendRecovery, attachBackendRecovery } = require('../backend-recovery.cjs');
 const { showMessage } = require('../message-window.cjs');
 
 app.setPath('userData', process.env.YAB_LIGHT_MODE_TEST_DATA);
@@ -35,7 +36,7 @@ async function main() {
   let serveFrontend = false;
   const server = http.createServer(async (request, response) => {
     requests++;
-    if (serveFrontend) {
+    if (serveFrontend && request.url !== '/bridge-only') {
       const pathname = new URL(request.url, 'http://localhost').pathname;
       const filename = pathname.startsWith('/assets/') ? pathname.slice(1) : 'index.html';
       const type = filename.endsWith('.js') ? 'text/javascript' : filename.endsWith('.css') ? 'text/css' : 'text/html';
@@ -51,6 +52,9 @@ async function main() {
   const url = `http://127.0.0.1:${server.address().port}/`;
   const settingsFile = path.join(process.env.YAB_LIGHT_MODE_TEST_DATA, 'desktop-settings.json');
   attachWindowSettings(ipcMain, { mode, filename: settingsFile,
+    getWindow: () => mode.window, pageUrl: () => url });
+  const recovery = new BackendRecovery({ restart: async () => { throw new Error('Unexpected backend restart'); } });
+  attachBackendRecovery(ipcMain, { recovery,
     getWindow: () => mode.window, pageUrl: () => url });
   const create = async state => {
     windowsCreated++;
@@ -74,6 +78,7 @@ async function main() {
     window.close();
     assert.equal(window.isDestroyed(), false, 'startup must keep its window');
     ready = true;
+    assert.deepEqual(await window.webContents.executeJavaScript('window.yabDesktop.getBackendState()'), recovery.snapshot());
     await window.webContents.executeJavaScript('location.hash = "#/default_config/schedule"; document.querySelector("input").value = "未保存"');
     window.setBounds({ x: 80, y: 90, width: 1024, height: 700 });
     const expectedBounds = window.getBounds();
@@ -265,7 +270,7 @@ async function main() {
     assert.equal(await window.webContents.executeJavaScript('window.yabDesktop.setCloseAction("invalid").then(() => false, () => true)'), true);
     const other = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true,
       preload: path.resolve(__dirname, '../preload.js') } });
-    await other.loadURL(url);
+    await other.loadURL(url + 'bridge-only');
     assert.equal(await other.webContents.executeJavaScript('window.yabDesktop.setCloseAction("开启轻量模式").then(() => false, () => true)'), true);
     other.destroy();
     await window.webContents.executeJavaScript('location.hash = "#/update"');
@@ -315,7 +320,9 @@ async function main() {
     // Unchecking the default checkbox applies this choice only once.
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
-    await dialog.webContents.executeJavaScript('document.querySelector("#remember").checked = false; document.querySelectorAll("button")[1].click()');
+    // Queue the click after this evaluation has returned, so closing the
+    // dialog cannot dispose a renderer that still owes us an evaluation reply.
+    await dialog.webContents.executeJavaScript('document.querySelector("#remember").checked = false; setTimeout(() => document.querySelectorAll("button")[1].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), false);
     assert.equal(mode.closeAction, '询问');
@@ -323,7 +330,7 @@ async function main() {
     mode.save = action => require('../window-mode.cjs').saveWindowMode(settingsFile, action);
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
-    await dialog.webContents.executeJavaScript('document.querySelectorAll("button")[0].click()');
+    await dialog.webContents.executeJavaScript('setTimeout(() => document.querySelectorAll("button")[0].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), true);
     assert.equal(readWindowMode(settingsFile), '开启轻量模式');
