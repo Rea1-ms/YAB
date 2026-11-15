@@ -1,21 +1,14 @@
-name: mirrorchyan_release_note
+# 旧分发流程已停用；保留文件，不上传文件或发布说明。
+name: mirrorchyan_release_note_disabled
 
 on:
   workflow_dispatch:
-  release:
-    types: [edited, released]
+
+permissions: {}
 
 jobs:
-  mirrorchyan:
-    runs-on: macos-latest
-
+  disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     steps:
-      - id: uploading
-        uses: MirrorChyan/release-note-action@v1
-        with:
-          mirrorchyan_rid: BAAS
-
-          upload_token: ${{ secrets.MirrorChyanUploadToken }}
-          owner: pur1fying
-          repo: blue_archive_auto_script
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: echo "Legacy distribution is disabled."
