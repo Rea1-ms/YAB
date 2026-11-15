@@ -87,29 +87,40 @@ function contained(base, file) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-async function readActiveRuntime(userData) {
+async function readRuntime(userData) {
   const state = await readJson(path.join(userData, 'desktop-runtime.json'));
-  if (!state || !contained(path.join(userData, 'versions'), state.root || '')
-      || !contained(path.join(userData, 'runtimes'), state.python || '')) return null;
-  if (!await exists(path.join(state.root, 'server', '__main__.py')) || !await exists(state.python)) return null;
+  if (!state || !contained(path.join(userData, 'runtimes'), state.python || '')) return null;
   return state;
 }
 
-async function activateRuntime(userData, runtime) {
+// Diagnostic/configuration-location record only; never used to select old code.
+async function recordRuntime(userData, runtime) {
   await fs.mkdir(userData, { recursive: true });
   const state = path.join(userData, 'desktop-runtime.json');
-  if (await exists(state)) await fs.copyFile(state, path.join(userData, `desktop-runtime-${randomUUID()}.json`));
+  if (JSON.stringify(await readJson(state)) === JSON.stringify(runtime)) return;
   const pending = path.join(userData, `desktop-runtime-${randomUUID()}.pending`);
   await fs.writeFile(pending, JSON.stringify(runtime, null, 2));
   await fs.rename(pending, state);
 }
 
-async function restoreSettings(userData, runtime) {
-  if (!runtime.backup || !contained(path.join(userData, 'backups'), runtime.backup)) return;
-  for (const { relative, shared } of settingsDirectories(userData, runtime.configRoot)) {
-    const source = path.join(runtime.backup, relative);
-    if (await exists(source)) await fs.cp(source, shared, { recursive: true, force: true });
+async function prepareOcrData(userData, root, configRoot) {
+  const key = createHash('sha256').update(root + '\0' + configRoot).digest('hex').slice(0, 16);
+  const directory = path.join(userData, 'ocr', key);
+  await fs.mkdir(directory, { recursive: true });
+  // The native service expects resource/ and config/ under its working directory.
+  // Link those directories; binaries and models stay in the installation.
+  for (const [name, target] of [
+    ['resource', path.join(root, 'core/ocr/baas_ocr_client/bin/resource')],
+    ['config', path.join(configRoot, 'ocr')],
+  ]) {
+    const destination = path.join(directory, name);
+    try {
+      await fs.symlink(target, destination, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (error.code !== 'EEXIST' || await fs.realpath(destination) !== await fs.realpath(target)) throw error;
+    }
   }
+  return directory;
 }
 
 async function digest(file) {
@@ -170,7 +181,7 @@ function runProcess(command, args, { cwd, env, signal, output }) {
 }
 
 async function prepareRuntime(bundle, userData, options = {}) {
-  const configRoot = options.configRoot ? path.resolve(options.configRoot) : undefined;
+  const configRoot = path.resolve(options.configRoot || path.join(userData, 'config'));
   const run = options.run || runProcess;
   const progress = options.progress || (() => {});
   const signal = options.signal;
@@ -187,19 +198,9 @@ async function prepareRuntime(bundle, userData, options = {}) {
     const online = manifest.format === 3;
     env = runtimeEnvironment(online, userData);
     signal?.throwIfAborted();
-    const active = await readActiveRuntime(userData);
+    const active = await readRuntime(userData);
     progress('正在检查已有运行环境…', 20);
-    const settings = await prepareSettings(userData, configRoot, active?.configRoot);
-    if (active?.id === manifest.id && active.runtimeKey === manifest.runtimeKey && active.configRoot === configRoot) {
-      try {
-        await execute(active.python, PROBE_ARGS);
-        progress('已有运行环境检查通过，正在复用…', 82);
-        return active;
-      } catch (error) {
-        signal?.throwIfAborted();
-        output(`现有环境不可用，重新准备：${error.message}\n`);
-      }
-    }
+    await prepareSettings(userData, configRoot, active?.configRoot);
 
     const runtimes = path.join(userData, 'runtimes');
     // Keep native DLL paths below Windows' legacy length limit. Full digests
@@ -259,32 +260,19 @@ async function prepareRuntime(bundle, userData, options = {}) {
       await fs.writeFile(path.join(runtimeRoot, '.ready.json'), JSON.stringify({ path: runtimeRoot, key: manifest.runtimeKey }));
     }
 
-    progress('正在准备新版程序和配置目录…', 74);
-    const root = path.join(userData, 'versions', `${manifest.id.slice(0, 16)}-${randomUUID().slice(0, 12)}`);
-    const appFiles = Object.keys(manifest.files).filter(name => name.startsWith('app/'));
-    let copied = 0;
-    for (const name of appFiles) {
-      const destination = path.join(root, name.slice('app/'.length));
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.copyFile(path.join(bundle, name), destination);
-      progress('正在准备新版程序和配置目录…', 74 + ++copied / appFiles.length * 6);
-    }
-    // Junctions keep relative-path consumers working with installation-local settings.
-    for (const { relative, shared } of settings) {
-      await fs.symlink(shared, path.join(root, relative), process.platform === 'win32' ? 'junction' : 'dir');
-    }
+    progress('正在准备配置和运行数据目录…', 76);
+    const root = path.resolve(bundle, 'app');
+    const dataRoot = path.join(userData, 'runtime-data');
+    await fs.mkdir(dataRoot, { recursive: true });
+    const ocrRoot = await prepareOcrData(userData, root, configRoot);
     signal?.throwIfAborted();
-    const backup = path.join(userData, 'backups', randomUUID());
-    for (const { relative, shared } of settings) {
-      await fs.cp(shared, path.join(backup, relative), { recursive: true });
-    }
     progress('运行环境准备完成…', 82);
-    return { id: manifest.id, version: manifest.version, runtimeKey: manifest.runtimeKey, backup, configRoot,
-      root, python: path.join(runtimeRoot, '.venv/Scripts/python.exe') };
+    return { id: manifest.id, version: manifest.version, runtimeKey: manifest.runtimeKey, configRoot,
+      root, dataRoot, ocrRoot, python: path.join(runtimeRoot, '.venv/Scripts/python.exe') };
   } finally {
     await Promise.allSettled(pendingWrites);
     await log.close();
   }
 }
 
-module.exports = { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings, verifyBundle };
+module.exports = { desktopDataPath, prepareRuntime, recordRuntime, readRuntime, verifyBundle };

@@ -15,7 +15,7 @@ from core.exception import SharedMemoryError, OcrInternalError
 class ServerConfig:
     def __init__(self):
         self.config = None
-        self.config_path = os.path.join(BaasOcrClient.server_folder_path, "config", "global_setting.json")
+        self.config_path = os.path.join(BaasOcrClient.runtime_folder_path(), "config", "global_setting.json")
         self.host = None
         self.port = None
         self.server_is_remote = False
@@ -51,6 +51,10 @@ class BaasOcrClient:
     if sys.platform == "win32":
         executable_name += ".exe"
 
+    @classmethod
+    def runtime_folder_path(cls):
+        return os.environ.get('YAB_OCR_DATA_DIR') or cls.server_folder_path
+
     def __init__(self):
         self.exe_path = os.path.join(self.server_folder_path, self.executable_name)
         if not os.path.exists(self.exe_path):
@@ -61,7 +65,7 @@ class BaasOcrClient:
 
     # clear log since time_distance days ago
     def clear_log(self, time_distance=7):
-        log_folder_path = os.path.join(self.server_folder_path, "output")
+        log_folder_path = os.path.join(self.runtime_folder_path(), "output")
         if not os.path.exists(log_folder_path):
             return
         for name in os.listdir(log_folder_path):
@@ -115,7 +119,7 @@ class BaasOcrClient:
         try:
             self.server_process = subprocess.Popen(
                 self.exe_path,
-                cwd=self.server_folder_path,
+                cwd=self.runtime_folder_path(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
@@ -124,7 +128,7 @@ class BaasOcrClient:
         except Exception:
             self.server_process = subprocess.Popen(
                 [self.exe_path],
-                cwd=self.server_folder_path,
+                cwd=self.runtime_folder_path(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,

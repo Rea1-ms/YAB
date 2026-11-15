@@ -14,6 +14,30 @@ export interface DesktopBridge {
   setCloseAction?: (action: CloseAction) => Promise<CloseAction>;
   getBackendState?: () => Promise<BackendState>;
   onBackendState?: (callback: (state: BackendState) => void) => () => void;
+  getUpdateState?: () => Promise<DesktopUpdateState>;
+  checkUpdate?: (options?: { automatic?: boolean }) => Promise<DesktopUpdateState>;
+  setUpdateSchedule?: (schedule: { enabled: boolean; time: string }) => Promise<DesktopUpdateState>;
+  downloadUpdate?: () => Promise<DesktopUpdateState>;
+  installUpdate?: () => Promise<DesktopUpdateState>;
+  onUpdateState?: (callback: (state: DesktopUpdateState) => void) => () => void;
+}
+
+export interface DesktopUpdateState {
+  revision: number;
+  enabled: boolean;
+  reason: string;
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'downloaded' | 'preparing' | 'installing' | 'error';
+  currentVersion: string;
+  latestVersion: string;
+  variant: 'offline' | 'lite' | 'lite-system';
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+  notes: string;
+  error: string;
+  lastResult: string;
+  schedule: { enabled: boolean; time: string };
 }
 
 declare global {

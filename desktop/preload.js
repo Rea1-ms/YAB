@@ -13,6 +13,16 @@ const desktopInfo = {
     getCloseAction: () => ipcRenderer.invoke('yab-desktop:close-action:get'),
     setCloseAction: action => ipcRenderer.invoke('yab-desktop:close-action:set', action),
     getBackendState: () => ipcRenderer.invoke('yab-backend:get'),
+    getUpdateState: () => ipcRenderer.invoke('yab-update:get'),
+    checkUpdate: options => ipcRenderer.invoke('yab-update:check', { automatic: options?.automatic === true }),
+    setUpdateSchedule: schedule => ipcRenderer.invoke('yab-update:schedule', schedule),
+    downloadUpdate: () => ipcRenderer.invoke('yab-update:download'),
+    installUpdate: () => ipcRenderer.invoke('yab-update:install'),
+    onUpdateState: callback => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on('yab-update:state', listener);
+      return () => ipcRenderer.removeListener('yab-update:state', listener);
+    },
     onBackendState: callback => {
       const listener = (_event, state) => callback(state);
       ipcRenderer.on('yab-backend:update', listener);

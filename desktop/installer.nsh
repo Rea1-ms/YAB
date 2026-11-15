@@ -26,6 +26,17 @@
 !macroend
 
 !macro customInstall
+  ; Only installed copies may launch automatic installer updates.
+  Push $R9
+  ClearErrors
+  FileOpen $R9 "$INSTDIR\resources\yab-install-location" w
+  ${ifNot} ${Errors}
+    FileWriteUTF16LE $R9 "$INSTDIR"
+    FileClose $R9
+  ${endif}
+  Pop $R9
+  ; A missing marker safely disables updates without invalidating installed files.
+  ClearErrors
   YabInstallUI::Phase /NOUNLOAD "$(yabFinishing)" 98 99
 !macroend
 

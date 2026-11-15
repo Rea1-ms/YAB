@@ -5,6 +5,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { build, Platform, Arch } = require('electron-builder');
 const { prepareInstallerProgress, installerTemplateRoot } = require('./installer-progress.cjs');
+const { updateConfig, createUpdateManifest } = require('./update-config.cjs');
 
 async function main() {
   if (process.platform !== 'win32' || process.arch !== 'x64') {
@@ -42,7 +43,9 @@ async function main() {
   process.env.BAAS_BACKEND_DIR = backend;
   process.env.BAAS_RELEASE_DIR = release;
   process.env.YAB_BUILD_VARIANT = variant;
-  const config = require('./electron-builder.cjs');
+  // Pass the filename: loading the same cached object twice makes the builder
+  // mutate its own publish array while merging configuration.
+  const config = path.join(__dirname, 'electron-builder.cjs');
   const progressIncludes = prepareInstallerProgress(release);
   const targets = Platform.WINDOWS.createTarget(process.argv.includes('--dir') ? ['dir'] : ['nsis', 'zip'], Arch.x64);
   const artifacts = await build({ targets, config, publish: 'never',
@@ -60,6 +63,10 @@ async function main() {
     projectDir: __dirname });
   console.log(`\n桌面产物：${release}`);
   for (const artifact of artifacts) console.log(artifact);
+  if (!process.argv.includes('--dir')) {
+    console.log(await createUpdateManifest(release, updateConfig(variant, process.env.YAB_UPDATE_URL),
+      require('./package.json').version, process.env.YAB_RELEASE_NOTES || ''));
+  }
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,5 +1,6 @@
 import json
 import os
+from core.paths import profiles_dir
 from core.config.generated_user_config import Config
 from core.config.generated_static_config import StaticConfig
 from core.config.shop_config import (
@@ -19,12 +20,12 @@ class ConfigSet:
             ConfigSet._init_static_config()
         self.config: Config
         self.config_dir = None
-        if os.path.exists(f'config/{config_dir}/config.json'):  # relative path
-            self.config_dir = os.path.abspath(f'config/{config_dir}')
+        if os.path.exists(profiles_dir() / config_dir / 'config.json'):
+            self.config_dir = os.path.abspath(profiles_dir() / config_dir)
         elif os.path.exists(f'{config_dir}/config.json'):  # absolute path
             self.config_dir = config_dir
         else:
-            raise FileNotFoundError(f'config/{config_dir}/config.json not found')
+            raise FileNotFoundError(f'{profiles_dir() / config_dir / "config.json"} not found')
         self.server_mode = 'CN'
         self._init_config()
         self.window = None
@@ -33,7 +34,7 @@ class ConfigSet:
 
     @staticmethod
     def _init_static_config():
-        with open('config/static.json', 'r', encoding='utf-8') as f:
+        with open(profiles_dir() / 'static.json', 'r', encoding='utf-8') as f:
             data = json.load(f)
             ConfigSet.static_config = StaticConfig(**data)
 

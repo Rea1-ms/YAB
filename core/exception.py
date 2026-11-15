@@ -1,4 +1,5 @@
 import traceback
+from core.paths import data_path
 
 
 class SharedMemoryError(Exception):
@@ -78,7 +79,7 @@ class LogTraceback:
         # self.log_into_file()
 
     def log_into_file(self):
-        with open('error.html', 'a') as f:
+        with open(data_path('error.html'), 'a') as f:
             if self.context.connection is None:
                 return
             # screenshot = self.context.connection.screenshot()

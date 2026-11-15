@@ -16,14 +16,6 @@ installer.py的运行步骤:
 
 ## 参数说明
 
-### mirrorc_cdk
-- **type**: `str`
-- **description** : mirrorc的CDK, 填写后可以使用mirror酱更新
-- **note**:
-  1. mirror酱用户请填写
-  2. [什么是mirror酱?](/usage_doc/install/Windows#mirror酱cdk)
-  3. 如果CDK无效, 则会使用默认的更新方式
-
 ### current_BAAS_version
 - **type**: `str`
 - **description** : 当前`BAAS`的版本号
@@ -38,10 +30,9 @@ installer.py的运行步骤:
 - **type**: `str`
 - **description** : 获取远程代码SHA的方式, 可选项如下
    1. `github` 
-   2. `mirrorc` 
-   3. `gitee` 
-   4. `gitcode`
-   5. `tencent_c_coding`
+   2. `gitee`
+   3. `gitcode`
+   4. `tencent_c_coding`
 - **note**: 一般不需要修改
 
 ### dev
@@ -147,7 +138,6 @@ installer.py的运行步骤:
 ## 默认配置
 ```toml
 [General]
-mirrorc_cdk = ""
 current_BAAS_version = ""
 current_BAAS_Cpp_version = ""
 get_remote_sha_method = ""

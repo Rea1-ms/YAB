@@ -15,45 +15,17 @@ BAAS提供以下三种安装包
    - **description**: .exe安装包全部运行完毕后压缩后的安装包, 不需要安装环境, 自带四份配置(国服, 国际服, 日服, Steam国际服), 
    - **operation**: 下载后解压, 双击运行`BlueArchiveAutoScript.exe`即可
    
-### with_config安装包 (**mirror酱用户可选**)
+### with_config（附带配置）安装包
    - ![with_config_installer.png](/assets/install/with_config_installer.png)
    - **description**: .exe安装包 与 setup.toml (安装配置) 一起压缩的安装包 
    - **description**: .exe安装包 , setup.toml (安装配置) , 和四份运行配置(国服, 国际服, 日服, Steam国际服)一起压缩的安装包 
-   - **operation**: 下载后解压, 用记事本打开`setup.toml`文件修改`mirrorc_cdk`为你的cdk, 双击运行`BlueArchiveAutoScript.exe`即可
+   - **operation**: 下载后解压，可按[安装配置](./setup_config)修改 `setup.toml`（安装配置文件），再双击运行 `BlueArchiveAutoScript.exe`（安装与启动程序）。
 
 ## 简易安装教程
 
 - 解压Release或[qq交流群](/usage_doc/qq_group_regulation)中的安装包，双击`BlueArchiveAutoScript.exe`安装环境，请耐心等待。
 安装完成后, BAAS的UI界面将自动启动。
 - [视频教程](https://www.acfun.cn/v/ac47360708_2)
-
-## Mirror酱CDK
-为了改善更新体验，从[v1.4.0](https://github.com/pur1fying/blue_archive_auto_script/releases/tag/v1.4.0)版本开始, **BAAS**正式接入Mirror酱更新服务
-
-### 什么是Mirror酱？
-- **description**: Mirror酱是一个第三方应用分发平台, 开源应用提供更新辅助服务, Mirror酱将为BAAS用户提供免费的更新检查服务以及**付费**的稳定更新服务. 
-- **note**:
-  1. 你完全可以选择不使用Mirror酱更新, 新版本的BAAS仍然适配原来的更新方式，但是下载过程可能不稳定。你可能会遇到 [#278](https://github.com/pur1fying/blue_archive_auto_script/issues/278)  [#294](https://github.com/pur1fying/blue_archive_auto_script/issues/294)  [#314](https://github.com/pur1fying/blue_archive_auto_script/issues/314) 中发生的问题
-  2. 如果你购买并填写Mirror酱CDK, BAAS将从Mirror酱下载站获取更新文件, 下载速度更稳定. 另外CDK不仅可以用于BAAS的更新, 还可以用于一系列其他开源脚本的更新, 详见[Mirror酱官网](https://mirrorchyan.com/zh/projects?rid=BAAS_repo&source=BAAS_WIKI)
-  3. 无论是国内外用户, 都可以使用Mirror酱
-
-### 如何使用CDK?
-- **description**: 下载[with_config安装包](#with-config安装包-mirror酱用户可选) 或 [full_env安装包](#full-env的安装包-最为推荐下载), 在`setup.toml`中填写如下字段
-```toml
-[General]
-mirrorc_cdk = "你的CDK"
-```
-填写完毕后保存再次运行, **BAAS**安装器出现如下日志表示成功
-- 成功使用Mirror酱安装
-![mirrorc_install_success.png](/assets/install/mirrorc_install_success.png)
-- 成功使用Mirror酱更新
-![mirrorc_update_success.png](/assets/install/mirrorc_update_success.png)
-
-::: warning
-请勿将setup.toml分享给陌生人, 否则你的cdk会被泄漏
-:::
-
-- **related config**: [mirrorc_cdk](/usage_doc/install/setup_config#mirrorc-cdk)
 
 ## 问题解答
 ### 确保安装路径没有中文
@@ -94,7 +66,5 @@ mirrorc_cdk = "你的CDK"
 - GithubFast 加速：https://githubfast.com/pur1fying/blue_archive_auto_script.git
 
 > キラメイ 个人推荐：Gh-Proxy 加速与 7ed 加速
-
-2. 使用[Mirror酱更新](#mirror酱cdk) (需要购买CDK)
 
 - **原因:** 你可能被gitee拒绝服务

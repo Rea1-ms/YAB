@@ -6,6 +6,7 @@ from datetime import datetime
 from core.config import default_config
 from core.config.config_set import ConfigSet
 from core.config.shop_config import migrate_tactical_shop_list
+from core.paths import data_path, profiles_dir
 
 
 # =============================================================================
@@ -16,7 +17,7 @@ from core.config.shop_config import migrate_tactical_shop_list
 
 def delete_deprecated_config(file_name, config_name=None):
     # delete useless config file
-    pre = 'config/'
+    pre = str(profiles_dir()) + '/'
     if config_name is not None:
         pre += config_name + '/'
     if type(file_name) is str:
@@ -47,20 +48,19 @@ def update_config_reserve_old(config_old, config_new):  # 保留旧配置原有�
 
 
 def check_static_config():
-    if not os.path.exists('./config'):
-        os.mkdir('./config')
-    with open('./config/static.json', 'w', encoding='utf-8') as f:
+    os.makedirs(profiles_dir(), exist_ok=True)
+    with open(profiles_dir() / 'static.json', 'w', encoding='utf-8') as f:
         f.write(default_config.STATIC_DEFAULT_CONFIG)
 
 
 def check_switch_config(dir_path='./default_config'):
-    path = './config/' + dir_path + '/switch.json'
+    path = profiles_dir() / dir_path / 'switch.json'
     with open(path, 'w', encoding='utf-8') as f:
         f.write(default_config.SWITCH_DEFAULT_CONFIG)
 
 
 def check_and_update_user_config(dir_path='./default_config'):
-    path = './config/' + dir_path + '/config.json'
+    path = profiles_dir() / dir_path / 'config.json'
     if not os.path.exists(path):
         with open(path, 'w', encoding='utf-8') as f:
             f.write(default_config.DEFAULT_CONFIG)
@@ -92,7 +92,7 @@ def check_single_event(new_event, old_event):
 
 
 def check_event_config(dir_path='./default_config', user_config=None):
-    path = './config/' + dir_path + '/event.json'
+    path = profiles_dir() / dir_path / 'event.json'
     default_event_config = json.loads(default_config.EVENT_DEFAULT_CONFIG)
     server = user_config.server_mode
     enable_state = user_config.config.new_event_enable_state
@@ -128,7 +128,7 @@ def check_event_config(dir_path='./default_config', user_config=None):
         with open(path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as e:
-        with open("error.log", 'w+', encoding='utf-8') as f:
+        with open(data_path('error.log'), 'w+', encoding='utf-8') as f:
             f.write(str(e) + '\n' + dir_path + '\n' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '\n')
         with open(path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(default_event_config, ensure_ascii=False, indent=2))
@@ -138,13 +138,11 @@ def check_event_config(dir_path='./default_config', user_config=None):
 def check_config(dir_path):
     if type(dir_path) is not list:
         dir_path = [dir_path]
-    if not os.path.exists('./config'):
-        os.mkdir('./config')
+    os.makedirs(profiles_dir(), exist_ok=True)
     check_static_config()
     for path in dir_path:
         delete_deprecated_config("display.json", path)
-        if not os.path.exists('./config/' + path):
-            os.mkdir('./config/' + path)
+        os.makedirs(profiles_dir() / path, exist_ok=True)
         check_and_update_user_config(path)
         config = ConfigSet(config_dir=path)
         config.update_create_quantity_entry()

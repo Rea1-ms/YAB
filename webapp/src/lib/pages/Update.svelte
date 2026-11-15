@@ -4,16 +4,14 @@
   import { toast } from '../toast';
   import { LOCALES, t, tNow } from '../i18n';
   import { styleHelpDocument } from '../help-document';
-  import type { CdkTestResult, HelpLangEntry, ShaTestResult, UpdateInfo } from '../types';
+  import DesktopUpdate from '../components/DesktopUpdate.svelte';
+  import type { HelpLangEntry, ShaTestResult, UpdateInfo } from '../types';
 
   // —— 更新设置 ——
   let info = $state<UpdateInfo | null>(null);
-  let cdk = $state('');
   let repo = $state('');
   let shaMethod = $state('');
-  let testingCdk = $state(false);
   let testingSha = $state(false);
-  let cdkResult = $state<CdkTestResult | null>(null);
   let shaResult = $state<ShaTestResult | null>(null);
 
   const REPOS: [string, string][] = [
@@ -27,7 +25,6 @@
     const r = await callRpc<UpdateInfo>('Meta', 'update_get', {});
     if (r) {
       info = r;
-      cdk = r.mirrorc_cdk ?? '';
       repo = r.repo_url_http ?? '';
       shaMethod = r.get_remote_sha_method ?? '';
     }
@@ -37,15 +34,6 @@
 
   async function applySave(patch: Record<string, unknown>): Promise<UpdateInfo | null> {
     return (await callRpc<UpdateInfo>('Meta', 'update_save', { patch })) ?? null;
-  }
-
-  async function saveCdk(): Promise<void> {
-    const r = await applySave({ mirrorc_cdk: cdk });
-    if (r) {
-      info = r;
-      cdk = r.mirrorc_cdk ?? '';
-      toast('success', tNow()('Mirror酱 CDK 已保存'));
-    }
   }
 
   async function saveRepo(url: string): Promise<void> {
@@ -66,16 +54,6 @@
     }
   }
 
-  async function testCdk(): Promise<void> {
-    testingCdk = true;
-    cdkResult = null;
-    try {
-      cdkResult = (await callRpc<CdkTestResult>('Meta', 'cdk_test', { cdk })) ?? null;
-    } finally {
-      testingCdk = false;
-    }
-  }
-
   async function testSha(): Promise<void> {
     testingSha = true;
     shaResult = null;
@@ -83,14 +61,6 @@
       shaResult = (await callRpc<ShaTestResult>('Meta', 'sha_test', { repo_url_http: repo })) ?? null;
     } finally {
       testingSha = false;
-    }
-  }
-
-  function cdkSummary(r: CdkTestResult): string {
-    try {
-      return JSON.stringify(r.data).slice(0, 240);
-    } catch {
-      return String(r.data);
     }
   }
 
@@ -134,6 +104,9 @@
 </script>
 
 <div class="page">
+  {#if window.yabDesktop?.getUpdateState}
+    <DesktopUpdate />
+  {:else}
   <div class="card sec settings-card">
     <h2>{$t('更新设置')}</h2>
     <div class="ver">
@@ -141,34 +114,6 @@
       {#if info && !editable}
         <span class="warn">{$t('开发环境，更新设置不可用')}</span>
       {/if}
-    </div>
-
-    <div class="field">
-      <label for="upd-cdk">{$t('Mirror酱 CDK')}</label>
-      <div class="ctl">
-        <div class="row">
-          <input
-            id="upd-cdk"
-            class="input"
-            placeholder="MirrorChyan CDK"
-            bind:value={cdk}
-            disabled={!editable}
-            onkeydown={(e) => e.key === 'Enter' && saveCdk()}
-          />
-          <button class="btn" type="button" disabled={!editable} onclick={() => void saveCdk()}>{$t('保存')}</button>
-          <button class="btn" type="button" disabled={!editable || testingCdk} onclick={() => void testCdk()}>
-            {testingCdk ? $t('测试中…') : $t('测试 CDK')}
-          </button>
-        </div>
-        {#if cdkResult}
-          {@const cr = cdkResult}
-          {#if cr.ok}
-            <div class="result ok">{$t('测试通过：{0}').replace('{0}', () => cdkSummary(cr))}</div>
-          {:else}
-            <div class="result err">{$t('测试失败：{0}').replace('{0}', () => cr.error ?? tNow()('未知错误'))}</div>
-          {/if}
-        {/if}
-      </div>
     </div>
 
     <div class="field">
@@ -209,26 +154,27 @@
     <div class="field">
       <label for="upd-sha">{$t('SHA获取方式')}</label>
       <div class="ctl">
-        <input
+        <select
           id="upd-sha"
           class="input"
-          list="sha-methods"
-          placeholder="github_api / mirrorc_api / pygit2"
-          bind:value={shaMethod}
+          value={shaMethod}
           disabled={!editable}
-          onblur={() => void saveShaMethod()}
-          onkeydown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
-        />
-        <datalist id="sha-methods">
-          <option value="github_api"></option>
-          <option value="mirrorc_api"></option>
-          <option value="pygit2"></option>
-        </datalist>
+          onchange={(e) => {
+            shaMethod = e.currentTarget.value;
+            void saveShaMethod();
+          }}
+        >
+          <option value="">{$t('自动选择')}</option>
+          <option value="github">{$t('GitHub 主仓库')}</option>
+          <option value="gitee">{$t('Gitee 国内镜像')}</option>
+          <option value="gitcode">{$t('GitCode 国内镜像')}</option>
+          <option value="tencent_c_coding">{$t('腾讯工蜂 国内镜像')}</option>
+        </select>
         <div class="help">{$t('取远端最新提交 SHA 的方式，保存后用于检查更新')}</div>
       </div>
     </div>
   </div>
-
+  {/if}
   <div class="card sec settings-card">
     <h2>{$t('帮助文档')}</h2>
     {#if helpList.length === 0}
@@ -322,9 +268,6 @@
   .row {
     display: flex;
     gap: 8px;
-  }
-  .row .input {
-    flex: 1;
   }
   .result {
     font-size: 12.5px;

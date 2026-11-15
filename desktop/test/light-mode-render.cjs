@@ -273,19 +273,25 @@ async function main() {
     await other.loadURL(url + 'bridge-only');
     assert.equal(await other.webContents.executeJavaScript('window.yabDesktop.setCloseAction("开启轻量模式").then(() => false, () => true)'), true);
     other.destroy();
-    await window.webContents.executeJavaScript('location.hash = "#/update"');
+    // The legacy update form belongs to ordinary browsers. Desktop updates
+    // have a separate real-updater regression with their privileged bridge.
+    const browser = new BrowserWindow({ show: false, width: 1280, height: 800,
+      webPreferences: { sandbox: true, contextIsolation: true, offscreen: true } });
+    await browser.loadURL(url + '#/update');
     for (let count = 0; count < 100; count++) {
-      if (await window.webContents.executeJavaScript('Boolean(document.querySelector("#upd-sha"))')) break;
+      if (await browser.webContents.executeJavaScript('Boolean(document.querySelector("#upd-sha"))')) break;
       await sleep(20);
     }
     for (const width of [1280, 960]) {
-      window.setSize(width, 800);
+      browser.setSize(width, 800);
       await sleep(30);
-      assert.equal(await window.webContents.executeJavaScript(`(() => {
+      assert.equal(await browser.webContents.executeJavaScript(`(() => {
         const page = document.querySelector('.page');
         const titles = Array.from(document.querySelectorAll('.settings-card h2'));
         const fields = Array.from(document.querySelectorAll('.settings-card .field'));
-        return page.scrollWidth <= page.clientWidth && titles.length === 2 && fields.length === 3
+        return page.scrollWidth <= page.clientWidth && titles.length === 2 && fields.length === 2
+          && !document.querySelector('#upd-cdk')
+          && !Array.from(document.querySelectorAll('#upd-sha option')).some(option => /mirror/i.test(option.value))
           && titles.every(title => getComputedStyle(title).color === 'rgb(122, 162, 247)' && getComputedStyle(title).fontSize === '15px')
           && fields.every(field => {
             const label = field.querySelector('label').getBoundingClientRect();
@@ -294,6 +300,7 @@ async function main() {
           });
       })()`), true);
     }
+    browser.destroy();
     await window.webContents.executeJavaScript('location.hash = "#/default_config/settings"');
     await settingsReady();
     mode.ask = owner => showMessage(owner, { message: '关闭窗口后开启轻量模式？',

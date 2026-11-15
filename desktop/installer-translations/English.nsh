@@ -11,7 +11,7 @@ ${LangFileString} yabDirectoryInvalid "Enter a complete installation folder path
 ${LangFileString} yabDataTitle "Application data"
 ${LangFileString} yabDataSubtitle "Choose whether to keep your settings and runtime data."
 ${LangFileString} yabKeepData "Keep application data (recommended)"
-${LangFileString} yabKeepDataText "Keep settings, logs, runtimes and backups for a future installation.$\r$\n$\r$\nUncheck to remove this installation's settings and default YAB application data."
+${LangFileString} yabKeepDataText "Keep settings, logs and runtime data for a future installation.$\r$\n$\r$\nUncheck to remove this installation's settings and default YAB application data."
 ${LangFileString} yabChecking "Checking whether YAB is running..."
 ${LangFileString} yabInstalling "Installing"
 ${LangFileString} yabPreparing "Preparing installation..."

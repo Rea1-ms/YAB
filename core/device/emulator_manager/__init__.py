@@ -1,4 +1,7 @@
-DEVICE_CONFIG_PATH = './config/'
+import os
+from core.paths import profiles_dir
+
+DEVICE_CONFIG_PATH = str(profiles_dir()) + os.sep
 
 from .auto_scan_simulator import auto_scan_simulators as auto_scan
 from .auto_scan_simulator import auto_search_adb_address as autosearch
