@@ -80,7 +80,16 @@ class WindowMemoryMode {
       let action = this.closeAction;
       if (action === '询问') {
         const result = await this.ask(window);
-        if (result.response > 1 || this.isQuitting() || window.isDestroyed()) return;
+        if (result.response > 1 || this.isQuitting() || window.isDestroyed()) {
+          // Let the modal child finish releasing its owner before restoring a
+          // parent that was hidden by the native window manager.
+          await new Promise(resolve => setImmediate(resolve));
+          if ((result.parentHidden || !window.isVisible()) && !this.isQuitting() && !window.isDestroyed()) {
+            window.show();
+            window.focus();
+          }
+          return;
+        }
         action = result.response === 0 ? '开启轻量模式' : '仅关闭窗口';
         if (result.checkboxChecked) {
           this.save(action);

@@ -4,7 +4,7 @@ const path = require('path');
 const { BrowserWindow, ipcMain, nativeTheme } = require('electron');
 let sequence = 0;
 
-function showMessage(parent, options = {}, { show = true } = {}) {
+function showMessage(parent, options = {}, { show = true, hideParentOnResponse = false } = {}) {
   const buttons = options.buttons?.length ? options.buttons.map(String) : ['确定'];
   const defaultId = Math.max(0, Math.min(options.defaultId ?? 0, buttons.length - 1));
   const cancelId = Math.max(0, Math.min(options.cancelId ?? buttons.length - 1, buttons.length - 1));
@@ -17,6 +17,7 @@ function showMessage(parent, options = {}, { show = true } = {}) {
       preload: path.join(__dirname, 'message-preload.cjs'), additionalArguments: [`--yab-message-channel=${channel}`] } });
   let response = cancelId;
   let checkboxChecked = Boolean(options.checkboxChecked);
+  let parentHidden = false;
   ipcMain.handle(channel, (event, action, value, checked) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('无效的消息请求');
     if (action === 'get') return { message: String(options.message || ''), detail: String(options.detail || ''),
@@ -26,13 +27,18 @@ function showMessage(parent, options = {}, { show = true } = {}) {
       if (typeof checked !== 'boolean') throw new Error('无效的复选框状态');
       checkboxChecked = checked;
     }
+    if (hideParentOnResponse && value !== cancelId && owner && !owner.isDestroyed()) {
+      owner.hide();
+      parentHidden = true;
+    }
     response = value;
     setImmediate(() => window.close());
     return true;
   });
   const result = new Promise(resolve => window.once('closed', () => {
     ipcMain.removeHandler(channel);
-    resolve(options.checkboxLabel ? { response, checkboxChecked } : { response });
+    const extra = hideParentOnResponse ? { parentHidden } : {};
+    resolve(options.checkboxLabel ? { response, checkboxChecked, ...extra } : { response, ...extra });
   }));
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());

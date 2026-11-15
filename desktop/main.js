@@ -94,7 +94,7 @@ const windowMode = new WindowMemoryMode({
   ask: window => showMessage(window, { title: '关闭窗口', message: '关闭窗口后开启轻量模式？',
     detail: '轻量模式会释放界面，后台任务继续运行。再次打开时会重新加载页面，未保存的输入会丢失。',
     buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
-    checkboxLabel: '下次不再提示', checkboxChecked: true }),
+    checkboxLabel: '下次不再提示', checkboxChecked: true }, { hideParentOnResponse: true }),
   save: action => saveWindowMode(windowModeFile, action),
   onError: error => showMessage(mainWindow, { type: 'error', message: '无法保存关闭窗口设置',
     detail: error.message, buttons: ['确定'] }),

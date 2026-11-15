@@ -306,7 +306,7 @@ async function main() {
     mode.ask = owner => showMessage(owner, { message: '关闭窗口后开启轻量模式？',
       detail: '轻量模式会释放界面，后台任务继续运行。',
       buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
-      checkboxLabel: '下次不再提示', checkboxChecked: true }, { show: false });
+      checkboxLabel: '下次不再提示', checkboxChecked: true }, { show: false, hideParentOnResponse: true });
     const waitForDialog = async owner => {
       for (let count = 0; count < 100; count++) {
         const dialog = BrowserWindow.getAllWindows().find(item => item !== owner);
@@ -325,6 +325,9 @@ async function main() {
     assert.equal(window.isDestroyed(), false);
     assert.equal(mode.closeAction, '询问');
     // Unchecking the default checkbox applies this choice only once.
+    const visibility = [];
+    window.on('show', () => visibility.push('show'));
+    window.on('hide', () => visibility.push('hide'));
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
     // Queue the click after this evaluation has returned, so closing the
@@ -332,14 +335,30 @@ async function main() {
     await dialog.webContents.executeJavaScript('document.querySelector("#remember").checked = false; setTimeout(() => document.querySelectorAll("button")[1].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), false);
+    assert.equal(visibility.includes('show'), false, 'Closing the prompt must not briefly show the parent page.');
     assert.equal(mode.closeAction, '询问');
-    // Remembering the light-mode choice releases the renderer and persists it.
+    // The first persisted choice writes desktop-settings.json while the page is
+    // already hidden, so a slow first write cannot expose it for one frame.
     mode.save = action => require('../window-mode.cjs').saveWindowMode(settingsFile, action);
+    visibility.length = 0;
+    closing = mode.requestClose(window);
+    dialog = await waitForDialog(window);
+    await dialog.webContents.executeJavaScript('setTimeout(() => document.querySelectorAll("button")[1].click(), 0)');
+    await closing;
+    assert.equal(window.isDestroyed(), false);
+    assert.equal(visibility.includes('show'), false, 'Persisting the first choice must not expose the parent page.');
+    assert.equal(readWindowMode(settingsFile), '仅关闭窗口');
+    assert.equal(mode.closeAction, '仅关闭窗口');
+    window.show();
+    mode.closeAction = '询问';
+    // Remembering the light-mode choice releases the renderer and persists it.
+    visibility.length = 0;
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
     await dialog.webContents.executeJavaScript('setTimeout(() => document.querySelectorAll("button")[0].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), true);
+    assert.equal(visibility.includes('show'), false, 'Releasing from the first prompt must not expose the parent page.');
     assert.equal(readWindowMode(settingsFile), '开启轻量模式');
     assert.equal(mode.closeAction, '开启轻量模式');
     mode.state.url = 'https://example.com/';
