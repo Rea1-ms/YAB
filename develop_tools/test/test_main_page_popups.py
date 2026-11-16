@@ -407,6 +407,68 @@ class MainPagePopupTests(unittest.TestCase):
             self.assertFalse(picture.handle_global_main_page_overlay(worker))
             worker.click.assert_not_called()
 
+    def test_reported_news_detail_closes_in_all_languages_and_resolutions(self):
+        frame = load_fixture('global_news_detail_20261115')
+        for identifier in IDENTIFIERS:
+            for ratio in (.75, 1, 1.5, 2):
+                with (self.subTest(identifier=identifier, ratio=ratio),
+                      self.android_worker([frame, self.frame('home')], ratio, identifier) as worker):
+                    worker.to_main_page()
+                    worker.control.click.assert_called_once_with(int(1214 * ratio), int(43 * ratio))
+                    self.assertEqual(worker.replay.index, 1)
+
+    def test_news_detail_closes_before_accepting_visible_home_features(self):
+        frame = load_fixture('global_news_detail_20261115')
+        frame[:6, :6] = (3, 2, 1)
+        worker = self.worker([frame, self.frame('home')])
+        worker.to_main_page()
+        worker.click.assert_called_once_with(1214, 43, wait_over=True)
+        self.assertEqual(worker.replay.index, 1)
+
+    def test_news_detail_retry_waits_for_close_cooldown(self):
+        worker = self.worker([load_fixture('global_news_detail_20261115')] * 6 + [self.frame('home')])
+        worker.to_main_page()
+        self.assertEqual(worker.click.call_args_list, [call(1214, 43, wait_over=True)] * 2)
+        self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+        first, second = worker.replay.actions
+        self.assertGreater(second['time'] - first['time'], 2)
+        self.assertEqual(worker.replay.index, 6)
+
+    def test_news_detail_cannot_finish_without_home(self):
+        worker = self.worker([load_fixture('global_news_detail_20261115')] * 6)
+        with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+            worker.to_main_page()
+        self.assertEqual(worker.click.call_args_list, [call(1214, 43, wait_over=True)] * 2)
+        self.assertEqual([action['frame'] for action in worker.replay.actions], [0, 5])
+
+    def test_news_detail_requires_toolbar_and_close_button(self):
+        for identifier in IDENTIFIERS:
+            for ratio in (.75, 1, 1.5, 2):
+                for area in ((35, 84, 106, 655), (1180, 15, 1255, 77)):
+                    with self.subTest(identifier=identifier, ratio=ratio, missing=area):
+                        frame = load_fixture('global_news_detail_20261115')
+                        x1, y1, x2, y2 = area
+                        frame[y1:y2, x1:x2] = 0
+                        worker = self.worker([frame], identifier, ratio)
+                        self.assertFalse(picture.handle_global_main_page_overlay(worker))
+                        worker.click.assert_not_called()
+
+    def test_news_detail_does_not_apply_to_other_servers(self):
+        for server in ('CN', 'JP'):
+            with self.subTest(server=server):
+                worker = self.worker([load_fixture('global_news_detail_20261115')])
+                worker.server = server
+                self.assertFalse(picture.handle_global_main_page_overlay(worker))
+                worker.click.assert_not_called()
+
+    def test_news_detail_does_not_depend_on_article_text(self):
+        frame = load_fixture('global_news_detail_20261115')
+        frame[159:654, 107:1245] = (90, 180, 230)
+        worker = self.worker([frame, self.frame('home')])
+        worker.to_main_page()
+        worker.click.assert_called_once_with(1214, 43, wait_over=True)
+        self.assertEqual(worker.replay.index, 1)
+
     def test_launch_prompt_checks_suppression_then_closes_without_logging_in(self):
         for ratio in (1, 2):
             with self.subTest(ratio=ratio):

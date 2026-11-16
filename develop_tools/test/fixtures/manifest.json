@@ -73,6 +73,47 @@
         "description": "既有裁剪样本，原图来源未记录"
       }
     },
+    "global_news_detail_20261115": {
+      "path": "global_news_detail_20261115.png",
+      "sha256": "387648a9a5c21d1437814e002841a92c8592fde55deb4db877c6dcee274ad5bc",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服公告详情页：列表图标选中，主页图标未选中",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_does_not_apply_to_other_servers",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_does_not_depend_on_article_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_requires_toolbar_and_close_button",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_retry_waits_for_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_reported_news_detail_closes_in_all_languages_and_resolutions"
+      ],
+      "source": {
+        "filename": "ba-stuck.png",
+        "sha256": "0a81c67a3c66e345b4d2e2094a94d565c0e2a89127331d2da84c433e963012f0",
+        "registered_on": "2026-11-15",
+        "captured_on": null,
+        "language": "zh-tw"
+      },
+      "redactions": [
+        [
+          0,
+          0,
+          285,
+          84
+        ],
+        [
+          500,
+          0,
+          1040,
+          65
+        ]
+      ]
+    },
     "global_shop_last_row": {
       "path": "global_shop_last_row.png",
       "sha256": "10e70c9dea72aff6ad48884088fbd3b7c784b724d2cf20553fcb5cecc1a51c59",
