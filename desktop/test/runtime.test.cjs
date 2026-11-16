@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const { createHash } = require('crypto');
-const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings } = require('../runtime.cjs');
+const { desktopDataPath, prepareRuntime, recordRuntime, readRuntime } = require('../runtime.cjs');
 const { INDEXES, loadRuntimeSettings, saveRuntimeSettings, validateSettings, runtimeEnvironment } = require('../runtime-settings.cjs');
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -29,6 +29,7 @@ async function fixture({ online = false, bundled = true } = {}) {
   const writeBundle = async (version, dependency = 'deps-v1') => {
     const content = { 'app/server/__main__.py': version, 'app/webapp/dist/index.html': 'html',
       'app/distribution.json': '{}', [`app/${ocr}/BAAS_ocr_server.exe`]: 'ocr',
+      [`app/${ocr}/resource/global_setting.json`]: '{}',
       'requirements.txt': dependency };
     if (!online) Object.assign(content, { 'toolkit/python/python.exe': 'standalone python', 'wheels/package.whl': dependency });
     else content['build-constraints.txt'] = 'setuptools==69.5.1\nwheel==0.45.1\n';
@@ -50,7 +51,7 @@ async function fixture({ online = false, bundled = true } = {}) {
   return { bundle, data, calls, run, writeBundle, resolveUv, selections };
 }
 
-test('upgrade isolates source versions, reuses dependencies and preserves legacy settings', async () => {
+test('installed sources run in place and repeated launches never copy code or back up settings', async () => {
   const f = await fixture();
   const config = path.join(f.data, 'backend/config/account.json');
   const ocrConfig = path.join(f.data, 'backend', ocr, 'config/global_setting.json');
@@ -60,31 +61,31 @@ test('upgrade isolates source versions, reuses dependencies and preserves legacy
   }
   const v1 = await prepareRuntime(f.bundle, f.data, f);
   assert.ok(path.basename(path.dirname(path.dirname(path.dirname(v1.python)))).length < 40);
-  assert.ok(path.basename(v1.root).length < 40);
-  assert.equal(await readActiveRuntime(f.data), null);
-  await activateRuntime(f.data, v1);
-  await fs.writeFile(path.join(v1.root, 'removed-module.py'), 'obsolete');
-  // Unlisted mutable files must never be copied, even from a dirty bundle.
-  await fs.mkdir(path.join(f.bundle, 'app/config'));
-  await fs.writeFile(path.join(f.bundle, 'app/config/account.json'), 'must not copy');
-  await fs.writeFile(path.join(f.bundle, 'app/setup.toml'), 'private');
+  assert.equal(v1.root, path.join(f.bundle, 'app'));
+  assert.equal(await readRuntime(f.data), null);
+  await recordRuntime(f.data, v1);
+  assert.equal(await fs.readFile(path.join(v1.configRoot, 'profiles/account.json'), 'utf8'), 'my settings');
+  assert.equal(await fs.readFile(path.join(v1.ocrRoot, 'config/global_setting.json'), 'utf8'), 'my settings');
+  assert.equal(await fs.realpath(path.join(v1.ocrRoot, 'resource')), await fs.realpath(path.join(v1.root, ocr, 'resource')));
+  assert.equal((await fs.lstat(path.join(v1.ocrRoot, 'resource'))).isSymbolicLink(), true);
+  await assert.rejects(fs.access(path.join(v1.root, 'config')));
+  await assert.rejects(fs.access(path.join(v1.root, ocr, 'config')));
+  await assert.rejects(fs.access(path.join(v1.root, ocr, 'output')));
   await f.writeBundle('v2');
   const v2 = await prepareRuntime(f.bundle, f.data, f);
-  assert.notEqual(v2.root, v1.root);
+  assert.equal(v2.root, v1.root);
+  assert.equal(await fs.readFile(path.join(v2.root, 'server/__main__.py'), 'utf8'), 'v2');
   assert.equal(v2.python, v1.python);
   assert.equal(f.calls.filter(call => call.args[0] === 'venv').length, 1);
-  assert.equal(await fs.readFile(path.join(v2.root, 'config/account.json'), 'utf8'), 'my settings');
-  assert.equal(await fs.readFile(path.join(v2.root, ocr, 'config/global_setting.json'), 'utf8'), 'my settings');
-  await assert.rejects(fs.access(path.join(v2.root, 'removed-module.py')));
-  await assert.rejects(fs.access(path.join(v2.root, 'setup.toml')));
-  assert.equal((await readActiveRuntime(f.data)).id, v1.id);
-  await fs.writeFile(config, 'failed migration');
-  await restoreSettings(f.data, v2);
+  assert.equal((await readRuntime(f.data)).id, v1.id);
   assert.equal(await fs.readFile(config, 'utf8'), 'my settings');
-  await activateRuntime(f.data, v2);
+  await recordRuntime(f.data, v2);
+  await recordRuntime(f.data, v2);
   const again = await prepareRuntime(f.bundle, f.data, f);
   assert.equal(again.root, v2.root);
-  assert.equal((await fs.readdir(path.join(f.data, 'versions'))).length, 2);
+  assert.equal(again.ocrRoot, v2.ocrRoot);
+  for (const name of ['versions', 'backups', 'updates']) await assert.rejects(fs.access(path.join(f.data, name)));
+  assert.deepEqual((await fs.readdir(f.data)).filter(name => name.startsWith('desktop-runtime-')), []);
 });
 
 test('desktop data uses the YAB directory and honors explicit overrides', async () => {
@@ -97,6 +98,23 @@ test('desktop data uses the YAB directory and honors explicit overrides', async 
   assert.equal(await fs.readFile(path.join(legacy, 'Preferences'), 'utf8'), 'saved preferences');
   const custom = path.join(f.data, 'custom');
   assert.equal(desktopDataPath(f.data, custom), custom);
+});
+
+test('legacy version folders are preserved but never selected or refreshed', async () => {
+  const f = await fixture();
+  const first = await prepareRuntime(f.bundle, f.data, f);
+  const oldRoot = path.join(f.data, 'versions', 'old-version');
+  await fs.mkdir(oldRoot, { recursive: true });
+  await fs.writeFile(path.join(oldRoot, 'local-patch.py'), 'keep untouched');
+  await recordRuntime(f.data, { ...first, root: oldRoot, backup: 'legacy-backup' });
+  await f.writeBundle('v2');
+  const current = await prepareRuntime(f.bundle, f.data, f);
+  assert.equal(current.root, path.join(f.bundle, 'app'));
+  assert.equal(current.python, first.python);
+  assert.equal(await fs.readFile(path.join(oldRoot, 'local-patch.py'), 'utf8'), 'keep untouched');
+  assert.deepEqual(await fs.readdir(path.join(f.data, 'versions')), ['old-version']);
+  await fs.writeFile(path.join(current.root, 'server/__main__.py'), 'damaged');
+  await assert.rejects(prepareRuntime(f.bundle, f.data, f), /校验失败/);
 });
 
 test('online and offline startup report real preparation phases and forward live output', async () => {
@@ -119,7 +137,7 @@ test('online and offline startup report real preparation phases and forward live
     assert.equal(updates.at(-1).percent, 82, 'The backend and page are still pending.');
     assert.ok(updates.every(update => update.percent < 100));
     assert.ok(logs.includes('正在安装依赖\n'));
-    await activateRuntime(f.data, runtime);
+    await recordRuntime(f.data, runtime);
     updates.length = 0;
     await prepareRuntime(f.bundle, f.data, { ...f, progress });
     assert.equal(updates.at(-1).percent, 82);
@@ -127,7 +145,7 @@ test('online and offline startup report real preparation phases and forward live
   }
 });
 
-test('installation-local settings migrate legacy data, survive upgrades and restore locally', async () => {
+test('installation-local settings migrate legacy data without modifying program files', async () => {
   const f = await fixture();
   const oldConfig = path.join(f.data, 'backend/config/account/config.json');
   const oldOcr = path.join(f.data, 'backend', ocr, 'config/global_setting.json');
@@ -136,30 +154,27 @@ test('installation-local settings migrate legacy data, survive upgrades and rest
     await fs.writeFile(file, 'legacy settings');
   }
   const legacy = await prepareRuntime(f.bundle, f.data, f);
-  await activateRuntime(f.data, legacy);
+  await recordRuntime(f.data, legacy);
   const configRoot = path.join(f.data, '../installed/config');
   const options = { ...f, configRoot };
   const local = await prepareRuntime(f.bundle, f.data, options);
-  assert.notEqual(local.root, legacy.root); // The old version is still linked to AppData.
+  assert.equal(local.root, legacy.root);
   assert.equal(local.python, legacy.python);
   const config = path.join(configRoot, 'profiles/account/config.json');
   const localOcr = path.join(configRoot, 'ocr/global_setting.json');
   assert.equal(await fs.readFile(config, 'utf8'), 'legacy settings');
   assert.equal(await fs.readFile(localOcr, 'utf8'), 'legacy settings');
-  await fs.writeFile(path.join(local.root, 'config/account/config.json'), 'local profile');
-  await fs.writeFile(path.join(local.root, ocr, 'config/global_setting.json'), 'local OCR');
+  await fs.writeFile(config, 'local profile');
+  await fs.writeFile(path.join(local.ocrRoot, 'config/global_setting.json'), 'local OCR');
   assert.equal(await fs.readFile(oldConfig, 'utf8'), 'legacy settings');
   assert.equal(await fs.readFile(oldOcr, 'utf8'), 'legacy settings');
   assert.equal(await fs.readFile(config, 'utf8'), 'local profile');
-  await activateRuntime(f.data, local);
+  await recordRuntime(f.data, local);
   assert.equal((await prepareRuntime(f.bundle, f.data, options)).root, local.root);
   await f.writeBundle('v2');
   const v2 = await prepareRuntime(f.bundle, f.data, options);
   assert.equal(v2.python, local.python);
-  assert.equal(await fs.readFile(path.join(v2.root, 'config/account/config.json'), 'utf8'), 'local profile');
-  await fs.writeFile(config, 'failed migration');
-  await fs.writeFile(localOcr, 'failed OCR migration');
-  await restoreSettings(f.data, v2);
+  assert.equal(v2.root, path.join(f.bundle, 'app'));
   assert.equal(await fs.readFile(config, 'utf8'), 'local profile');
   assert.equal(await fs.readFile(localOcr, 'utf8'), 'local OCR');
   assert.equal(await fs.readFile(oldConfig, 'utf8'), 'legacy settings');
@@ -172,10 +187,11 @@ test('existing installation settings take precedence and a new location imports 
   await fs.mkdir(path.dirname(config), { recursive: true });
   await fs.writeFile(config, 'existing local settings');
   const local = await prepareRuntime(f.bundle, f.data, { ...f, configRoot });
-  await activateRuntime(f.data, local);
+  await recordRuntime(f.data, local);
   const newRoot = path.join(f.data, '../second-install/config');
   const next = await prepareRuntime(f.bundle, f.data, { ...f, configRoot: newRoot });
-  assert.notEqual(next.root, local.root);
+  assert.equal(next.root, local.root);
+  assert.notEqual(next.ocrRoot, local.ocrRoot);
   assert.equal(await fs.readFile(path.join(newRoot, 'profiles/account/config.json'), 'utf8'), 'existing local settings');
   assert.equal(await fs.readFile(config, 'utf8'), 'existing local settings');
 });
@@ -183,13 +199,13 @@ test('existing installation settings take precedence and a new location imports 
 test('unusable configuration location fails clearly without executing tools or replacing active state', async () => {
   const f = await fixture();
   const v1 = await prepareRuntime(f.bundle, f.data, f);
-  await activateRuntime(f.data, v1);
+  await recordRuntime(f.data, v1);
   const configRoot = path.join(f.data, 'blocked-config');
   await fs.writeFile(configRoot, 'this is a file');
   f.calls.length = 0;
   await assert.rejects(prepareRuntime(f.bundle, f.data, { ...f, configRoot }), /无法准备配置目录.*YAB_CONFIG_DIR/);
   assert.equal(f.calls.length, 0);
-  assert.equal((await readActiveRuntime(f.data)).root, v1.root);
+  assert.equal((await readRuntime(f.data)).id, v1.id);
 });
 
 test('configuration imports recover from a temporary Windows lock without changing old settings', {
@@ -211,11 +227,11 @@ test('configuration imports recover from a temporary Windows lock without changi
   const configRoot = path.join(f.data, '../installed/config');
   const runtime = await prepareRuntime(f.bundle, f.data, { ...f, configRoot });
   assert.equal(blocked, true);
-  assert.equal(await fs.readFile(path.join(runtime.root, 'config/account/config.json'), 'utf8'), 'legacy settings');
+  assert.equal(await fs.readFile(path.join(runtime.configRoot, 'profiles/account/config.json'), 'utf8'), 'legacy settings');
   assert.equal(await fs.readFile(original, 'utf8'), 'legacy settings');
 });
 
-test('a persistent Windows import lock leaves the old active version and settings intact', {
+test('a persistent Windows import lock preserves the previous diagnostic record and original settings', {
   skip: process.platform !== 'win32',
 }, async t => {
   const f = await fixture();
@@ -223,7 +239,7 @@ test('a persistent Windows import lock leaves the old active version and setting
   await fs.mkdir(path.dirname(original), { recursive: true });
   await fs.writeFile(original, 'legacy settings');
   const previous = await prepareRuntime(f.bundle, f.data, f);
-  await activateRuntime(f.data, previous);
+  await recordRuntime(f.data, previous);
   const rename = fs.rename;
   t.mock.method(fs, 'rename', async (from, to) => {
     if (path.basename(from).startsWith('.import-')) {
@@ -234,18 +250,18 @@ test('a persistent Windows import lock leaves the old active version and setting
   const configRoot = path.join(f.data, '../installed/config');
   f.calls.length = 0;
   await assert.rejects(prepareRuntime(f.bundle, f.data, { ...f, configRoot }), /无法准备配置目录/);
-  assert.equal((await readActiveRuntime(f.data)).root, previous.root);
+  assert.equal((await readRuntime(f.data)).id, previous.id);
   assert.equal(await fs.readFile(original, 'utf8'), 'legacy settings');
   assert.equal(f.calls.length, 0);
 });
 
-test('dependency change creates an environment; failed install leaves active version usable', async () => {
+test('dependency change prepares a new environment and a failed install reports the error', async () => {
   const f = await fixture();
   const v1 = await prepareRuntime(f.bundle, f.data, f);
-  await activateRuntime(f.data, v1);
+  await recordRuntime(f.data, v1);
   await f.writeBundle('v2', 'deps-v2');
   await assert.rejects(prepareRuntime(f.bundle, f.data, { run: async () => { throw new Error('install failed'); } }), /install failed/);
-  assert.equal((await readActiveRuntime(f.data)).root, v1.root);
+  assert.equal((await readRuntime(f.data)).id, v1.id);
   const v2 = await prepareRuntime(f.bundle, f.data, f);
   assert.notEqual(v2.python, v1.python);
   for (const call of f.calls.filter(call => call.args[0] === 'pip' && call.args[1] === 'sync')) {
@@ -261,7 +277,7 @@ test('corrupt offline content is rejected before any executable runs', async () 
   await fs.writeFile(path.join(f.bundle, 'wheels/package.whl'), 'corrupt');
   await assert.rejects(prepareRuntime(f.bundle, f.data, f), /校验失败/);
   assert.equal(f.calls.length, 0);
-  assert.equal(await readActiveRuntime(f.data), null);
+  assert.equal(await readRuntime(f.data), null);
 });
 
 test('manifest traversal is rejected before executing a package', async () => {
@@ -294,7 +310,7 @@ test('lightweight installation checks the shared pinned interpreter and installs
     assert.ok(!sync.args.includes('--no-index'));
     assert.equal(sync.options.env.UV_OFFLINE, undefined);
     assert.ok(!f.calls.some(call => call.args.includes('wheel')));
-    await activateRuntime(f.data, runtime);
+    await recordRuntime(f.data, runtime);
     f.calls.length = 0;
     await saveRuntimeSettings(configRoot, f.data, { uvMode: 'system', uvPath: '', index: 'aliyun' });
     assert.equal((await prepareRuntime(f.bundle, f.data, { ...f, configRoot })).python, runtime.python);
@@ -313,24 +329,24 @@ test('a system-tool lightweight package needs no bundled interpreter or uv', asy
 test('lightweight source updates reuse dependencies; dependency updates isolate failed preparations', async () => {
   const f = await fixture({ online: true });
   const first = await prepareRuntime(f.bundle, f.data, f);
-  await activateRuntime(f.data, first);
-  await fs.writeFile(path.join(first.root, 'config/account.json'), 'keep my settings');
+  await recordRuntime(f.data, first);
+  await fs.writeFile(path.join(first.configRoot, 'profiles/account.json'), 'keep my settings');
   await f.writeBundle('v2');
   const second = await prepareRuntime(f.bundle, f.data, f);
   assert.equal(second.python, first.python);
-  await activateRuntime(f.data, second);
+  await recordRuntime(f.data, second);
   await f.writeBundle('v3', 'new dependency');
   const failingRun = async (command, args, options) => {
     if (args[1] === 'sync') throw new Error('mirror unavailable');
     return f.run(command, args, options);
   };
   await assert.rejects(prepareRuntime(f.bundle, f.data, { ...f, run: failingRun }), /mirror unavailable/);
-  assert.equal((await readActiveRuntime(f.data)).root, second.root);
-  assert.equal(await fs.readFile(path.join(first.root, 'config/account.json'), 'utf8'), 'keep my settings');
+  assert.equal((await readRuntime(f.data)).id, second.id);
+  assert.equal(await fs.readFile(path.join(first.configRoot, 'profiles/account.json'), 'utf8'), 'keep my settings');
   const third = await prepareRuntime(f.bundle, f.data, f);
   assert.notEqual(third.python, second.python);
-  assert.equal(await fs.readFile(path.join(third.root, 'config/account.json'), 'utf8'), 'keep my settings');
-  assert.equal((await readActiveRuntime(f.data)).root, second.root);
+  assert.equal(await fs.readFile(path.join(third.configRoot, 'profiles/account.json'), 'utf8'), 'keep my settings');
+  assert.equal((await readRuntime(f.data)).id, second.id);
 });
 
 test('corrupt lightweight content and incomplete online metadata never execute tools', async () => {

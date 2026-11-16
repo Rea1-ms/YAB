@@ -5,6 +5,7 @@ from core.ocr import ocr
 from core.utils import Logger
 from core.Baas_thread import Baas_thread
 from core.config.config_set import ConfigSet
+from core.paths import profiles_dir
 from core.ocr.baas_ocr_client.server_installer import check_git
 
 class Main:
@@ -71,8 +72,8 @@ class Main:
 
     def init_static_config(self):
         try:
-            self.static_config = self.operate_dict(
-                json.load(open(self.project_dir + "/config/static.json", 'r', encoding='utf-8')))
+            with open(profiles_dir() / 'static.json', 'r', encoding='utf-8') as stream:
+                self.static_config = self.operate_dict(json.load(stream))
             return True
         except Exception as e:
             self.logger.error("Static Config initialization failed")

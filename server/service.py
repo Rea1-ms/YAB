@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from server.hub import Hub
+from core.paths import profiles_dir
 
 
 def config_path(name, require_exists=True):
@@ -14,7 +15,7 @@ def config_path(name, require_exists=True):
             or name in ('.', '..') or name.endswith('.')
             or any(c in name for c in '/\\:') or any(ord(c) < 32 for c in name)):
         raise ValueError('配置目录名称不合法')
-    base = Path('config').resolve()
+    base = profiles_dir().resolve()
     path = (base / name).resolve()
     if path.parent != base:
         raise ValueError('配置目录必须位于配置根目录内')
@@ -35,7 +36,7 @@ class _Signal:
 
 def scan_configs():
     res = []
-    base = './config'
+    base = profiles_dir()
     if not os.path.exists(base):
         return res
     for name in sorted(os.listdir(base)):
@@ -75,7 +76,30 @@ class BaasService:
         self.states = {}  # config -> dict(running, button, current, waiting)
         self._control_lock = threading.RLock()
         self._stop_events = {}
+        self._desktop_update_pending = False
         self.listener = None
+
+    def guard_write(self, handler):
+        def guarded(*args):
+            with self._control_lock:
+                if self._desktop_update_pending:
+                    raise RuntimeError('正在准备桌面更新，暂时不能修改配置或启动任务')
+                return handler(*args)
+        return guarded
+
+    def desktop_update(self, action):
+        with self._control_lock:
+            if action == 'prepare':
+                self._desktop_update_pending = True
+                for config in list(self.threads):
+                    self.stop(config)
+            elif action == 'cancel':
+                self._desktop_update_pending = False
+            elif action != 'status':
+                raise ValueError('更新操作不合法')
+            running = [config for config in self.workers if self._busy(config)]
+            return {'pending': self._desktop_update_pending, 'running': running,
+                    'ready': self._desktop_update_pending and not running}
 
     def webui_get(self):
         from server.webui_settings import load_settings
@@ -118,7 +142,8 @@ class BaasService:
                 self.ocr_error = None
                 self.hub.push('Meta', 'set', {'ocr_ready': True, 'ocr_error': None})
                 self.hub.push_full('ConfigScan')
-                self._autostart()
+                if os.environ.get('YAB_DESKTOP_RECOVERY') != '1':
+                    self._autostart()
             except Exception as e:
                 self.ocr_ready = False
                 self.ocr_error = str(e)
@@ -182,6 +207,8 @@ class BaasService:
         if not self.ocr_ready:
             raise RuntimeError('OCR 尚未初始化完成，请稍候')
         with self._control_lock:
+            if self._desktop_update_pending:
+                raise RuntimeError('正在准备桌面更新，暂时不能启动任务')
             if self._busy(config):
                 if task is not None:
                     raise ValueError('配置正在运行，请先停止')
@@ -391,7 +418,6 @@ class BaasService:
     # ---------- update settings (setup.toml) ----------
 
     UPDATE_KEYS = {
-        'mirrorc_cdk': 'General.mirrorc_cdk',
         'repo_url_http': 'URLs.REPO_URL_HTTP',
         'get_remote_sha_method': 'General.get_remote_sha_method',
     }
@@ -402,6 +428,8 @@ class BaasService:
         'https://gitcode.com/m0_74686738/blue_archive_auto_script.git': 'gitcode',
         'https://e.coding.net/g-jbio0266/baas/blue_archive_auto_script.git': 'tencent_c_coding',
     }
+
+    UPDATE_SHA_METHODS = frozenset(('', *REPO_URL_CHECK_UPDATE_METHOD.values()))
 
     def _toml_config(self):
         path = './setup.toml'
@@ -421,10 +449,11 @@ class BaasService:
         }
         if cfg is not None:
             info.update({
-                'mirrorc_cdk': cfg.get('General.mirrorc_cdk', ''),
                 'repo_url_http': cfg.get('URLs.REPO_URL_HTTP', ''),
                 'get_remote_sha_method': cfg.get('General.get_remote_sha_method', ''),
             })
+            if info['get_remote_sha_method'] not in self.UPDATE_SHA_METHODS:
+                info['get_remote_sha_method'] = ''
         return info
 
     def update_save(self, params):
@@ -432,22 +461,18 @@ class BaasService:
         if cfg is None:
             raise ValueError('未找到 setup.toml（非完整发行包环境，更新设置不可用）')
         patch = params.get('patch', {})
+        if not isinstance(patch, dict):
+            raise ValueError('更新设置必须是对象')
         for name, value in patch.items():
-            key = self.UPDATE_KEYS.get(name)
-            if key is None:
+            if name not in self.UPDATE_KEYS:
                 raise ValueError(f'不允许修改: {name}')
-            cfg.set_and_save(key, value)
+            if not isinstance(value, str):
+                raise ValueError(f'更新设置必须是字符串: {name}')
+            if name == 'get_remote_sha_method' and value not in self.UPDATE_SHA_METHODS:
+                raise ValueError('不支持的提交查询方式')
+        for name, value in patch.items():
+            cfg.set_and_save(self.UPDATE_KEYS[name], value)
         return self.update_get({})
-
-    def cdk_test(self, params):
-        cdk = str(params.get('cdk', '')).strip()
-        try:
-            from deploy.installer.mirrorc_update.mirrorc_updater import MirrorC_Updater
-            inst = MirrorC_Updater(app='BAAS_repo', current_version='')
-            ret = inst.get_latest_version(cdk=cdk, timeout=3.0)
-            return {'ok': True, 'data': ret}
-        except Exception as e:
-            return {'ok': False, 'error': str(e)}
 
     def sha_test(self, params):
         url = params.get('repo_url_http', '')

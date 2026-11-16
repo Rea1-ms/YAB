@@ -1,14 +1,28 @@
-version: '3'
 services:
-  baas_main:
-    image: baas:v1.0
-    tty: true
+  yab:
+    image: yab:local
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/dockerfile
+    init: true
     ports:
-      # 可修改冒号前的端口，通过浏览器访问网页界面。
-      - "22267:22267"
+      - "${YAB_WEBUI_BIND:-127.0.0.1}:${YAB_WEBUI_PORT:-22267}:22267"
     environment:
       BAAS_WEBUI_TOKEN: ${BAAS_WEBUI_TOKEN:?请先设置网页访问密码}
-    restart: always
-    container_name: blue_archive_auto_script
+      TZ: ${TZ:-Asia/Shanghai}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: 256m
+    restart: unless-stopped
     volumes:
-      - ./:/app
+      - yab_config:/app/config
+      - yab_ocr_config:/app/core/ocr/baas_ocr_client/bin/config
+      - yab_ocr_output:/app/core/ocr/baas_ocr_client/bin/output
+      - yab_adb:/home/yab/.android
+
+volumes:
+  yab_config:
+  yab_ocr_config:
+  yab_ocr_output:
+  yab_adb:

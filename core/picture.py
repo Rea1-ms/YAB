@@ -193,9 +193,13 @@ def handle_global_main_page_overlay(self, before_reaction=None):
     # Recognize startup promotions by the footer icon and click the fixed close
     # position. The close icon can vary with the banner artwork.
     if (image.compare_image(self, 'main_page_startup-promo-dismiss')
-            or image.compare_image(self, 'main_page_startup-promo-dismiss-2')):
+            or image.compare_image(self, 'main_page_startup-promo-dismiss-2')
+            or image.compare_image(self, 'main_page_startup-promo-dismiss-light')
+            or image.compare_image(self, 'main_page_startup-promo-dismiss-dark')):
         feature, click = 'main_page_startup-promo-dismiss', (1173, 75)
-    elif (image.compare_image(self, 'main_page_news-webview')
+    # The news list and article view select different toolbar icons.
+    elif ((image.compare_image(self, 'main_page_news-webview')
+            or image.compare_image(self, 'main_page_news-webview-detail'))
             and image.compare_image(self, 'main_page_news-webview-close')):
         feature, click = 'main_page_news-webview', (1214, 43)
     elif image.compare_image(self, 'main_page_login-store'):

@@ -5,7 +5,6 @@ REPO_BRANCH = "master"
 class GetShaMethod(Enum):
     GITHUB_API = auto()
     PYGIT2 = auto()
-    MIRRORC_API = auto()
 
 
 get_remote_sha_methods = [
@@ -15,10 +14,6 @@ get_remote_sha_methods = [
         "owner": "pur1fying",
         "repo": "blue_archive_auto_script",
         "branch": REPO_BRANCH,
-    },
-    {
-        "name": "mirrorc",
-        "method": GetShaMethod.MIRRORC_API,
     },
     {
         "name": "gitee",

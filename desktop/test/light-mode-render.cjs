@@ -6,6 +6,7 @@ const path = require('path');
 const http = require('http');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { WindowMemoryMode, attachWindowSettings, readWindowMode } = require('../window-mode.cjs');
+const { BackendRecovery, attachBackendRecovery } = require('../backend-recovery.cjs');
 const { showMessage } = require('../message-window.cjs');
 
 app.setPath('userData', process.env.YAB_LIGHT_MODE_TEST_DATA);
@@ -35,7 +36,7 @@ async function main() {
   let serveFrontend = false;
   const server = http.createServer(async (request, response) => {
     requests++;
-    if (serveFrontend) {
+    if (serveFrontend && request.url !== '/bridge-only') {
       const pathname = new URL(request.url, 'http://localhost').pathname;
       const filename = pathname.startsWith('/assets/') ? pathname.slice(1) : 'index.html';
       const type = filename.endsWith('.js') ? 'text/javascript' : filename.endsWith('.css') ? 'text/css' : 'text/html';
@@ -51,6 +52,9 @@ async function main() {
   const url = `http://127.0.0.1:${server.address().port}/`;
   const settingsFile = path.join(process.env.YAB_LIGHT_MODE_TEST_DATA, 'desktop-settings.json');
   attachWindowSettings(ipcMain, { mode, filename: settingsFile,
+    getWindow: () => mode.window, pageUrl: () => url });
+  const recovery = new BackendRecovery({ restart: async () => { throw new Error('Unexpected backend restart'); } });
+  attachBackendRecovery(ipcMain, { recovery,
     getWindow: () => mode.window, pageUrl: () => url });
   const create = async state => {
     windowsCreated++;
@@ -74,6 +78,7 @@ async function main() {
     window.close();
     assert.equal(window.isDestroyed(), false, 'startup must keep its window');
     ready = true;
+    assert.deepEqual(await window.webContents.executeJavaScript('window.yabDesktop.getBackendState()'), recovery.snapshot());
     await window.webContents.executeJavaScript('location.hash = "#/default_config/schedule"; document.querySelector("input").value = "未保存"');
     window.setBounds({ x: 80, y: 90, width: 1024, height: 700 });
     const expectedBounds = window.getBounds();
@@ -265,22 +270,28 @@ async function main() {
     assert.equal(await window.webContents.executeJavaScript('window.yabDesktop.setCloseAction("invalid").then(() => false, () => true)'), true);
     const other = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true,
       preload: path.resolve(__dirname, '../preload.js') } });
-    await other.loadURL(url);
+    await other.loadURL(url + 'bridge-only');
     assert.equal(await other.webContents.executeJavaScript('window.yabDesktop.setCloseAction("开启轻量模式").then(() => false, () => true)'), true);
     other.destroy();
-    await window.webContents.executeJavaScript('location.hash = "#/update"');
+    // The legacy update form belongs to ordinary browsers. Desktop updates
+    // have a separate real-updater regression with their privileged bridge.
+    const browser = new BrowserWindow({ show: false, width: 1280, height: 800,
+      webPreferences: { sandbox: true, contextIsolation: true, offscreen: true } });
+    await browser.loadURL(url + '#/update');
     for (let count = 0; count < 100; count++) {
-      if (await window.webContents.executeJavaScript('Boolean(document.querySelector("#upd-sha"))')) break;
+      if (await browser.webContents.executeJavaScript('Boolean(document.querySelector("#upd-sha"))')) break;
       await sleep(20);
     }
     for (const width of [1280, 960]) {
-      window.setSize(width, 800);
+      browser.setSize(width, 800);
       await sleep(30);
-      assert.equal(await window.webContents.executeJavaScript(`(() => {
+      assert.equal(await browser.webContents.executeJavaScript(`(() => {
         const page = document.querySelector('.page');
         const titles = Array.from(document.querySelectorAll('.settings-card h2'));
         const fields = Array.from(document.querySelectorAll('.settings-card .field'));
-        return page.scrollWidth <= page.clientWidth && titles.length === 2 && fields.length === 3
+        return page.scrollWidth <= page.clientWidth && titles.length === 2 && fields.length === 2
+          && !document.querySelector('#upd-cdk')
+          && !Array.from(document.querySelectorAll('#upd-sha option')).some(option => /mirror/i.test(option.value))
           && titles.every(title => getComputedStyle(title).color === 'rgb(122, 162, 247)' && getComputedStyle(title).fontSize === '15px')
           && fields.every(field => {
             const label = field.querySelector('label').getBoundingClientRect();
@@ -289,12 +300,13 @@ async function main() {
           });
       })()`), true);
     }
+    browser.destroy();
     await window.webContents.executeJavaScript('location.hash = "#/default_config/settings"');
     await settingsReady();
     mode.ask = owner => showMessage(owner, { message: '关闭窗口后开启轻量模式？',
       detail: '轻量模式会释放界面，后台任务继续运行。',
       buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
-      checkboxLabel: '下次不再提示', checkboxChecked: true }, { show: false });
+      checkboxLabel: '下次不再提示', checkboxChecked: true }, { show: false, hideParentOnResponse: true });
     const waitForDialog = async owner => {
       for (let count = 0; count < 100; count++) {
         const dialog = BrowserWindow.getAllWindows().find(item => item !== owner);
@@ -313,19 +325,40 @@ async function main() {
     assert.equal(window.isDestroyed(), false);
     assert.equal(mode.closeAction, '询问');
     // Unchecking the default checkbox applies this choice only once.
+    const visibility = [];
+    window.on('show', () => visibility.push('show'));
+    window.on('hide', () => visibility.push('hide'));
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
-    await dialog.webContents.executeJavaScript('document.querySelector("#remember").checked = false; document.querySelectorAll("button")[1].click()');
+    // Queue the click after this evaluation has returned, so closing the
+    // dialog cannot dispose a renderer that still owes us an evaluation reply.
+    await dialog.webContents.executeJavaScript('document.querySelector("#remember").checked = false; setTimeout(() => document.querySelectorAll("button")[1].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), false);
+    assert.equal(visibility.includes('show'), false, 'Closing the prompt must not briefly show the parent page.');
     assert.equal(mode.closeAction, '询问');
-    // Remembering the light-mode choice releases the renderer and persists it.
+    // The first persisted choice writes desktop-settings.json while the page is
+    // already hidden, so a slow first write cannot expose it for one frame.
     mode.save = action => require('../window-mode.cjs').saveWindowMode(settingsFile, action);
+    visibility.length = 0;
     closing = mode.requestClose(window);
     dialog = await waitForDialog(window);
-    await dialog.webContents.executeJavaScript('document.querySelectorAll("button")[0].click()');
+    await dialog.webContents.executeJavaScript('setTimeout(() => document.querySelectorAll("button")[1].click(), 0)');
+    await closing;
+    assert.equal(window.isDestroyed(), false);
+    assert.equal(visibility.includes('show'), false, 'Persisting the first choice must not expose the parent page.');
+    assert.equal(readWindowMode(settingsFile), '仅关闭窗口');
+    assert.equal(mode.closeAction, '仅关闭窗口');
+    window.show();
+    mode.closeAction = '询问';
+    // Remembering the light-mode choice releases the renderer and persists it.
+    visibility.length = 0;
+    closing = mode.requestClose(window);
+    dialog = await waitForDialog(window);
+    await dialog.webContents.executeJavaScript('setTimeout(() => document.querySelectorAll("button")[0].click(), 0)');
     await closing;
     assert.equal(window.isDestroyed(), true);
+    assert.equal(visibility.includes('show'), false, 'Releasing from the first prompt must not expose the parent page.');
     assert.equal(readWindowMode(settingsFile), '开启轻量模式');
     assert.equal(mode.closeAction, '开启轻量模式');
     mode.state.url = 'https://example.com/';

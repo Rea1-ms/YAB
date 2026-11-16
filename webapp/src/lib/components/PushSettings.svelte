@@ -55,11 +55,13 @@
 
   function changeProvider(index: number, provider: string): void {
     dirty = true;
-    channels[index] = { ...channels[index], provider, params: {} };
+    channels[index] = { ...channels[index], provider, params: {}, proxy: provider === 'system' ? '' : channels[index].proxy };
     extraDrafts[index] = '{}';
   }
 
   function buildChannel(index: number): PushChannel {
+    const channel = channels[index];
+    if (channel.provider === 'system') return { ...channel, params: {}, proxy: '' };
     let extra: unknown;
     try {
       extra = JSON.parse(extraDrafts[index] || '{}');
@@ -69,7 +71,6 @@
     if (!extra || typeof extra !== 'object' || Array.isArray(extra)) {
       throw new Error(tNow()('更多参数需要填写有效的 JSON 对象'));
     }
-    const channel = channels[index];
     const required = Object.fromEntries(requiredKeys(channel.provider).map((key) => [key, channel.params[key] ?? '']));
     return { ...channel, params: { ...extra, ...required } };
   }
@@ -105,13 +106,14 @@
 
 <section class="card settings-card push-settings">
   <h2>{$t('推送通知')}</h2>
-  <p class="hint">{$t('使用 OnePush，可同时配置多个渠道。旧推送配置会自动沿用。')}</p>
+  <p class="hint">{$t('支持本机系统通知和多个远程渠道。旧推送配置会自动沿用。')}</p>
   {#each [['push_after_error', '出错时推送'], ['push_after_completion', '完成后推送']] as [key, label] (key)}
     <div class="field">
       <label for={key}>{$t(label)}</label>
       <div class="ctl"><Switch checked={Boolean($argsStore?.[key])} label={label} onchange={(value) => void setConfigValue(dir, key, value)} /></div>
     </div>
   {/each}
+  <p class="hint">{$t('完成后推送包括一轮日常任务完成，以及剧情推进、活动一键执行中的单次任务完成；手动停止不会发送完成通知。')}</p>
 
   {#each channels as channel, index (index)}
     <div class="push-channel">
@@ -130,6 +132,9 @@
           </select>
         </div>
       </div>
+      {#if channel.provider === 'system'}
+        <p class="hint">{$t('使用 Windows（视窗系统）通知，无需填写参数；通知显示在运行脚本的电脑上，关闭网页后仍可接收。')}</p>
+      {:else}
       {#each requiredKeys(channel.provider) as key (key)}
         <div class="field">
           <label for={`push-${index}-${key}`}>{$t(labels[key] ?? key)}</label>
@@ -162,6 +167,7 @@
         <textarea class="input extra-params" rows="4" aria-label={$t('更多参数')} disabled={busy} spellcheck="false"
           value={extraDrafts[index] ?? '{}'} oninput={(event) => { dirty = true; extraDrafts[index] = event.currentTarget.value; }}></textarea>
       </details>
+      {/if}
       <button class="btn small" type="button" disabled={busy} onclick={() => testChannel(index)}>
         {testing === index ? $t('发送中…') : $t('发送测试通知')}
       </button>

@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, dialog, nativeTheme } = require('electron');
+const { app, BrowserWindow, dialog, nativeTheme, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
@@ -8,16 +8,53 @@ const { showMessage } = require('../message-window.cjs');
 app.setPath('userData', process.env.YAB_DIALOG_TEST_DATA);
 app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
+const timeline = [];
+app.on('web-contents-created', (_event, contents) => {
+  // These previews are never shown. Keep their renderers active just as the
+  // other hidden UI regressions do, regardless of desktop visibility.
+  contents.setBackgroundThrottling(false);
+  const record = (event, data) => timeline.push({ at: Date.now(), id: contents.id, event, ...data });
+  for (const event of ['did-start-loading', 'dom-ready', 'did-finish-load', 'did-stop-loading']) {
+    contents.on(event, () => record(event));
+  }
+  contents.on('console-message', event => record('console', { level: event.level, message: event.message }));
+  contents.on('preload-error', (_event, preload, error) => record('preload-error', { preload, message: error.message }));
+  contents.on('did-fail-load', (_event, code, message, url) => record('did-fail-load', { code, message, url }));
+  contents.on('render-process-gone', (_event, details) => record('render-process-gone', details));
+});
 async function ready(window) {
   const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (window.isDestroyed()) throw new Error('Message preview closed before becoming ready');
-    if (!window.webContents.isLoading() && await window.webContents.executeJavaScript("document.querySelectorAll('button').length > 0")) return;
-    await delay(30);
-  }
-  throw new Error('Message preview did not become ready within 10 seconds');
+  let watchdog;
+  const initialized = await Promise.race([
+    (async () => {
+      while (Date.now() < deadline) {
+        if (window.isDestroyed()) throw new Error('Message preview closed before becoming ready');
+        if (!window.webContents.isLoading() && await window.webContents.executeJavaScript("document.querySelectorAll('button').length > 0")) return true;
+        await delay(30);
+      }
+      return false;
+    })(),
+    new Promise(resolve => { watchdog = setTimeout(() => resolve(false), 10000); }),
+  ]).finally(() => clearTimeout(watchdog));
+  if (initialized) return;
+  const contents = window.webContents;
+  const state = { url: contents.getURL(), loading: contents.isLoading(), mainFrameLoading: contents.isLoadingMainFrame() };
+  // A renderer stuck during navigation may not answer even a diagnostic query.
+  // Preserve the main-process evidence before attempting a bounded page read.
+  const report = path.join(app.getPath('userData'), 'readiness-failure.json');
+  fs.writeFileSync(report, JSON.stringify({ state, timeline }, null, 2));
+  state.page = await Promise.race([
+    contents.executeJavaScript("({ready: document.readyState, buttons: document.querySelectorAll('button').length, bridge: Boolean(window.yabMessage), body: document.body?.innerText})")
+      .catch(error => ({ error: error.message })),
+    delay(300).then(() => ({ error: 'Renderer did not answer the diagnostic query' })),
+  ]);
+  fs.writeFileSync(report, JSON.stringify({ state, timeline }, null, 2));
+  throw new Error('Message preview did not become ready within 10 seconds: ' + JSON.stringify({ state, timeline, report }));
 }
 app.whenReady().then(async () => {
+  session.defaultSession.webRequest.onErrorOccurred(details => {
+    timeline.push({ at: Date.now(), id: details.webContentsId, event: 'resource-error', url: details.url, error: details.error });
+  });
   const systemDark = nativeTheme.shouldUseDarkColors;
   for (const theme of [process.env.YAB_DIALOG_TEST_THEME]) {
     nativeTheme.themeSource = theme;
@@ -52,7 +89,8 @@ app.whenReady().then(async () => {
     await other.loadURL('data:text/html,<html><body>untrusted window</body></html>');
     assert.equal(await other.webContents.executeJavaScript("window.yabMessage.get().then(() => false, error => error.message.includes('无效的消息请求'))"), true);
     other.destroy();
-    await window.webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    // Return from evaluation before the action closes its renderer.
+    await window.webContents.executeJavaScript("setTimeout(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 0)");
     assert.equal((await result).response, 1);
     const next = showMessage(owner, { message: '启动失败', buttons: ['确定'] }, { show: false });
     const single = BrowserWindow.getAllWindows().find(value => value !== owner);
@@ -63,7 +101,7 @@ app.whenReady().then(async () => {
     const contrast = await single.webContents.executeJavaScript("({bg:getComputedStyle(document.documentElement).backgroundColor,fg:getComputedStyle(document.documentElement).color})");
     assert.notEqual(contrast.bg, contrast.fg);
     single.webContents.debugger.detach();
-    await single.webContents.executeJavaScript("document.querySelector('button').click()");
+    await single.webContents.executeJavaScript("setTimeout(() => document.querySelector('button').click(), 0)");
     assert.equal((await next).response, 0);
     const closed = showMessage(owner, { message: '已继续使用上一版本', buttons: ['确定', '取消'] }, { show: false });
     const closing = BrowserWindow.getAllWindows().find(value => value !== owner);
@@ -73,6 +111,7 @@ app.whenReady().then(async () => {
     owner.destroy();
   }
   const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  console.log('MESSAGE_SHELL_READY');
   const file = await dialog.showOpenDialog(window, { title: 'YAB-PREVIEW:file:3', properties: ['openFile'],
     filters: [{ name: 'uv', extensions: ['exe'] }] });
   fs.writeFileSync(path.join(app.getPath('userData'), 'result.json'), JSON.stringify({ file, systemDark }));

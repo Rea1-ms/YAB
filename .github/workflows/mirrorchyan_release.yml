@@ -1,34 +1,14 @@
-name: mirrorchyan_release
+# 旧分发流程已停用；保留文件，不上传文件或发布说明。
+name: mirrorchyan_release_disabled
 
 on:
   workflow_dispatch:
-  release:
-    types: [released]
+
+permissions: {}
 
 jobs:
-  mirrorchyan:
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            filename: "BlueArchiveAutoScript_*_amd64.deb"
-          - os: win
-            arch: x64
-            filename: "BlueArchiveAutoScript_*_win_x86_64.exe"
-
+  disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: MirrorChyan/uploading-action@v1
-        with:
-          filetype: latest-release
-          filename: ${{ matrix.filename }}
-          mirrorchyan_rid: BAAS
-
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          owner: pur1fying
-          repo: blue_archive_auto_script
-          upload_token: ${{ secrets.MirrorChyanUploadToken }}
-          os: ${{ matrix.os }}
-          arch: ${{ matrix.arch }}
+      - run: echo "Legacy distribution is disabled."

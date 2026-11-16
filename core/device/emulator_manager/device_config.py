@@ -47,7 +47,7 @@ def device_config(simulator_type, multi_instance, latest_adb_address=None, lates
     }
 
     # 确保目录存在
-    os.makedirs('./config', exist_ok=True)
+    os.makedirs(DEVICE_CONFIG_PATH, exist_ok=True)
 
     # 将字典存储到json文件中
     with open(DEVICE_CONFIG_PATH + 'device.json', 'w') as f:

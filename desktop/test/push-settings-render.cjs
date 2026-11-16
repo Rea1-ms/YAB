@@ -64,7 +64,7 @@ async function main() {
   }
 
   await window.loadURL(`${url}/#/account/settings`);
-  await waitFor('document.querySelector("#push-provider-0")?.options.length === 18');
+  await waitFor('Array.from(document.querySelector("#push-provider-0")?.options ?? []).some(option => option.value === "system")');
   assert.equal(await run('document.querySelector("#push-0-token").value'), 'offline-ui-token');
   assert.equal(await run('document.querySelector("#push-proxy-0").value'), 'http://127.0.0.1:1080');
   await click('添加渠道');
@@ -87,6 +87,28 @@ async function main() {
   await click('保存推送设置');
   await waitFor('document.querySelector(".push-actions .primary").disabled');
 
+  // Native notifications have no credential or proxy controls. Test a disabled
+  // draft with the task triggers still off, and preserve it across a reload.
+  await click('添加渠道');
+  await input('#push-proxy-2', 'http://127.0.0.1:1080');
+  await input('#push-provider-2', 'system', 'change');
+  assert.equal(await run('document.querySelectorAll(".push-channel")[2].querySelectorAll("input, textarea").length'), 0);
+  assert.equal(await run('document.querySelector("#push-proxy-2")'), null);
+  await run('document.querySelectorAll(".push-channel")[2].querySelector(".channel-head [role=switch]").click()');
+  await run('document.querySelectorAll(".push-channel")[2].querySelector(":scope > button").click()');
+  await waitFor('Array.from(document.querySelectorAll(".toast")).some(item => item.textContent.includes("已提交系统通知"))');
+  const deliveries = JSON.parse(await fs.readFile(path.join(scratch, 'deliveries.json'), 'utf8'));
+  assert.equal(deliveries.length, 2);
+  assert.equal(deliveries[1].method, 'system');
+  assert.equal(deliveries[1].app_id, 'YAB');
+  assert.equal((await saved()).length, 2, 'testing a system draft must not save it');
+  await click('保存推送设置');
+  await waitFor('document.querySelector(".push-actions .primary").disabled');
+  assert.deepEqual((await saved())[2], { provider: 'system', enabled: false, params: {}, proxy: '' });
+  await window.webContents.reload();
+  await waitFor('document.querySelector("#push-provider-2")?.value === "system"');
+  assert.equal(await run('document.querySelectorAll(".push-channel")[2].querySelector(".channel-head [role=switch]").getAttribute("aria-checked")'), 'false');
+
   const measurements = [];
   for (const width of [1440, 900]) {
     window.setSize(width, 1000);
@@ -105,6 +127,7 @@ async function main() {
 
   await click('移除渠道');
   await click('移除渠道');
+  await click('移除渠道');
   await click('保存推送设置');
   await waitFor('document.querySelector(".push-actions .primary").disabled');
   assert.deepEqual(await saved(), []);
@@ -112,7 +135,7 @@ async function main() {
   await waitFor('document.querySelector(".push-settings .empty")?.textContent.includes("尚未配置推送渠道")');
   assert.equal(await run('document.querySelectorAll(".push-channel").length'), 0);
   assert.deepEqual(errors, []);
-  await fs.writeFile(path.join(scratch, 'result.json'), JSON.stringify({ measurements, mockDeliveries: 1 }, null, 2));
+  await fs.writeFile(path.join(scratch, 'result.json'), JSON.stringify({ measurements, mockDeliveries: 2 }, null, 2));
   console.log('PUSH_SETTINGS_OK ' + JSON.stringify(measurements));
 }
 

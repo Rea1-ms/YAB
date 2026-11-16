@@ -27,10 +27,12 @@ from develop_tools.test.offline_support import (
 
 SUITES = {
     'popups': ('develop_tools.test.test_main_page_popups',),
+    'activity': ('develop_tools.test.test_current_activity',),
     'shop': ('develop_tools.test.test_shop_selection',),
     'drill': ('develop_tools.test.test_joint_firing_drill',),
     'version': ('develop_tools.test.test_version_info',),
-    'infrastructure': ('develop_tools.test.test_offline_runner',),
+    'screenshot': ('develop_tools.test.test_screenshot_failures',),
+    'infrastructure': ('develop_tools.test.test_offline_runner', 'develop_tools.test.test_task_errors'),
 }
 
 

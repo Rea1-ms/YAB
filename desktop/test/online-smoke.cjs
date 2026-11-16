@@ -1,13 +1,14 @@
 'use strict';
 
-// Explicit network test; intentionally excluded from the default test command.
+// Explicit packaged startup test; online bundles may access the network.
+// Intentionally excluded from the default test command.
 // node test/online-smoke.cjs --bundle <backend> [--app <YAB.exe>] [--index aliyun]
 const fs = require('fs/promises');
 const path = require('path');
 const net = require('net');
 const assert = require('assert/strict');
 const { spawn } = require('child_process');
-const { prepareRuntime } = require('../runtime.cjs');
+const { prepareRuntime, verifyBundle } = require('../runtime.cjs');
 const { saveRuntimeSettings } = require('../runtime-settings.cjs');
 
 const arg = (name, fallback) => {
@@ -23,8 +24,10 @@ async function main() {
   const data = path.join(scratch, 'data');
   const configRoot = path.join(scratch, 'config');
   const manifest = JSON.parse(await fs.readFile(path.join(bundle, 'bundle.json')));
-  const settings = { uvMode: arg('--uv-mode', manifest.uv), uvPath: arg('--uv-path', ''), index: arg('--index', 'pypi') };
-  await saveRuntimeSettings(configRoot, data, settings);
+  const settings = manifest.format === 3
+    ? { uvMode: arg('--uv-mode', manifest.uv), uvPath: arg('--uv-path', ''), index: arg('--index', 'pypi') }
+    : null;
+  if (settings) await saveRuntimeSettings(configRoot, data, settings);
   console.log('测试目录：' + scratch);
   let previousMessage;
   const progress = (message, percent) => {
@@ -34,6 +37,7 @@ async function main() {
   const first = await prepareRuntime(bundle, data, { configRoot, progress, output: text => process.stdout.write(text) });
   const second = await prepareRuntime(bundle, data, { configRoot });
   assert.equal(second.python, first.python);
+  assert.equal(first.root, path.join(bundle, 'app'));
   const report = { bundle, settings, runtime: first, reused: true };
   const executable = arg('--app');
   if (executable) {
@@ -59,6 +63,13 @@ async function main() {
     report.backendAndOcr = true;
     report.repeatedLaunch = true;
   }
+  for (const name of ['versions', 'backups', 'updates']) await assert.rejects(fs.access(path.join(data, name)));
+  for (const name of ['config', 'core/ocr/baas_ocr_client/bin/config', 'core/ocr/baas_ocr_client/bin/output']) {
+    await assert.rejects(fs.access(path.join(bundle, 'app', name)));
+  }
+  await verifyBundle(bundle, manifest);
+  report.noProgramCopies = true;
+  report.installationUnchanged = true;
   await fs.writeFile(path.join(scratch, 'result.json'), JSON.stringify(report, null, 2));
   console.log('ONLINE_SMOKE_OK ' + scratch);
 }

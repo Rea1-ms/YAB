@@ -73,6 +73,47 @@
         "description": "既有裁剪样本，原图来源未记录"
       }
     },
+    "global_news_detail_20261115": {
+      "path": "global_news_detail_20261115.png",
+      "sha256": "387648a9a5c21d1437814e002841a92c8592fde55deb4db877c6dcee274ad5bc",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服公告详情页：列表图标选中，主页图标未选中",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_closes_before_accepting_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_does_not_apply_to_other_servers",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_does_not_depend_on_article_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_requires_toolbar_and_close_button",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_news_detail_retry_waits_for_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_reported_news_detail_closes_in_all_languages_and_resolutions"
+      ],
+      "source": {
+        "filename": "ba-stuck.png",
+        "sha256": "0a81c67a3c66e345b4d2e2094a94d565c0e2a89127331d2da84c433e963012f0",
+        "registered_on": "2026-11-15",
+        "captured_on": null,
+        "language": "zh-tw"
+      },
+      "redactions": [
+        [
+          0,
+          0,
+          285,
+          84
+        ],
+        [
+          500,
+          0,
+          1040,
+          65
+        ]
+      ]
+    },
     "global_shop_last_row": {
       "path": "global_shop_last_row.png",
       "sha256": "10e70c9dea72aff6ad48884088fbd3b7c784b724d2cf20553fcb5cecc1a51c59",
@@ -284,6 +325,367 @@
       ],
       "source": {
         "description": "既有裁剪样本，原图来源未记录"
+      }
+    },
+    "global_download_essential": {
+      "path": "global_download_essential.png",
+      "sha256": "92b2e1d4736aadde528db72b3c1f6c317b88f150a843a4ee742866e741d77a17",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服英文：必要游戏资源下载确认",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_start_confirms_both_downloads_with_scaled_device_clicks",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_download_stop_prevents_more_clicks_and_restart_errors",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_downloads_cannot_complete_with_only_legacy_templates"
+      ],
+      "source": {
+        "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
+        "filename": "shot-aurora-store-update5.png",
+        "sha256": "92b2e1d4736aadde528db72b3c1f6c317b88f150a843a4ee742866e741d77a17",
+        "redacted_regions": []
+      }
+    },
+    "global_download_additional": {
+      "path": "global_download_additional.png",
+      "sha256": "a8f17c8bfd23c40659b8b4422ccec13bd21c402009dbbc214eaa6f6858f5ff21",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服英文：追加游戏资源下载确认",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_prompts_confirm_at_all_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_sequence_waits_for_home_and_throttles_confirm",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_confirm_without_next_screen_cannot_finish",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_resource_download_recognition_ignores_file_size_but_requires_download_text",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_start_confirms_both_downloads_with_scaled_device_clicks",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_download_stop_prevents_more_clicks_and_restart_errors",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_downloads_cannot_complete_with_only_legacy_templates"
+      ],
+      "source": {
+        "description": "用户提供的完整游戏截图；无账号信息，未裁剪或遮盖，采集时间未知",
+        "filename": "shot-aurora-store-update6.png",
+        "sha256": "a8f17c8bfd23c40659b8b4422ccec13bd21c402009dbbc214eaa6f6858f5ff21",
+        "redacted_regions": []
+      }
+    },
+    "global_startup_promo_livestream": {
+      "path": "global_startup_promo_livestream.png",
+      "sha256": "fc118e785dfedfbf7c8b19748cddf79a58946e0f940b87f46c5958fb0b86186c",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：直播预告，蓝色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-ba-stuck-popup-again.png",
+        "sha256": "608a61820e650c1fc3db487c7a310fa97e911bfb4632ce360cbd1ccc142c4780",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_fest_character_background": {
+      "path": "global_startup_promo_fest_character_background.png",
+      "sha256": "0f0818ad79ae77efdff19c125a49941f2f099af62488d540de4a683b9bac3ce7",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：学生自选券，角色背景与浅色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-stuck-1.png",
+        "sha256": "405bb912b487254ab4d36f91b14dbc0edfb3a5717c38c30a1554b5b2bcbd62c9",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_fest_city_background": {
+      "path": "global_startup_promo_fest_city_background.png",
+      "sha256": "a8a70e5c9737ced313e844430184f6b0bb6dff72b110c3d6a3b9cee9cdfacabe",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：学生自选券，城市背景与浅色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-popup-1111.png",
+        "sha256": "69bc6f1d0848bc2b4237462d5d5ba7ee7224981e05a43a1e61c4be9afaedb1c9",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_startup_promo_preregistration": {
+      "path": "global_startup_promo_preregistration.png",
+      "sha256": "f6f34a2ff29767169d681869a7ad373e353d860c54e4192687c605ca28dbdb21",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服进游戏前活动提示：周年预约奖励，深色不再显示底栏，完整脱敏画面",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_in_all_languages_and_resolutions",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_require_footer_but_not_close_artwork",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_close_before_visible_home_features",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_retry_only_after_close_cooldown",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_cannot_finish_without_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_android_new_startup_sequence_scales_close_and_waits_for_home",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_new_startup_captures_do_not_apply_to_other_servers"
+      ],
+      "source": {
+        "filename": "shot-popup-1111-2.png",
+        "sha256": "8a2640dc2e249cd8cd205d4acd8cea1bbbed0e02c4fe29d6ed3c4145d011217b",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1120,
+          10,
+          1280,
+          35
+        ],
+        [
+          1205,
+          35,
+          1280,
+          80
+        ]
+      ]
+    },
+    "global_makoto_activity_home": {
+      "path": "global_makoto_activity_home.png",
+      "sha256": "41d43ab6590e782f76c163f03f6aedf1464545a27c94f3f3603f4541aefeece6",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：主页右上角入口，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_entry_matches_in_all_languages_and_resolutions",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_legacy_activity_does_not_match_new_entry",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_home_entry_waits_for_story_page_and_retries_missed_clicks",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_clicked_entry_without_observed_event_page_cannot_finish",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_missing_entry_artwork_never_clicks_the_activity_position",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-1.png",
+        "sha256": "0d073770ad85dc876ed99688085174c0dca4ab90e422a620a0bfad7acac82649",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          76,
+          18,
+          248,
+          52
+        ],
+        [
+          500,
+          16,
+          1035,
+          56
+        ]
+      ]
+    },
+    "global_makoto_activity_story": {
+      "path": "global_makoto_activity_story.png",
+      "sha256": "74750d2667d5f8b79b115c5d5e1ba00e22e6ed5ef120a797e09fa26df4b7cf05",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：故事标签选中，无独立挑战页，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_home_entry_waits_for_story_page_and_retries_missed_clicks",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_retries_without_accepting_stale_story_page",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_to_story_uses_the_two_tab_layout",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_without_observed_selection_cannot_finish",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-2.png",
+        "sha256": "6226db43491d8e8c399225a60bdcc2775c8948535f7528156bb9187e1ba32664",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          478,
+          0,
+          1118,
+          42
+        ]
+      ]
+    },
+    "global_makoto_activity_quest": {
+      "path": "global_makoto_activity_quest.png",
+      "sha256": "686f77fdd3ea2da5dff12ee294381536156c937fe9252f9a1255bb83e500a9c4",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服真琴夏日活动：任务标签选中，无独立挑战页，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_retries_without_accepting_stale_story_page",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_to_story_uses_the_two_tab_layout",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+      ],
+      "source": {
+        "filename": "ba-activity-3.png",
+        "sha256": "3f2805409fc2ff39fbba9122aad3f40bd4528c6986d451966b93d9682d4e9cfb",
+        "registered_on": "2026-11-12",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          478,
+          0,
+          1118,
+          42
+        ]
+      ]
+    },
+    "global_home_mumu_20261113": {
+      "path": "global_home_mumu_20261113.png",
+      "sha256": "0c1b5c483812987350c9153b6ea1368b12f1ccd920402b8bcd3b5d2ed19d2d55",
+      "size": [
+        2560,
+        1440
+      ],
+      "scene": "国际服繁体中文主页：MuMu 原生截图颜色与主页识别",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reported_home_is_recognized_through_native_capture",
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_reference_rgb_and_yab_bgr_preserve_the_same_colors",
+        "develop_tools.test.test_screenshot_failures.ScreenshotFailureTests.test_adb_nc_home_colors_match_png_for_supported_pixel_formats"
+      ],
+      "source": {
+        "description": "用户提供的 MuMu-20261113-142253-591.zip 中的同名截图；保留原尺寸，遮盖账号名、等级与资源数值",
+        "archive_entry": "MuMu-20261113-142253-591.png",
+        "original_sha256": "c07b49c3823bc126016ddd212955e0b48d85a16f1fdc419ce8d703e5e6fa133b",
+        "captured_at": null,
+        "redacted_regions": [
+          [
+            0,
+            0,
+            560,
+            165
+          ],
+          [
+            1000,
+            0,
+            2095,
+            115
+          ]
+        ]
       }
     }
   }

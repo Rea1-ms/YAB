@@ -7,6 +7,7 @@ from copy import deepcopy
 import onepush
 import requests
 
+from core import notification
 from core.push_config import validate_channels
 
 REQUEST_TIMEOUT = 10
@@ -73,6 +74,10 @@ def send_channel(channel, title, content):
         validate_channels([channel], require_complete=True)
         if not channel['enabled']:
             return {**result, 'message': '该推送渠道已停用'}
+        if provider == 'system':
+            if not notification.notify(title=title, body=content):
+                return {**result, 'message': '本机系统通知不可用，请在 Windows（视窗系统）上安装通知组件后重试'}
+            return {**result, 'success': True, 'message': '已提交系统通知'}
         notifier = onepush.get_notifier(provider)
         params = deepcopy(channel['params'])
         params.update(title=title, content=content)

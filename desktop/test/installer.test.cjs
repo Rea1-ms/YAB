@@ -207,7 +207,25 @@ test('generated uninstall cleanup includes the icon and retries only packaged em
   await fs.writeFile(path.join(backend, 'bundle.json'), '{"format":2}');
   await fs.writeFile(path.join(backend, 'app/server/__main__.py'), '# fixture\n');
   await fs.writeFile(path.join(appOutDir, 'YAB.exe'), 'fixture, not an executable');
-  execute(process.execPath, ['-e', 'require(process.argv[1]).afterPack({ appOutDir: process.argv[2] });',
+  execute(process.execPath, ['-e', `
+    (async () => {
+      const fs = require('node:fs/promises');
+      const path = require('node:path');
+      const { createRequire } = require('node:module');
+      const fromBuilder = createRequire(createRequire(require.resolve('electron-builder')).resolve('app-builder-lib'));
+      const asar = fromBuilder('@electron/asar');
+      const config = require(process.argv[1]);
+      const input = path.join(process.argv[2], '..', 'asar-input');
+      await fs.mkdir(input, { recursive: true });
+      for (const name of ['main.js', 'preload.js', 'updater.cjs', 'update-config.cjs']) {
+        await fs.copyFile(path.join(path.dirname(process.argv[1]), name), path.join(input, name));
+      }
+      const dependency = path.join(input, 'node_modules/electron-updater/out');
+      await fs.mkdir(dependency, { recursive: true });
+      await fs.copyFile(require.resolve('electron-updater'), path.join(dependency, 'main.js'));
+      await asar.createPackage(input, path.join(process.argv[2], 'resources/app.asar'));
+      config.afterPack({ appOutDir: process.argv[2] });
+    })().catch(error => { console.error(error); process.exitCode = 1; });`,
     path.resolve(__dirname, '../electron-builder.cjs'), appOutDir], {
     env: { ...process.env, BAAS_BACKEND_DIR: backend, BAAS_RELEASE_DIR: release },
   });
@@ -906,6 +924,8 @@ Function testProgress
   SendMessage $1 0x404 25 0 ; PBM_SETSTEP
   SendMessage $1 0x405 0 0 ; PBM_STEPIT
   !insertmacro recordProgress
+  StrCpy $INSTDIR "$EXEDIR\installation folder"
+  CreateDirectory "$INSTDIR\resources"
   !insertmacro customInstall
   SendMessage $1 0x402 100 0
   !insertmacro recordProgress ; raw 100 must never imply successful completion
@@ -932,6 +952,10 @@ SectionEnd
   execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
   execute(executable, []);
   const lines = (await fs.readFile(path.join(scratch, 'status.txt'), 'utf16le')).trim().split(/\r?\n/);
+  const { installedAt } = require('../update-config.cjs');
+  const installation = path.join(scratch, 'installation folder');
+  assert.equal(installedAt(path.join(installation, 'YAB.exe'), path.join(installation, 'resources')), true);
+  assert.equal(installedAt(path.join(scratch, 'copied/YAB.exe'), path.join(installation, 'resources')), false);
   const readings = lines.slice(0, -1).map(line => {
     const [text, visible, raw] = line.split('|');
     return { text, visible: Number(visible), raw: Number(raw) };

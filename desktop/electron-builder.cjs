@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { updateConfig } = require('./update-config.cjs');
+const updates = updateConfig(process.env.YAB_BUILD_VARIANT || 'offline', process.env.YAB_UPDATE_URL);
 
 // Retry only directories belonging to this build, deepest first. Never walk
 // an installed directory at uninstall time or follow directory links.
@@ -25,11 +27,27 @@ if (!backend || !fs.existsSync(path.join(backend, 'bundle.json'))
 module.exports = {
   appId: 'org.baas.desktop', // Keep the installation identity so YAB upgrades the existing app.
   productName: 'YAB',
+  extraMetadata: { yabUpdate: updates },
+  publish: [{ provider: 'generic', url: updates.url, channel: updates.channel,
+    useMultipleRangeRequest: false }],
   asar: true,
   // Reuse the platform binary already provided by the local Electron package.
   electronDist: path.dirname(require('electron')),
   directories: { output: process.env.BAAS_RELEASE_DIR },
   afterPack(context) {
+    // Reject a mixed build if source files changed while asar was being written.
+    const { createRequire } = require('node:module');
+    const builderRequire = createRequire(createRequire(require.resolve('electron-builder')).resolve('app-builder-lib'));
+    const asar = builderRequire('@electron/asar');
+    const archive = path.join(context.appOutDir, 'resources', 'app.asar');
+    for (const filename of ['main.js', 'preload.js', 'updater.cjs', 'update-config.cjs']) {
+      if (!asar.extractFile(archive, filename).equals(fs.readFileSync(path.join(__dirname, filename)))) {
+        throw new Error(`构建期间源文件发生变化，请重新构建：${filename}`);
+      }
+    }
+    if (!asar.extractFile(archive, path.join('node_modules', 'electron-updater', 'out', 'main.js')).length) {
+      throw new Error('发行包缺少桌面更新依赖');
+    }
     // Remove only files shipped by this build. The installation-local config
     // directory survives upgrades and is removed on uninstall only by choice.
     const entries = fs.readdirSync(context.appOutDir, { withFileTypes: true });
@@ -80,8 +98,9 @@ module.exports = {
   },
   files: ['main.js', 'preload.js', 'runtime.cjs', 'runtime-settings.cjs', 'runtime-window.cjs',
     'runtime-preload.cjs', 'runtime-settings.html', 'runtime-settings-page.js', 'webui.cjs',
-    'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js',
-    'window-mode.cjs', 'message-window.cjs', 'message-preload.cjs', 'message.html', 'message-page.js', 'assets/**', 'package.json'],
+    'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js', 'backend-recovery.cjs',
+    'window-mode.cjs', 'message-window.cjs', 'message-preload.cjs', 'message.html', 'message-page.js',
+    'updater.cjs', 'update-config.cjs', 'assets/**', 'package.json'],
   extraResources: [{ from: backend, to: 'backend' }],
   artifactName: 'YAB-${version}-${arch}' + (process.env.YAB_BUILD_VARIANT?.startsWith('lite') ? '-' + process.env.YAB_BUILD_VARIANT : '') + '.${ext}',
   win: {

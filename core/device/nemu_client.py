@@ -1,11 +1,14 @@
-import asyncio
-import os
 import ctypes
-import time
-from functools import partial
+import os
 import sys
-import numpy as np
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from threading import Lock
+
 import cv2
+import numpy as np
+
 
 class NemuIpcIncompatible(Exception):
     pass
@@ -169,7 +172,9 @@ class NemuClient:
 
     def __init__(self, nemu_folder, instance_id, logger, display_id=0):
         self.lib = None
-        self._ev = asyncio.new_event_loop()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='nemu-ipc')
+        self._call_lock = Lock()
+        self._pending_call = None
         self.nemu_folder = nemu_folder
         self.instance_id = instance_id
         self.logger = logger
@@ -252,51 +257,29 @@ class NemuClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    async def ev_run_async(self, func, *args, timeout=0.15, **kwargs):
-        """
-        Args:
-            func: Sync function to call
-            *args:
-            timeout:
-            **kwargs:
+    def ev_run_sync(self, func, *args, timeout=0.5, **kwargs):
+        """Serialize native calls; a timeout cannot cancel a running DLL call."""
+        with self._call_lock:
+            if self._pending_call is not None and not self._pending_call.done():
+                raise NemuIpcError("MuMu 上一次调用尚未结束，已停止继续调用，请检查模拟器状态。")
+            future = self._executor.submit(func, *args, **kwargs)
+            self._pending_call = future
+            try:
+                result = future.result(timeout=timeout)
+            except FutureTimeoutError as exc:
+                # Keep the running operation and its pointer arguments alive. Do
+                # not queue retries while native code still uses those buffers.
+                raise NemuIpcError("MuMu 调用超时，请检查模拟器状态或切换截图及控制方式。") from exc
+            finally:
+                if future.done():
+                    self._pending_call = None
 
-        Raises:
-            asyncio.TimeoutError: If function call timeout
-        """
-        func_wrapped = partial(func, *args, **kwargs)
-        # Increased timeout for slow PCs
-        # Default screenshot interval is 0.2s, so a 0.15s timeout would have a fast retry without extra time costs
-        result = await asyncio.wait_for(self._ev.run_in_executor(None, func_wrapped), timeout=timeout)
-        return result
-
-    def ev_run_sync(self, func, *args, **kwargs):
-        """
-        Args:
-            func: Sync function to call
-            *args:
-            **kwargs:
-
-        Raises:
-            asyncio.TimeoutError: If function call timeout
-            NemuIpcIncompatible:
-            NemuIpcError
-        """
-        result = self._ev.run_until_complete(self.ev_run_async(func, *args, **kwargs))
-
-        err = False
-        if func.__name__ == 'nemu_connect':
-            if result == 0:
-                err = True
-        else:
-            if result > 0:
-                err = True
-        # Get to actual error message printed in std
-        if err:
-            self.logger.warning(f'Failed to call {func.__name__}, result={result}')
-            with CaptureNemuIpc(self.logger):
-                result = self._ev.run_until_complete(self.ev_run_async(func, *args, **kwargs))
-
-        return result
+            failed = result <= 0 if func.__name__ == 'nemu_connect' else result != 0
+            if failed:
+                # Repeating a failed call just to capture stderr can repeat input
+                # events and used to redirect process-wide stdout/stderr.
+                raise NemuIpcError(f'MuMu 调用 {func.__name__} 失败，返回码：{result}')
+            return result
 
     def get_resolution(self):
         """
@@ -315,23 +298,25 @@ class NemuClient:
         )
         if ret > 0:
             raise NemuIpcError('nemu_capture_display failed during get_resolution()')
-        self.width = width_ptr.contents.value
-        self.height = height_ptr.contents.value
+        width, height = width_ptr.contents.value, height_ptr.contents.value
+        if width <= 0 or height <= 0:
+            raise NemuIpcError(f'MuMu 返回无效截图尺寸：{width}x{height}')
+        self.width, self.height = width, height
+        return width, height
 
-    def screenshot(self, timeout=0.15):
+    def screenshot(self, timeout=0.5):
         """
         Returns:
-            np.ndarray: Image array in RGBA color space
-                Note that image is upside down
+            np.ndarray: Upright image in BGR order, matching other screenshot methods.
         """
         if self.connect_id == 0:
             self.connect()
 
-        self.get_resolution()
+        width, height = self.get_resolution()
 
-        width_ptr = ctypes.pointer(ctypes.c_int(self.width))
-        height_ptr = ctypes.pointer(ctypes.c_int(self.height))
-        length = self.width * self.height * 4
+        width_ptr = ctypes.pointer(ctypes.c_int(width))
+        height_ptr = ctypes.pointer(ctypes.c_int(height))
+        length = width * height * 4
         pixels_pointer = ctypes.pointer((ctypes.c_ubyte * length)())
 
         ret = self.ev_run_sync(
@@ -341,10 +326,13 @@ class NemuClient:
         )
         if ret > 0:
             raise NemuIpcError('nemu_capture_display failed during screenshot()')
+        if (width_ptr.contents.value, height_ptr.contents.value) != (width, height):
+            raise NemuIpcError('MuMu 截图期间分辨率发生变化，请重新截图。')
 
-        # image = np.ctypeslib.as_array(pixels_pointer, shape=(self.height, self.width, 4))
-        image = np.ctypeslib.as_array(pixels_pointer.contents).reshape((self.height, self.width, 4))
-        image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+        image = np.ctypeslib.as_array(pixels_pointer.contents).reshape((height, width, 4))
+        # MuMu's buffer is RGBA; YAB recognition expects BGR. This is equivalent
+        # to the upstream COLOR_BGRA2RGB constant, with explicit format names.
+        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
         cv2.flip(image, 0, dst=image)
         return image
 

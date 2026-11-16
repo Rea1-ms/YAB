@@ -43,5 +43,6 @@ test('real windows release renderers and restore once while the service keeps ru
     child.once('exit', code => { clearTimeout(watchdog); resolve({ code, logs }); });
   });
   assert.equal(result.code, 0, result.logs);
+  assert.doesNotMatch(result.logs, /No handler registered/);
   assert.match(result.logs, /LIGHT_MODE_OK/);
 });

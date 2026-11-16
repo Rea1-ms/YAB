@@ -40,14 +40,18 @@ const { app, BrowserWindow, Tray, Menu, shell, Notification, ipcMain } = require
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { randomBytes } = require('crypto');
 const { readWebSettings, probePort } = require('./webui.cjs');
 const { spawn } = require('child_process');
-const { desktopDataPath, prepareRuntime, activateRuntime, readActiveRuntime, restoreSettings, verifyBundle } = require('./runtime.cjs');
+const { desktopDataPath, prepareRuntime, recordRuntime } = require('./runtime.cjs');
 const { loadRuntimeSettings } = require('./runtime-settings.cjs');
 const { openRuntimeWindow } = require('./runtime-window.cjs');
 const { StartupProgress, createStartupScreen } = require('./startup.cjs');
 const { showMessage } = require('./message-window.cjs');
 const { WindowMemoryMode, readWindowMode, saveWindowMode, attachWindowSettings } = require('./window-mode.cjs');
+const { BackendRecovery, attachBackendRecovery } = require('./backend-recovery.cjs');
+const { updateConfig, installedAt } = require('./update-config.cjs');
+const { DesktopUpdater, attachDesktopUpdater, writeRecord, createNsisUpdater } = require('./updater.cjs');
 
 const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
 fs.mkdirSync(dataPath, { recursive: true });
@@ -74,26 +78,40 @@ let trayHintShown = false;
 let repoRoot = null;
 let serverPort = null;
 let packagedRuntime = null;
-let previousRuntime = null;
-let runtimeFallbackMessage = '';
+let desktopUpdater = null;
+let desktopUpdateBusy = false;
+let updateBackendStopped = false;
+const desktopUpdateToken = randomBytes(32).toString('hex');
 const preparation = new AbortController();
 const logLines = []; // 后端 stdout/stderr 环形缓冲
 const startup = new StartupProgress();
 const windowModeFile = path.join(dataPath, 'desktop-settings.json');
 const windowMode = new WindowMemoryMode({
-  canRelease: () => !quitting && backend?.healthy && startup.state.status === 'complete'
+  canRelease: () => !quitting && !desktopUpdateBusy && backend?.healthy && startup.state.status === 'complete'
     && !BrowserWindow.getAllWindows().some(window => window !== mainWindow),
   isQuitting: () => quitting,
   onHidden: released => notifyHiddenToTray(released),
   ask: window => showMessage(window, { title: '关闭窗口', message: '关闭窗口后开启轻量模式？',
     detail: '轻量模式会释放界面，后台任务继续运行。再次打开时会重新加载页面，未保存的输入会丢失。',
     buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
-    checkboxLabel: '下次不再提示', checkboxChecked: true }),
+    checkboxLabel: '下次不再提示', checkboxChecked: true }, { hideParentOnResponse: true }),
   save: action => saveWindowMode(windowModeFile, action),
   onError: error => showMessage(mainWindow, { type: 'error', message: '无法保存关闭窗口设置',
     detail: error.message, buttons: ['确定'] }),
 });
 attachWindowSettings(ipcMain, { mode: windowMode, filename: windowModeFile,
+  getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
+const backendRecovery = new BackendRecovery({
+  isQuitting: () => quitting || desktopUpdateBusy,
+  log,
+  restart: async () => {
+    await killBackendTree();
+    if (quitting) return;
+    try { await launchBackend(repoRoot, serverPort, { recovery: true }); }
+    catch (error) { await killBackendTree(); throw error; }
+  },
+});
+attachBackendRecovery(ipcMain, { recovery: backendRecovery,
   getWindow: () => mainWindow, pageUrl: () => mainPageUrl() });
 
 // ------------------------------ 小工具 ------------------------------
@@ -147,15 +165,10 @@ async function resolveRepoRoot() {
     if (fs.existsSync(path.join(bundle, 'bundle.json'))) {
       const userData = app.getPath('userData');
       const configRoot = path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config'));
-      previousRuntime = await readActiveRuntime(userData);
-      // A rollback must use the same configuration location as the candidate.
-      if (previousRuntime?.configRoot !== configRoot) previousRuntime = null;
       let online = false;
       let windowOptions;
       for (;;) try {
         const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
-        showPreparation('正在校验发行文件…', 2);
-        await verifyBundle(bundle, manifest, fraction => showPreparation('正在校验发行文件…', 2 + fraction * 14));
         online = manifest.format === 3;
         windowOptions = { parent: mainWindow, configRoot, userData, bundle, bundled: manifest.uv === 'bundled' };
         if (online && !SMOKE_MODE) {
@@ -175,14 +188,10 @@ async function resolveRepoRoot() {
         startup.fail(error.message);
         if (online) {
           const choice = await showMessage(mainWindow, { type: 'error', message: '运行环境准备失败',
-            detail: error.message, buttons: ['调整设置并重试', previousRuntime ? '使用上一版本' : '退出'], defaultId: 0, cancelId: 1 });
+            detail: error.message, buttons: ['调整设置并重试', '退出'], defaultId: 0, cancelId: 1 });
           if (choice.response === 0 && await openRuntimeWindow({ ...windowOptions, initial: true })) continue;
         }
-        if (!previousRuntime) throw error;
-        packagedRuntime = previousRuntime;
-        runtimeFallbackMessage = `新版本准备失败，已使用上一版本。\n${error.message}`;
-        log(runtimeFallbackMessage);
-        break;
+        throw error;
       }
       return packagedRuntime.root;
     }
@@ -237,7 +246,7 @@ function backendCandidates(root) {
 }
 
 // 尝试 spawn 一个候选。spawn 失败（如 ENOENT）返回 null 交给下一个候选。
-function trySpawnCandidate(candidate, listenArgs, root) {
+function trySpawnCandidate(candidate, listenArgs, root, { recovery = false } = {}) {
   return new Promise((resolve) => {
     let child;
     let settled = false;
@@ -247,7 +256,10 @@ function trySpawnCandidate(candidate, listenArgs, root) {
         cwd: root, // server 以仓库根为 cwd（读 config/、src/ 等相对路径）
         env: { ...process.env,
           ...(packagedRuntime?.configRoot ? { YAB_CONFIG_DIR: packagedRuntime.configRoot } : {}),
+          ...(packagedRuntime ? { YAB_DATA_DIR: packagedRuntime.dataRoot, YAB_OCR_DATA_DIR: packagedRuntime.ocrRoot } : {}),
           YAB_DESKTOP_PORT_OVERRIDE: process.env.BAAS_DESKTOP_PORT ? '1' : '',
+          YAB_DESKTOP_RECOVERY: recovery ? '1' : '',
+          YAB_DESKTOP_UPDATE_TOKEN: desktopUpdateToken,
           PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
@@ -286,13 +298,14 @@ function trySpawnCandidate(candidate, listenArgs, root) {
 }
 
 // 拉起后端并等待就绪：健康检查通过 / 进程提前退出 / 90s 超时
-async function launchBackend(root, port) {
+async function launchBackend(root, port, options = {}) {
+  if (quitting) throw new StartupError('应用正在退出');
   showPreparation('正在启动后端服务…', 84);
   const listenArgs = ['--host', serverHost, '--port', String(port)];
   const attempted = [];
   for (const candidate of backendCandidates(root)) {
     attempted.push(candidate.cmd);
-    const started = await trySpawnCandidate(candidate, listenArgs, root);
+    const started = await trySpawnCandidate(candidate, listenArgs, root, options);
     if (started) {
       backend = { child: started.child, label: started.label, healthy: false };
       break;
@@ -309,12 +322,13 @@ async function launchBackend(root, port) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   showPreparation('正在等待后端和识别服务就绪…', 88);
   while (Date.now() < deadline) {
+    if (quitting) throw new StartupError('应用正在退出');
     if (backendExit) {
       throw new StartupError(
         `后端进程提前退出（code=${backendExit.code} signal=${backendExit.signal}）。后端输出尾部：\n${logTail()}`,
       );
     }
-    if (await healthCheck(port)) {
+    if (await healthCheck(port, Boolean(packagedRuntime) || options.recovery)) {
       backend.healthy = true;
       log(`后端就绪: ${mainPageUrl()}`);
       return;
@@ -326,12 +340,12 @@ async function launchBackend(root, port) {
   );
 }
 
-function healthCheck(port) {
+function healthCheck(port, waitForOcr = Boolean(packagedRuntime)) {
   return new Promise((resolve, reject) => {
     const token = process.env.BAAS_WEBUI_TOKEN;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const req = http.get({ host: connectHost, port, path: HEALTH_PATH, headers, timeout: 3000 }, (res) => {
-      if (!packagedRuntime) { res.resume(); resolve(res.statusCode === 200); return; }
+      if (!waitForOcr) { res.resume(); resolve(res.statusCode === 200); return; }
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
@@ -340,6 +354,7 @@ function healthCheck(port) {
         try {
           const state = JSON.parse(body);
           if (state.ocr_error) reject(new StartupError(`识别服务初始化失败：${state.ocr_error}`));
+          else if (packagedRuntime && state.version !== packagedRuntime.version) reject(new StartupError('后端版本与准备的发行版本不一致'));
           else {
             if (res.statusCode === 200 && state.ocr_ready === false) showPreparation('正在初始化识别服务…', 92);
             resolve(res.statusCode === 200 && state.ocr_ready === true);
@@ -353,27 +368,17 @@ function healthCheck(port) {
 }
 
 async function launchPreparedBackend() {
-  try {
-    await launchBackend(repoRoot, serverPort);
-    if (packagedRuntime) await activateRuntime(app.getPath('userData'), packagedRuntime);
-  } catch (error) {
-    if (SMOKE_MODE || !packagedRuntime || !previousRuntime || packagedRuntime.root === previousRuntime.root) throw error;
-    await killBackendTree();
-    await restoreSettings(app.getPath('userData'), packagedRuntime);
-    packagedRuntime = previousRuntime;
-    repoRoot = previousRuntime.root;
-    await launchBackend(repoRoot, serverPort);
-    runtimeFallbackMessage = `新版本启动失败，已使用上一版本。\n${error.message}`;
-    log(runtimeFallbackMessage);
-  }
+  await launchBackend(repoRoot, serverPort);
+  if (packagedRuntime) await recordRuntime(app.getPath('userData'), packagedRuntime);
 }
 
 // ------------------------------ 退出清理 ------------------------------
 
 // 杀后端进程树：Windows 用 taskkill /T /F，其他平台 SIGTERM（3s 后 SIGKILL）；
 // 最多等 KILL_TIMEOUT_MS，超时放弃等待（退出兜底）。
-function killBackendTree() {
-  return new Promise((resolve) => {
+function killBackendTree(strict = false) {
+  return new Promise((resolve, reject) => {
+    const previous = backend;
     const child = backend && backend.child;
     backend = null;
     if (!child || child.exitCode !== null || child.signalCode) {
@@ -381,14 +386,21 @@ function killBackendTree() {
       return;
     }
     let done = false;
-    const finish = () => {
+    let exited = false;
+    let treeStopped = !isWindows();
+    const finish = (error) => {
       if (done) return;
+      if (strict && !error && (!exited || !treeStopped)) return;
       done = true;
-      resolve();
-    };
-    const watchdog = setTimeout(finish, KILL_TIMEOUT_MS);
-    child.once('exit', () => {
       clearTimeout(watchdog);
+      if (error && strict) {
+        if (child.exitCode === null && !child.signalCode) backend = previous;
+        reject(error);
+      } else resolve();
+    };
+    const watchdog = setTimeout(() => finish(strict ? new Error('后端进程未能完全退出，已取消安装') : null), KILL_TIMEOUT_MS);
+    child.once('exit', () => {
+      exited = true;
       finish();
     });
     if (isWindows()) {
@@ -397,12 +409,18 @@ function killBackendTree() {
         windowsHide: true,
       });
       killer.once('error', (err) => {
+        if (strict) { finish(new Error(`无法停止后端进程：${err.message}`)); return; }
         log(`taskkill 失败（${err.message}），回退 child.kill()`);
         try {
           child.kill();
         } catch {
           /* already dead */
         }
+      });
+      killer.once('exit', code => {
+        treeStopped = code === 0;
+        if (strict && !treeStopped) finish(new Error('后端进程树停止失败，已取消安装'));
+        else finish();
       });
     } else {
       try {
@@ -419,6 +437,80 @@ function killBackendTree() {
       }, 3000).unref();
     }
   });
+}
+
+function updateBackendRequest(action) {
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json', 'X-Yab-Desktop-Token': desktopUpdateToken };
+    if (process.env.BAAS_WEBUI_TOKEN) headers.Authorization = `Bearer ${process.env.BAAS_WEBUI_TOKEN}`;
+    const request = http.request({ host: connectHost, port: serverPort, path: '/api/desktop-update',
+      method: 'POST', headers, timeout: 5000 }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(new Error('更新状态响应过大')); });
+      response.on('error', reject);
+      response.on('end', () => {
+        try {
+          const result = JSON.parse(body);
+          if (response.statusCode !== 200) throw new Error(result.error || '更新准备请求失败');
+          resolve(result);
+        } catch (error) { reject(error); }
+      });
+    });
+    request.on('error', reject);
+    request.on('timeout', () => request.destroy(new Error('更新准备请求超时')));
+    request.end(JSON.stringify({ action }));
+  });
+}
+
+async function configureDesktopUpdates() {
+  const metadata = require(path.join(app.getAppPath(), 'package.json'));
+  let config;
+  let disabledReason = '';
+  try { config = updateConfig(metadata.yabUpdate?.variant, metadata.yabUpdate?.url); }
+  catch { config = updateConfig(); disabledReason = '发行包的更新配置不合法'; }
+  if (!app.isPackaged) disabledReason = '源码运行不使用桌面安装更新';
+  else if (!isWindows()) disabledReason = '当前仅支持视窗系统安装版更新';
+  else if (!installedAt(app.getPath('exe'), process.resourcesPath)) disabledReason = '解压版请下载新版安装包，或解压到新目录使用';
+  // Keep the small update journal beside the installed program. Update-specific
+  // code does not create another copy of the installer or configuration under
+  // the user's data directory.
+  const journal = path.join(path.dirname(app.getPath('exe')), 'desktop-update.json');
+  const nativeUpdater = disabledReason ? null : createNsisUpdater(config);
+  if (nativeUpdater) nativeUpdater.installDirectory = path.dirname(app.getPath('exe'));
+  desktopUpdater = new DesktopUpdater({ version: app.getVersion(), config, disabledReason, journal,
+    settingsFile: path.join(path.dirname(app.getPath('exe')), 'config', 'desktop-update.json'),
+    updater: nativeUpdater,
+    prepare: async targetVersion => {
+      if (quitting || !backend?.healthy || backendRecovery.snapshot().recovering) throw new Error('后端尚未就绪，请稍后重试');
+      if (BrowserWindow.getAllWindows().some(window => window !== mainWindow)) throw new Error('请先关闭其他设置窗口再安装更新');
+      desktopUpdateBusy = true;
+      let status = await updateBackendRequest('prepare');
+      const deadline = Date.now() + 30000;
+      while (!status.ready) {
+        if (Date.now() >= deadline) throw new Error('任务尚未停止，已取消安装，请稍后重试');
+        if (quitting) throw new Error('应用正在退出');
+        await sleep(250);
+        status = await updateBackendRequest('status');
+      }
+      await writeRecord(journal, { status: 'pending', currentVersion: app.getVersion(),
+        targetVersion, createdAt: new Date().toISOString() });
+      await killBackendTree(true);
+      updateBackendStopped = true;
+    },
+    resume: async () => {
+      if (quitting) return;
+      try {
+        if (!backend?.healthy || backendExit) await launchBackend(repoRoot, serverPort, { recovery: true });
+        await updateBackendRequest('cancel');
+      } finally {
+        updateBackendStopped = false;
+        desktopUpdateBusy = false;
+      }
+    },
+  });
+  await desktopUpdater.loadSchedule();
+  attachDesktopUpdater(ipcMain, { controller: desktopUpdater, getWindow: () => mainWindow, pageUrl: mainPageUrl });
 }
 
 // 统一退出：弹窗（GUI 模式）→ 杀进程树 → app.exit(code)。可重入保护。
@@ -561,6 +653,7 @@ function createTray() {
       } },
       { label: '在浏览器中打开', click: () => backend?.healthy && shell.openExternal(mainPageUrl()) },
       ...(app.isPackaged ? [{ label: '运行环境', click: async () => {
+        if (desktopUpdateBusy) return;
         try {
           const bundle = path.join(process.resourcesPath, 'backend');
           const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'bundle.json'), 'utf8'));
@@ -597,11 +690,14 @@ async function runGui() {
     log(`仓库根: ${repoRoot}`);
     log(`端口: ${serverPort}`);
     await launchPreparedBackend();
+    await configureDesktopUpdates();
     showPreparation('正在打开主界面…', 96);
     if (mainWindow) await mainWindow.loadURL(mainPageUrl());
     if (startupScreen) await startupScreen.finish();
     startupScreen = null;
-    if (runtimeFallbackMessage) await showMessage(mainWindow, { type: 'warning', message: '已继续使用上一版本', detail: runtimeFallbackMessage });
+    await desktopUpdater.confirmStartup(packagedRuntime?.version || app.getVersion())
+      .catch(error => log(`无法保存更新结果：${error.message}`));
+    void desktopUpdater.startAutoChecks().catch(() => log('启动更新检查未能完成'));
   } catch (err) {
     await fatalExit('YAB 启动失败', String((err && err.message) || err));
   }
@@ -631,6 +727,12 @@ async function runSmoke() {
 
 app.on('before-quit', (event) => {
   if (quitting) return;
+  desktopUpdater?.stopAutoChecks();
+  if (desktopUpdater?.snapshot().phase === 'installing' && updateBackendStopped) {
+    quitting = true;
+    if (tray) { tray.destroy(); tray = null; }
+    return;
+  }
   quitting = true;
   preparation.abort();
   event.preventDefault();
@@ -641,15 +743,12 @@ app.on('before-quit', (event) => {
   killBackendTree().finally(() => app.exit(0));
 });
 
-// 后端运行期意外退出：报错并退出（而不是留一个连不上后端的空窗口）。
-// 注意不能在这里清空 backend——fatalExit → killBackendTree 还需要它拿到子进程句柄。
+// 运行期崩溃保留窗口和日志，只恢复服务；任务等待用户手动启动。
 if (!SMOKE_MODE) {
   const watchBackendHealth = setInterval(() => {
-    if (backend && backend.healthy && backendExit && !quitting) {
-      fatalExit(
-        'YAB 后端已退出',
-        `后端进程意外退出（code=${backendExit.code} signal=${backendExit.signal}）。后端输出尾部：\n${logTail()}`,
-      );
+    if (backend && backend.healthy && backendExit && !quitting && !desktopUpdateBusy) {
+      backend.healthy = false;
+      void backendRecovery.recover(backendExit, logTail());
     }
   }, 1000);
   watchBackendHealth.unref();

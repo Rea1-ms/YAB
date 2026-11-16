@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import os
 
@@ -97,6 +98,9 @@ def derive_ocr_needed():
 
 
 def register_topics(hub: Hub, service: BaasService):
+    def register_write(topic, function, handler):
+        hub.register_rpc(topic, function, service.guard_write(handler))
+
     hub.register_provider('Meta', lambda _config: build_meta(service))
     hub.register_provider('ConfigScan', lambda _config: scan_configs())
     hub.register_provider('State', service.get_state)
@@ -108,30 +112,29 @@ def register_topics(hub: Hub, service: BaasService):
     hub.register_rpc('State', 'stop', lambda config, _params: service.stop(config))
     hub.register_rpc('State', 'run_task', lambda config, params: service.run_task(config, params['task']))
 
-    hub.register_rpc('ConfigScan', 'add', lambda _config, params: service.config_add(params['name']))
-    hub.register_rpc('ConfigScan', 'delete', lambda _config, params: service.config_delete(params['name']))
-    hub.register_rpc('ConfigScan', 'rename',
+    register_write('ConfigScan', 'add', lambda _config, params: service.config_add(params['name']))
+    register_write('ConfigScan', 'delete', lambda _config, params: service.config_delete(params['name']))
+    register_write('ConfigScan', 'rename',
                      lambda _config, params: service.config_rename(params['config'], params['name']))
 
-    hub.register_rpc('ConfigArg', 'set', service.config_set)
-    hub.register_rpc('ConfigArg', 'set_sweep', service.set_sweep)
-    hub.register_rpc('ConfigArg', 'push_test', service.push_test)
+    register_write('ConfigArg', 'set', service.config_set)
+    register_write('ConfigArg', 'set_sweep', service.set_sweep)
+    register_write('ConfigArg', 'push_test', service.push_test)
     hub.register_rpc('Assets', 'get', lambda config, _params: service.provide_assets(config))
 
-    hub.register_rpc('EventConfig', 'set_event', service.event_set)
-    hub.register_rpc('EventConfig', 'enable_all', service.event_enable_all)
-    hub.register_rpc('EventConfig', 'refresh_all', service.event_refresh_all)
+    register_write('EventConfig', 'set_event', service.event_set)
+    register_write('EventConfig', 'enable_all', service.event_enable_all)
+    register_write('EventConfig', 'refresh_all', service.event_refresh_all)
 
     hub.register_rpc('Meta', 'autosearch_adb', lambda _config, _params: _autosearch_adb())
     hub.register_rpc('Meta', 'connect_adb', lambda _config, params: _connect_adb(params))
     hub.register_rpc('Meta', 'update_get', lambda _config, params: service.update_get(params))
-    hub.register_rpc('Meta', 'update_save', lambda _config, params: service.update_save(params))
-    hub.register_rpc('Meta', 'cdk_test', lambda _config, params: service.cdk_test(params))
+    register_write('Meta', 'update_save', lambda _config, params: service.update_save(params))
     hub.register_rpc('Meta', 'sha_test', lambda _config, params: service.sha_test(params))
     hub.register_rpc('Meta', 'help_list', lambda _config, params: service.help_list(params))
     hub.register_rpc('Meta', 'help_content', lambda _config, params: service.help_content(params))
     hub.register_rpc('Meta', 'webui_get', lambda _config, _params: service.webui_get())
-    hub.register_rpc('Meta', 'webui_save', lambda _config, params: service.webui_save(params))
+    register_write('Meta', 'webui_save', lambda _config, params: service.webui_save(params))
 
 
 def _autosearch_adb():
@@ -173,9 +176,24 @@ def create_app(serve_webapp=True, access_token=None, listener=None) -> Starlette
         return JSONResponse({'status': 'ok', 'version': get_version(),
                              'ocr_ready': service.ocr_ready, 'ocr_error': service.ocr_error})
 
+    desktop_token = os.environ.get('YAB_DESKTOP_UPDATE_TOKEN', '')
+
+    async def desktop_update(request):
+        supplied = request.headers.get('x-yab-desktop-token', '')
+        if not desktop_token or not hmac.compare_digest(supplied.encode(), desktop_token.encode()):
+            return JSONResponse({'error': '桌面更新请求未授权'}, status_code=403)
+        try:
+            params = await request.json()
+            if not isinstance(params, dict) or params.get('action') not in ('prepare', 'cancel', 'status'):
+                raise ValueError('更新操作不合法')
+            return JSONResponse(await asyncio.to_thread(service.desktop_update, params['action']))
+        except ValueError as error:
+            return JSONResponse({'error': str(error)}, status_code=400)
+
     routes = [
         WebSocketRoute('/api/ws', ws_server.endpoint),
         Route('/api/health', health),
+        Route('/api/desktop-update', desktop_update, methods=['POST']),
     ]
 
     dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'webapp', 'dist')

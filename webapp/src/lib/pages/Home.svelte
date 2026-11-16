@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { callRpc, getDirStores } from '../stores';
+  import { callRpc, connected, getDirStores, meta } from '../stores';
+  import { desktopBackend } from '../backend';
   import { toast } from '../toast';
   import { t, tNow } from '../i18n';
   import AssetBar from '../components/AssetBar.svelte';
@@ -14,6 +15,9 @@
   let stick = $state(true);
 
   const running = $derived($stateStore?.running ?? false);
+  const unavailable = $derived(!$connected || !$meta?.ocr_ready || $desktopBackend.recovering);
+  const displayedLog = $derived([...$logStore, ...$desktopBackend.logs]
+    .sort((a, b) => a.t - b.t).slice(-500));
   // State.button 为后端下发的中文（'启动'/'停止'），仅翻译显示
   const buttonLabel = $derived(
     $stateStore?.button ? $t($stateStore.button) : running ? $t('停止') : $t('启动'),
@@ -23,11 +27,13 @@
   const waiting = $derived($stateStore?.waiting ?? []);
 
   function toggleRun(): void {
+    if (unavailable) return;
     if (running) void callRpc(`State:${dir}`, 'stop', {});
     else void callRpc(`State:${dir}`, 'start', {});
   }
 
   async function runTask(): Promise<void> {
+    if (unavailable) return;
     const task = taskInput.trim();
     if (!task) {
       toast('info', tNow()('请输入任务名'));
@@ -46,7 +52,7 @@
 
   // 新日志到达时自动滚底（用户向上翻阅时暂停）
   $effect(() => {
-    const count = $logStore.length;
+    const count = displayedLog.length;
     if (stick && count > 0 && logEl) logEl.scrollTop = logEl.scrollHeight;
   });
 
@@ -67,7 +73,7 @@
 <div class="page">
   <AssetBar {dir} />
   <div class="card run-card">
-    <button class="big-btn" class:running={running} type="button" onclick={toggleRun}>
+    <button class="big-btn" class:running={running} type="button" onclick={toggleRun} disabled={unavailable}>
       {buttonLabel}
     </button>
     <div class="run-meta">
@@ -91,15 +97,15 @@
           bind:value={taskInput}
           onkeydown={(e) => e.key === 'Enter' && runTask()}
         />
-        <button class="btn" type="button" onclick={runTask}>{$t('运行任务')}</button>
+        <button class="btn" type="button" onclick={runTask} disabled={unavailable}>{$t('运行任务')}</button>
       </div>
     </div>
   </div>
 
   <div class="card log-card">
-    <div class="log-head">{$t('运行日志')} <span class="dim">{$logStore.length} {$t('条')}</span></div>
+    <div class="log-head">{$t('运行日志')} <span class="dim">{displayedLog.length} {$t('条')}</span></div>
     <div class="log-body" bind:this={logEl} onscroll={onScroll}>
-      {#each $logStore as e, i (i)}
+      {#each displayedLog as e, i (i)}
         <div class="log-line {lvlClass(e.l)}">
           <span class="lt">{fmtTime(e.t)}</span>
           <span class="lm">{e.m}</span>
@@ -138,13 +144,17 @@
     font-family: inherit;
     transition: filter 0.15s;
   }
-  .big-btn:hover {
+  .big-btn:hover:not(:disabled) {
     filter: brightness(1.08);
   }
   .big-btn.running {
     background: var(--danger);
     border-color: var(--danger);
     color: #1a0d10;
+  }
+  .big-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .run-meta {
     display: flex;
