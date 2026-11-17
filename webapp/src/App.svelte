@@ -14,10 +14,17 @@
 
   const current = $derived($route);
   const scan = $derived($configScan);
-  const dir = $derived(current?.dir ?? '');
+  let lastDir = $state('');
+  const dir = $derived(current?.dir
+    ?? (scan.some((c) => c.dir === lastDir) ? lastDir : (scan[0]?.dir ?? '')));
   const page = $derived(current?.page ?? 'home');
   const globalPage = $derived(current?.global ?? null);
   const currentName = $derived(scan.find((c) => c.dir === dir)?.name ?? dir);
+
+  // 全局页没有配置目录，侧栏沿用最近选择的有效配置。
+  $effect(() => {
+    if (current?.dir) lastDir = current.dir;
+  });
 
   // 路由守卫：新建配置待出现后跳转；空 hash 跳第一个配置；目录失效跳回第一个
   // 全局页（更新与帮助）不参与目录守卫
@@ -25,12 +32,12 @@
     const r = current;
     const list = scan;
     const pend = $pendingNavDir;
-    if (r?.global) return;
     if (pend && list.some((c) => c.dir === pend)) {
       pendingNavDir.set(null);
       navigate(pend, 'home');
       return;
     }
+    if (r?.global) return;
     if (!r) {
       if (list.length > 0) navigate(list[0].dir, 'home');
       return;
@@ -58,7 +65,7 @@
 
   function onConfigChange(e: Event): void {
     const v = (e.currentTarget as HTMLSelectElement).value;
-    if (v && v !== dir) navigate(v, page);
+    if (v && (v !== dir || globalPage)) navigate(v, page);
   }
 
   function onLangChange(e: Event): void {
