@@ -96,15 +96,21 @@ class MainPagePopupTests(unittest.TestCase):
         worker.latest_img_array = frames[0]
         return worker
 
-    def store_menu_frame(self):
+    def store_frame(self, *features, identifier='Global_en-us'):
         menu = self.frame('empty')
-        for feature in ('purchase-pyroxenes-menu', 'purchase-pyroxenes-package-selected-1',
-                        'purchase-pyroxenes-daily-free-purchasable'):
-            name = 'main_page_' + feature
-            x1, y1, x2, y2 = position.get_area('Global_en-us', name)
-            template = position.image_dic['Global_en-us'][name]
+        for feature in features:
+            name = 'main_page_purchase-pyroxenes-' + feature
+            x1, y1, x2, y2 = position.get_area(identifier, name)
+            template = position.image_dic[identifier][name]
             menu[y1:y2, x1:x2] = cv2.resize(template, (x2 - x1, y2 - y1))
         return menu
+
+    def store_navigation_frames(self, identifier='Global_en-us', availability='daily-free-purchasable'):
+        return [
+            self.store_frame('menu', identifier=identifier),
+            self.store_frame('menu', 'general-selected-2', identifier=identifier),
+            self.store_frame('menu', 'general-selected-2', 'daily-selected', availability, identifier=identifier),
+        ]
 
     @contextmanager
     def android_worker(self, frames, ratio=1, identifier='Global_en-us', activity=None):
@@ -510,17 +516,18 @@ class MainPagePopupTests(unittest.TestCase):
                     worker.click.assert_not_called()
 
     def test_navigation_stages_dismiss_a_delayed_login_before_continuing(self):
+        daily_shop = self.store_navigation_frames()[-1]
         stages = [
-            (free_power.to_purchase_pyroxenes_menu, (), self.store_menu_frame()),
-            (free_power.to_purchase_type, ('package',), self.store_menu_frame()),
-            (free_power.detect_free_power_availability, (), self.store_menu_frame()),
-            (free_power.return_to_main_page, (), self.frame('home')),
+            (free_power.to_purchase_pyroxenes_menu, daily_shop),
+            (free_power.to_daily_free_product, daily_shop),
+            (free_power.detect_free_power_availability, daily_shop),
+            (free_power.return_to_main_page, self.frame('home')),
         ]
-        for function, args, target in stages:
+        for function, target in stages:
             for kind in ('store', 'launch', 'checked'):
                 with self.subTest(stage=function.__name__, kind=kind):
                     worker = self.worker(self.login_frames(kind) + [target])
-                    function(worker, *args)
+                    function(worker)
                     self.assertEqual(worker.click.call_args_list, self.login_clicks(kind))
 
     def test_late_startup_prompt_after_store_entry_still_allows_collection(self):
@@ -528,29 +535,30 @@ class MainPagePopupTests(unittest.TestCase):
             for ratio in (1, 2):
                 with self.subTest(kind=kind, ratio=ratio):
                     frames = ([self.frame('home')] + self.login_frames(kind)
-                              + [self.store_menu_frame(), self.frame('reward'), self.frame('home')])
+                              + self.store_navigation_frames() + [self.frame('reward'), self.frame('home')])
                     worker = self.worker(frames, ratio=ratio)
                     self.assertTrue(free_power.implement(worker))
                     self.assertEqual(worker.click.call_args_list, [call(982, 28)] + self.login_clicks(kind)
-                                     + [call(385, 479), call(640, 180)])
+                                     + [call(130, 318), call(885, 100), call(385, 423), call(640, 180)])
 
     def test_claim_guard_starts_after_the_actual_free_product_click(self):
         for kind in ('store', 'launch', 'checked'):
             with self.subTest(kind=kind):
-                worker = self.worker(self.login_frames(kind) + [self.store_menu_frame(), self.frame('store')])
+                worker = self.worker(self.login_frames(kind) + [self.store_frame('menu'), self.frame('store')])
                 with self.assertRaisesRegex(RequestHumanTakeOver, '应用商店未登录'):
                     free_power.collect_daily_free_power(worker)
-                self.assertEqual(worker.click.call_args_list, self.login_clicks(kind) + [call(385, 479)])
+                self.assertEqual(worker.click.call_args_list, self.login_clicks(kind) + [call(385, 423)])
 
     def test_task_stops_on_login_after_claim_without_dismissing_or_restarting(self):
         for kind in ('store', 'launch', 'checked'):
             with self.subTest(kind=kind):
-                worker = self.worker([self.frame('home'), self.store_menu_frame(), self.frame(kind)])
+                worker = self.worker([self.frame('home'), *self.store_navigation_frames(), self.frame(kind)])
                 worker.push_and_log_error_msg = Mock()
                 worker.deal_with_func_call_timeout = Mock()
                 worker.deal_with_package_incorrect = Mock()
                 self.assertFalse(worker.solve('collect_daily_free_power'))
-                self.assertEqual(worker.click.call_args_list, [call(982, 28), call(385, 479)])
+                self.assertEqual(worker.click.call_args_list,
+                                 [call(982, 28), call(130, 318), call(885, 100), call(385, 423)])
                 worker.push_and_log_error_msg.assert_called_once()
                 self.assertIn('应用商店未登录', worker.push_and_log_error_msg.call_args.args[1])
                 worker.deal_with_func_call_timeout.assert_not_called()
@@ -596,10 +604,30 @@ class MainPagePopupTests(unittest.TestCase):
         worker.click.assert_not_called()
 
     def test_logged_in_store_still_collects_free_power(self):
-        menu = self.store_menu_frame()
-        worker = self.worker([self.frame('home'), menu, self.frame('reward'), self.frame('home')])
-        self.assertTrue(free_power.implement(worker))
-        self.assertEqual(worker.click.call_args_list, [call(982, 28), call(385, 479), call(640, 180)])
+        for identifier in IDENTIFIERS:
+            for ratio in (1, 2):
+                with self.subTest(identifier=identifier, ratio=ratio):
+                    frames = [
+                        self.frame('home'), *self.store_navigation_frames(identifier),
+                        self.store_frame('confirm-purchase-notice', identifier=identifier),
+                        self.frame('reward'), self.store_frame('menu', identifier=identifier), self.frame('home'),
+                    ]
+                    worker = self.worker(frames, identifier=identifier, ratio=ratio)
+                    self.assertTrue(free_power.implement(worker))
+                    self.assertEqual(worker.click.call_args_list, [
+                        call(982, 28), call(130, 318), call(885, 100), call(385, 423),
+                        call(765, 594), call(640, 180), call(52, 38),
+                    ])
+
+    def test_already_claimed_free_power_exits_without_buying(self):
+        for identifier in IDENTIFIERS:
+            with self.subTest(identifier=identifier):
+                frames = [self.frame('home'), *self.store_navigation_frames(identifier, 'daily-free-non-purchasable'),
+                          self.frame('home')]
+                worker = self.worker(frames, identifier=identifier)
+                self.assertTrue(free_power.implement(worker))
+                self.assertEqual(worker.click.call_args_list,
+                                 [call(982, 28), call(130, 318), call(885, 100), call(52, 38)])
 
 
 if __name__ == '__main__':
