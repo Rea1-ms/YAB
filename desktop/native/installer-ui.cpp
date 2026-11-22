@@ -814,6 +814,15 @@ extern "C" __declspec(dllexport) void Progress(HWND parent, int, wchar_t*, Stack
     progressBar = GetDlgItem(page, 1004);
     const HWND original = GetDlgItem(page, 1006);
     if (!progressBar || !original) return;
+    if (dark && !highContrast) {
+        const HWND details = FindWindowEx(page, nullptr, WC_LISTVIEW, nullptr);
+        if (details) {
+            SetWindowTheme(details, L"DarkMode_Explorer", nullptr);
+            ListView_SetBkColor(details, RGB(32, 32, 32));
+            ListView_SetTextBkColor(details, RGB(32, 32, 32));
+            ListView_SetTextColor(details, RGB(240, 240, 240));
+        }
+    }
     RECT rect;
     GetWindowRect(original, &rect);
     MapWindowPoints(nullptr, page, reinterpret_cast<POINT*>(&rect), 2);

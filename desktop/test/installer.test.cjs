@@ -972,6 +972,91 @@ SectionEnd
     'A newly created real progress page must reset the total and retain its independent label.');
 });
 
+test('the expanded installation log uses the wizard palette', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-log-theme-'));
+  const source = path.join(scratch, 'log-theme.nsi');
+  const executable = path.join(scratch, 'log-theme.exe');
+  for (const [theme, contrast] of [[0, 0], [1, 0], [0, 1]]) {
+    await fs.writeFile(source, String.raw`
+Unicode true
+!include MUI2.nsh
+!include LogicLib.nsh
+!define APP_FILENAME "YAB"
+!define isUpdated '1 = 1'
+!macro skipPageIfUpdated
+!macroend
+!macro yabReadThemePreference OUTPUT
+  ClearErrors
+  StrCpy @{OUTPUT} ${theme}
+!macroend
+!macro yabReadHighContrast OUTPUT
+  StrCpy @{OUTPUT} ${contrast}
+!macroend
+!include "${path.resolve(__dirname, '../installer.nsh')}"
+Name "YAB log palette test"
+OutFile "${executable}"
+RequestExecutionLevel user
+ShowInstDetails hide
+!insertmacro customPageAfterChangeDir
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE SimpChinese
+!insertmacro customHeader
+Function .onInit
+  !insertmacro customInit
+  StrCpy $yabSidebarBitmap 0
+FunctionEnd
+Section
+  SetDetailsPrint listonly
+  DetailPrint "YAB installation log preview"
+  SetDetailsView show
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  FindWindow $1 "SysListView32" "" $0
+  System::Call 'user32::IsWindowVisible(p r1) i.r2'
+  SendMessage $1 0x1000 0 0 $3 ; LVM_GETBKCOLOR
+  SendMessage $1 0x1023 0 0 $4 ; LVM_GETTEXTCOLOR
+  SendMessage $1 0x1025 0 0 $5 ; LVM_GETTEXTBKCOLOR
+  System::Call 'user32::GetSysColor(i 5) i.r6' ; COLOR_WINDOW
+  System::Call 'user32::GetSysColor(i 8) i.r7' ; COLOR_WINDOWTEXT
+
+  ; Paint the visible list into a bitmap and sample below the first line.
+  System::Call 'user32::GetClientRect(p r1, @r0)'
+  System::Call '*$0(i, i, i.r8, i.r9)'
+  System::Call 'user32::GetDC(p r1) p.r0'
+  System::Call 'gdi32::CreateCompatibleDC(p r0) p.R0'
+  System::Call 'gdi32::CreateCompatibleBitmap(p r0, i r8, i r9) p.R1'
+  System::Call 'gdi32::SelectObject(p R0, p R1) p.R2'
+  System::Call 'user32::PrintWindow(p r1, p R0, i 1)'
+  IntOp $8 $8 - 4
+  IntOp $9 $9 - 4
+  System::Call 'gdi32::GetPixel(p R0, i r8, i r9) i.R3'
+  System::Call 'gdi32::SelectObject(p R0, p R2)'
+  System::Call 'gdi32::DeleteObject(p R1)'
+  System::Call 'gdi32::DeleteDC(p R0)'
+  System::Call 'user32::ReleaseDC(p r1, p r0)'
+  FileOpen $0 "$EXEDIR\palette.txt" w
+  FileWriteUTF16LE $0 "$2|$3|$4|$5|$6|$7|$R3"
+  FileClose $0
+  SetErrorLevel 0
+  Quit
+SectionEnd
+`.replaceAll('@{', '${'));
+    execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    execute(executable, []);
+    const [visible, background, text, textBackground, systemBackground, systemText, painted] =
+      (await fs.readFile(path.join(scratch, 'palette.txt'), 'utf16le')).split('|').map(Number);
+    const dark = theme === 0 && contrast === 0;
+    assert.equal(visible, 1, 'The real log list must be expanded before sampling.');
+    assert.equal(background, dark ? 0x202020 : systemBackground);
+    assert.equal(text & 0xFFFFFF, dark ? 0xF0F0F0 : systemText);
+    if (dark) assert.equal(textBackground, background);
+    assert.equal(painted, background, 'The expanded log must paint its configured background.');
+  }
+});
+
 test('the packaged extraction template keeps builder retries and drives the real staged progress', {
   skip: process.platform !== 'win32',
 }, async t => {
