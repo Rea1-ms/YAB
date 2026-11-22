@@ -1,4 +1,9 @@
 !include "${__FILEDIR__}\installer-ui.nsh"
+!ifndef BUILD_UNINSTALLER
+  !ifdef YAB_INSTALL_COPY_DEBUG
+    !include "${__FILEDIR__}\installer-copy-debug.nsh"
+  !endif
+!endif
 
 ; The builder calls this after its own SetDetailsPrint none. Restore only the
 ; live status line, keeping its application-running checks and file operations.
@@ -55,6 +60,9 @@
   !endif
   !insertmacro yabUIHeader
   !ifndef BUILD_UNINSTALLER
+    !ifdef YAB_INSTALL_COPY_DEBUG
+      !insertmacro yabCopyDebugFunctions
+    !endif
     Function .onInstSuccess
       YabInstallUI::Complete /NOUNLOAD "$(yabInstalled)"
     FunctionEnd

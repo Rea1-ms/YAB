@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Instrument the installed builder's extraction macros rather than maintaining
-// a fork. All copying, retries and error handling remain the upstream code.
+// a fork. Keep the builder's copying and retry instructions intact.
 function extractionWithProgress(source) {
   const hooks = [
     ['!macro extractEmbeddedAppPackage',
@@ -17,15 +17,26 @@ function extractionWithProgress(source) {
       '    YabInstallUI::Phase /NOUNLOAD "$(yabCopying)" 65 90', true],
     ['    Nsis7z::Extract "${FILE}"',
       '    YabInstallUI::Phase /NOUNLOAD "$(yabExtracting)" 65 90', true],
+    ['  LoopExtract7za:', '  !insertmacro yabStartCopyDebug', true],
+    ['    ${if} $R1 < 5', '    !insertmacro yabCopyDebugLine "CopyFiles failed (attempt $R1)."', true],
+    ['      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION', '      !insertmacro yabInspectCopyFailure', true],
+    ['    RMDir /r "$PLUGINSDIR\\7z-out"',
+      '    !insertmacro yabCopyDebugLine "Retry selected. Attempting direct extraction."', true],
+    ['  AbortExtract7za:', '    !insertmacro yabCopyDebugLine "Cancel selected. Ending installation."', false],
+    ['  DoneExtract7za:', '    !insertmacro yabCopyDebugLine "End of program file write stage."', false],
   ];
   let patched = source.replaceAll('\r\n', '\n');
   for (const [anchor, hook, before] of hooks) {
     if (patched.split(anchor).length !== 2) {
-      throw new Error(`安装器模板已变化，需要检查进度阶段：${anchor}`);
+      throw new Error(`安装器模板已变化，需要检查扩展位置：${anchor}`);
     }
     patched = patched.replace(anchor, before ? `${hook}\n${anchor}` : `${anchor}\n${hook}`);
   }
-  return patched;
+  const copyWarning = '"$(appCannotBeClosed)" /SD IDRETRY IDCANCEL AbortExtract7za';
+  if (patched.split(copyWarning).length !== 2) {
+    throw new Error('安装器模板已变化，需要检查写入失败提示');
+  }
+  return patched.replace(copyWarning, copyWarning.replace('$(appCannotBeClosed)', '$(yabCopyFailed)$yabCopyDebugHint'));
 }
 
 function installerTemplateRoot() {

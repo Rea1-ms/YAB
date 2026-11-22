@@ -53,6 +53,7 @@ async function main() {
     // Use its normal main script and uninstaller generation/signing pipeline.
     effectiveOptionComputed([defines, commands]) {
       defines.YAB_REQUIRE_EARLY_THEME = null;
+      defines.YAB_INSTALL_COPY_DEBUG = null;
       // NSIS checks its working directory before include paths. The builder's
       // own template directory contains uninstaller.nsh, unlike extraction's
       // nested include. Compile from our generated directory so both win.

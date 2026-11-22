@@ -92,6 +92,7 @@ module.exports = {
     fs.copyFileSync(path.join(__dirname, 'installer-i18n.nsh'), path.join(release, 'installer-i18n.nsh'));
     fs.cpSync(path.join(__dirname, 'installer-translations'), path.join(release, 'installer-translations'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-copy-debug.nsh'), path.join(release, 'installer-copy-debug.nsh'));
     fs.mkdirSync(path.join(release, 'assets'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'assets/YabInstallUI.dll'), path.join(release, 'assets/YabInstallUI.dll'));
     fs.writeFileSync(path.join(release, 'installer-generated.nsh'), lines.join('\r\n'));

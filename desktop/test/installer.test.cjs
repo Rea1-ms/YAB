@@ -990,8 +990,9 @@ test('the packaged extraction template keeps builder retries and drives the real
   const templateDir = path.join(builderRoot, 'templates/nsis/include');
   const original = (await fs.readFile(path.join(templateDir, 'extractAppPackage.nsh'), 'utf8')).replaceAll('\r\n', '\n');
   const patched = extractionWithProgress(original);
-  assert.equal(patched.replace(/^ +YabInstallUI::Phase[^\n]*\n/gm, ''), original,
-    'Retain all upstream file-copy, retry and cancellation instructions unchanged.');
+  assert.equal(patched.replace(/^ +(YabInstallUI::Phase|!insertmacro yab\w+)[^\n]*\n/gm, ''),
+    original.replace('$(appCannotBeClosed)', '$(yabCopyFailed)$yabCopyDebugHint'),
+    'Keep the original copy, retry, and cancel instructions around the diagnostics.');
   assert.throws(() => extractionWithProgress(original.replace('!insertmacro decompress', '!insertmacro new_decompress')),
     /安装器模板已变化/, 'A builder upgrade must not silently omit progress stages.');
 
@@ -1026,6 +1027,7 @@ Unicode true
 !define APP_FILENAME "YAB"
 !define APP_64 "${archive}"
 !define COMPRESSION_METHOD "7z"
+!define YAB_INSTALL_COPY_DEBUG
 !define RunningX64 '1 = 1'
 !define IsNativeARM64 '0 = 1'
 !define isUpdated '1 = 1'
@@ -1042,7 +1044,6 @@ RequestExecutionLevel user
 !insertmacro customPageAfterChangeDir
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_LANGUAGE SimpChinese
-LangString appCannotBeClosed @{LANG_SIMPCHINESE} "Copy failed"
 !insertmacro customHeader
 Function .onInit
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
@@ -1053,7 +1054,19 @@ Section
   InitPluginsDir
   SetOutPath "$EXEDIR\target"
   SetDetailsPrint none
+  @{if} @{Silent}
+    ; Hold the fixture's destination open without sharing to make CopyFiles fail.
+    System::Call 'kernel32::CreateFileW(w "$OUTDIR\payload.txt", i 0xC0000000, i 0, p 0, i 3, i 0, p 0) p.r0'
+    @{if} $0 P= -1
+      SetErrorLevel 1
+      Quit
+    @{endif}
+  @{endif}
   !insertmacro extractEmbeddedAppPackage
+  @{if} @{Silent}
+    SetErrorLevel 0
+    Quit
+  @{endif}
   FindWindow $0 "#32770" "" $HWNDPARENT
   GetDlgItem $1 $0 0x7F10
   GetDlgItem $2 $0 0x7F11
@@ -1072,6 +1085,17 @@ SectionEnd
   const [label, total] = (await fs.readFile(path.join(scratch, 'extraction.txt'), 'utf16le')).split('|');
   assert.ok(Number(total) >= 90 && Number(total) <= 98, label);
   assert.equal(label, `正在保存安装信息…  ${total}%`);
+
+  const debugTemp = path.join(scratch, 'debug-temp');
+  await fs.mkdir(debugTemp);
+  const env = { ...process.env, TEMP: debugTemp, TMP: debugTemp };
+  execute(executable, ['/S', '--debug-install'], { env });
+  const reports = (await fs.readdir(debugTemp)).filter(name => /^YAB.*\.tmp$/i.test(name));
+  assert.equal(reports.length, 1);
+  const report = await fs.readFile(path.join(debugTemp, reports[0]), 'utf16le');
+  assert.equal((report.match(/CopyFiles failed \(attempt \d\)/g) || []).length, 5);
+  assert.ok(report.includes(`Win32 32 | open for replacement | ${path.join(scratch, 'target/payload.txt')}`), report);
+  assert.match(report, /Retry selected\. Attempting direct extraction\./);
 });
 
 test('uninstall pages keep localized version text and removal status after the shared running check', {
