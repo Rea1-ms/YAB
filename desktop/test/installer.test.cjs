@@ -23,6 +23,7 @@ function execute(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, timeout: 30000, ...options });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  return result.stdout;
 }
 
 test('compiled uninstall policy preserves data by default and during upgrades', {
@@ -2075,12 +2076,14 @@ SectionEnd
   }
 });
 
-test('per-monitor wizard previews preserve Chinese fonts, artwork and progress on the available displays', {
+test('per-monitor wizard previews and installer manifests', {
   skip: process.platform !== 'win32',
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/per-monitor-'));
+  const output = path.resolve(__dirname, '../../develop_tools/out');
+  await fs.mkdir(output, { recursive: true });
+  const scratch = await fs.mkdtemp(path.join(output, 'per-monitor-'));
   const source = path.join(scratch, 'dpi-preview.nsi');
   const executable = path.join(scratch, 'dpi-preview.exe');
   await fs.writeFile(source, String.raw`
@@ -2160,6 +2163,16 @@ SectionEnd
     assert.match((await fs.readFile(filename)).toString('utf8'), /<dpiAwareness[^>]*>PerMonitorV2,System<\/dpiAwareness>/i,
       'The generated installer and uninstaller must both carry the DPI manifest.');
   }
+  await t.test('native wizard preserves Chinese fonts, artwork and progress', t => checkDpiPreview(t, executable));
+});
+
+async function checkDpiPreview(t, executable) {
+  const probe = ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'native-dpi-probe.ps1')];
+  const { SkipReason } = JSON.parse(execute('pwsh', [...probe, '-CheckDesktop']));
+  if (SkipReason) return t.skip(SkipReason);
+
+  const scratch = path.dirname(executable);
+  t.diagnostic(`Isolated per-monitor preview: ${scratch}`);
   const preview = spawn(executable, [], { windowsHide: true, stdio: 'ignore' });
   const completed = new Promise((resolve, reject) => {
     preview.once('error', reject);
@@ -2167,7 +2180,7 @@ SectionEnd
   });
   try {
     const report = path.join(scratch, 'displays.json');
-    execute('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'native-dpi-probe.ps1'),
+    execute('pwsh', [...probe,
       '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', report]);
     assert.equal(await completed, 0);
     const samples = JSON.parse((await fs.readFile(report, 'utf8')).replace(/^\uFEFF/, ''));
@@ -2213,12 +2226,11 @@ SectionEnd
     const displays = [...new Map(samples.filter(row => row.Page === 'sidebar').map(row => [row.Monitor, row])).values()];
     const dpis = [...new Set(displays.map(row => row.Dpi))];
     t.diagnostic(`${displays.length} active display(s), DPI=${dpis.join(',')}; `
-      + (dpis.length > 1 ? 'physical mixed-DPI moves checked.' : 'mixed-DPI hardware was unavailable; resize and notification checks cover simulation only.'));
-    t.diagnostic(`Isolated per-monitor preview: ${scratch}`);
+      + (dpis.length > 1 ? 'mixed-DPI moves checked.' : 'native layout checked at a single scale; mixed-DPI moves require displays with different scales.'));
   } finally {
     if (preview.exitCode === null) preview.kill();
   }
-});
+}
 
 test('the real builder finish page defaults to opening YAB and honors unchecking', {
   skip: process.platform !== 'win32',

@@ -1,8 +1,16 @@
-param([int]$PreviewProcessId, [string]$Executable, [string]$ReportPath)
+[CmdletBinding(DefaultParameterSetName = 'Preview')]
+param(
+    [Parameter(Mandatory, ParameterSetName = 'DesktopCheck')][switch]$CheckDesktop,
+    [Parameter(Mandatory, ParameterSetName = 'Preview')][int]$PreviewProcessId,
+    [Parameter(Mandatory, ParameterSetName = 'Preview')][string]$Executable,
+    [Parameter(Mandatory, ParameterSetName = 'Preview')][string]$ReportPath
+)
 $ErrorActionPreference = 'Stop'
 # Only move the isolated preview supplied by the test; never change display settings.
-$preview = Get-Process -Id $PreviewProcessId
-if ($preview.Path -ne $Executable) { throw 'The preview executable does not match its process.' }
+if (-not $CheckDesktop) {
+    $preview = Get-Process -Id $PreviewProcessId
+    if ($preview.Path -ne $Executable) { throw 'The preview executable does not match its process.' }
+}
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -50,6 +58,8 @@ public static class YabDpiProbe {
     [DllImport("user32.dll")] static extern bool EnumWindows(WindowCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr window, WindowCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorCallback callback, IntPtr state);
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+    [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
@@ -194,13 +204,25 @@ public static class YabDpiProbe {
             LogicalFace = font.Face, Height = font.Height, Weight = font.Weight, Bounds = bounds, TextHeight = measured.Bottom });
     }
     [DllImport("user32.dll", EntryPoint="GetParent")] static extern IntPtr GetParentWindow(IntPtr window);
+    static List<Rect> ActiveMonitors() {
+        var monitors = new List<Rect>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr monitor, IntPtr dc, ref Rect area, IntPtr state) => {
+            monitors.Add(area); return true;
+        }, IntPtr.Zero);
+        return monitors;
+    }
+    public static string DesktopUnavailableReason() {
+        if (!Environment.UserInteractive) return "No interactive Windows desktop.";
+        const uint DesktopReadObjects = 0x0001;
+        IntPtr desktop = OpenInputDesktop(0, false, DesktopReadObjects);
+        if (desktop == IntPtr.Zero) return "Windows input desktop unavailable (Win32 error " + Marshal.GetLastWin32Error() + ").";
+        CloseDesktop(desktop);
+        return ActiveMonitors().Count == 0 ? "No active monitors in the Windows session." : null;
+    }
     public static List<YabDpiSample> Run(int process, string directory) {
         IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         try {
-            var monitors = new List<Rect>();
-            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr monitor, IntPtr dc, ref Rect area, IntPtr state) => {
-                monitors.Add(area); return true;
-            }, IntPtr.Zero);
+            var monitors = ActiveMonitors();
             if (monitors.Count == 0) throw new InvalidOperationException("No active monitors.");
             var samples = new List<YabDpiSample>();
             foreach (string page in new string[] { "sidebar", "progress", "finish" }) {
@@ -230,6 +252,10 @@ public static class YabDpiProbe {
     }
 }
 '@
+if ($CheckDesktop) {
+    @{ SkipReason = [YabDpiProbe]::DesktopUnavailableReason() } | ConvertTo-Json -Compress
+    return
+}
 try {
     [YabDpiProbe]::Run($PreviewProcessId, (Split-Path $ReportPath)) | ConvertTo-Json -Depth 5 -AsArray | Set-Content -LiteralPath $ReportPath -Encoding utf8
 } finally {
