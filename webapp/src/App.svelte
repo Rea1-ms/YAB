@@ -12,22 +12,39 @@
   import Advanced from './lib/pages/Advanced.svelte';
   import UpdatePage from './lib/pages/Update.svelte';
 
+  const LAST_DIR_KEY = 'baas.lastConfigDir';
+
+  function readLastDir(): string {
+    try {
+      return localStorage.getItem(LAST_DIR_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  }
+
   const current = $derived($route);
   const scan = $derived($configScan);
-  let lastDir = $state('');
-  const dir = $derived(current?.dir
+  let lastDir = $state(readLastDir());
+  const routeDir = $derived(scan.length === 0
+    ? current?.dir
+    : scan.find((c) => c.dir === current?.dir)?.dir);
+  // 全局页没有配置目录，侧栏沿用最近选择的有效配置。
+  const dir = $derived(routeDir
     ?? (scan.some((c) => c.dir === lastDir) ? lastDir : (scan[0]?.dir ?? '')));
   const page = $derived(current?.page ?? 'home');
   const globalPage = $derived(current?.global ?? null);
   const currentName = $derived(scan.find((c) => c.dir === dir)?.name ?? dir);
 
-  // 全局页没有配置目录，侧栏沿用最近选择的有效配置。
   $effect(() => {
-    if (current?.dir) lastDir = current.dir;
+    if (!routeDir || scan.length === 0 || routeDir === lastDir) return;
+    lastDir = routeDir;
+    try {
+      localStorage.setItem(LAST_DIR_KEY, routeDir);
+    } catch {
+      return;
+    }
   });
 
-  // 路由守卫：新建配置待出现后跳转；空 hash 跳第一个配置；目录失效跳回第一个
-  // 全局页（更新与帮助）不参与目录守卫
   $effect(() => {
     const r = current;
     const list = scan;
@@ -37,23 +54,13 @@
       navigate(pend, 'home');
       return;
     }
-    if (r?.global) return;
-    if (!r) {
-      if (list.length > 0) navigate(list[0].dir, 'home');
-      return;
-    }
-    if (list.length > 0 && !list.some((c) => c.dir === r.dir) && pend !== r.dir) {
-      navigate(list[0].dir, 'home');
-    }
+    if (r?.global || !dir) return;
+    if (!r || (!routeDir && pend !== r.dir)) navigate(dir, 'home');
   });
 
   // 切换激活配置：订阅/退订对应 topic；进入全局页时退订全部
   $effect(() => {
-    if (globalPage) {
-      setActiveDir(null);
-      return;
-    }
-    if (current && current.dir) setActiveDir(current.dir);
+    setActiveDir(routeDir ?? null);
   });
 
   // —— 新建 / 重命名 / 删除 ——
@@ -178,7 +185,7 @@
   <main class="main">
     {#if globalPage === 'update'}
       <UpdatePage />
-    {:else if !dir}
+    {:else if !routeDir}
       <div class="placeholder">{scan.length === 0 ? $t('等待后端连接…') : $t('暂无配置')}</div>
     {:else}
       {#key dir}

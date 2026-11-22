@@ -30,13 +30,18 @@ async function checkNavigation() {
       backend.once('error', reject);
       backend.once('exit', code => reject(new Error(`Fixture exited ${code}: ${logs}`)));
     });
-    window = new BrowserWindow({ show: false, width: 1280, height: 800,
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
-        offscreen: true, backgroundThrottling: false } });
     const errors = [];
-    window.webContents.on('console-message', ({ level, message }) => {
-      if (level === 'error') errors.push(message);
-    });
+    async function open(fragment = '') {
+      const previous = window;
+      window = new BrowserWindow({ show: false, width: 1280, height: 800,
+        webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
+          offscreen: true, backgroundThrottling: false } });
+      window.webContents.on('console-message', ({ level, message }) => {
+        if (level === 'error') errors.push(message);
+      });
+      previous?.destroy();
+      await window.loadURL(`${url}/${fragment}`);
+    }
     const run = source => window.webContents.executeJavaScript(source);
     async function until(source) {
       for (let count = 0; count < 150; count++) {
@@ -48,6 +53,9 @@ async function checkNavigation() {
     async function click(selector) {
       await run(`document.querySelector(${JSON.stringify(selector)}).click()`);
     }
+    async function selectProfile(dir) {
+      await run(`(() => { const select = document.querySelector('.cfg-block select'); select.value = ${JSON.stringify(dir)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    }
     async function profileFiles() {
       const result = {};
       for (const dir of ['account', 'second']) {
@@ -58,8 +66,9 @@ async function checkNavigation() {
       return result;
     }
 
-    // A nonfirst profile exposes a silent fallback to the first entry.
-    await window.loadURL(`${url}/#/second/home`);
+    await open();
+    await until('location.hash === "#/account/home" && !!document.querySelector(".big-btn")');
+    await open('#/second/home');
     await until('document.querySelector(".cfg-block select")?.value === "second" && document.querySelector(".big-btn")?.textContent.trim() === "停止"');
     const before = await profileFiles();
     for (const page of ['home', 'schedule', 'config', 'settings', 'advanced']) {
@@ -77,17 +86,24 @@ async function checkNavigation() {
     // Changing the selector on the global page explicitly selects that profile.
     await click('.global-nav a[href="#/update"]');
     await until('location.hash === "#/update"');
-    await run('(() => { const select = document.querySelector(".cfg-block select"); select.value = "account"; select.dispatchEvent(new Event("change", { bubbles: true })); })()');
+    await selectProfile('account');
     await until('location.hash === "#/account/home" && !!document.querySelector(".big-btn")');
     await click('.global-nav a[href="#/update"]');
     await until('location.hash === "#/update"');
     assert.equal(await run('document.querySelector(".cfg-block select").value'), 'account');
+    await selectProfile('second');
+    await until('location.hash === "#/second/home" && !!document.querySelector(".big-btn")');
 
-    // A direct visit has no previous profile and uses the first valid entry.
-    await window.webContents.reload();
-    await until('document.querySelector(".cfg-block select")?.value === "account"');
-    await click('.nav a[href="#/account/home"]');
-    await until('location.hash === "#/account/home" && !!document.querySelector(".big-btn")');
+    await open();
+    await until('location.hash === "#/second/home" && document.querySelector(".cfg-block select")?.value === "second"');
+    await open('#/update');
+    await until('document.querySelector(".cfg-block select")?.value === "second"');
+    await open('#/missing/home');
+    await until('location.hash === "#/second/home"');
+
+    await run('localStorage.setItem("baas.lastConfigDir", "missing")');
+    await open();
+    await until('location.hash === "#/account/home" && document.querySelector(".cfg-block select")?.value === "account"');
     assert.deepEqual(await profileFiles(), before);
     assert.deepEqual(errors, []);
     console.log('CONFIG_NAVIGATION_OK');
