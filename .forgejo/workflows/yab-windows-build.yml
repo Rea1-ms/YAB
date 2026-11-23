@@ -1,0 +1,86 @@
+name: YAB Windows Build
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: forgejo.ref == 'refs/heads/master'
+    runs-on: windows-build
+    steps:
+      - name: 构建完整安装包和压缩包
+        run: |
+          set -eu
+          # PowerShell 7 的 EncodedCommand 使用 UTF-16LE，避免两端对引号的不同处理。
+          command=$(node -e '
+            const commit = process.env.FORGEJO_SHA;
+            if (!/^[0-9a-f]{40}$/i.test(commit ?? "")) {
+              throw new Error("缺少有效的构建提交 SHA");
+            }
+            const script = require("node:fs").readFileSync(0, "utf8");
+            process.stdout.write(Buffer.from(script.replace("__BUILD_COMMIT__", commit), "utf16le").toString("base64"));
+          ' <<'POWERSHELL'
+          $ErrorActionPreference = 'Stop'
+          Write-Output "PowerShell $($PSVersionTable.PSVersion)"
+          $missingTools = @('git', 'uv', 'node', 'pnpm') | Where-Object {
+            -not (Get-Command -Name $_ -ErrorAction SilentlyContinue)
+          }
+          if ($missingTools) {
+            throw "构建账号的 PATH 找不到这些工具：$($missingTools -join ', ')。"
+          }
+
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $projectDir = 'C:\Build\YAB'
+          if (-not (Test-Path -LiteralPath (Join-Path $projectDir '.git'))) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $projectDir) -Force | Out-Null
+            git clone --branch master --single-branch https://github.com/Rea1-ms/YAB.git $projectDir
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Set-Location -LiteralPath $projectDir
+          $changes = git status --porcelain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($changes) { throw '构建目录有未提交的改动，请先处理。' }
+
+          $commit = '__BUILD_COMMIT__'
+          git fetch origin master
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git merge-base --is-ancestor $commit FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw '触发构建的提交没有合并到 GitHub 的 master。' }
+          git checkout --detach $commit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          uv sync --locked --python 3.11
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          function Test-OcrAssets([string]$directory) {
+            $server = Join-Path $directory 'BAAS_ocr_server.exe'
+            $models = Join-Path $directory 'resource\ocr_models'
+            (Test-Path -LiteralPath $server -PathType Leaf) -and (Test-Path -LiteralPath $models -PathType Container)
+          }
+
+          $ocrDir = Join-Path $projectDir 'core\ocr\baas_ocr_client\bin'
+          if (-not (Test-OcrAssets $ocrDir)) {
+            $ocrSource = uv run --locked --no-sync python -c 'from core.ocr.baas_ocr_client.server_installer import OCR_SERVER_PREBUILD_URL, branch; print(OCR_SERVER_PREBUILD_URL); print(branch)'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            # 下载完成并确认程序和模型都存在之后，才将资源放到打包入口。
+            $buildDir = Join-Path $projectDir 'desktop\build'
+            New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+            $ocrStage = Join-Path $buildDir ('ocr-' + [guid]::NewGuid().ToString('N'))
+            git clone --depth 1 --single-branch --branch ($ocrSource[1]) ($ocrSource[0]) $ocrStage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (-not (Test-OcrAssets $ocrStage)) { throw '下载的识别资源缺少程序或模型。' }
+            if (Test-Path -LiteralPath $ocrDir) {
+              Move-Item -LiteralPath $ocrDir -Destination "$ocrStage.previous"
+            }
+            Move-Item -LiteralPath $ocrStage -Destination $ocrDir
+          }
+
+          pnpm -C desktop install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm -C desktop run dist
+          exit $LASTEXITCODE
+          POWERSHELL
+          )
+          ssh -T windows-build pwsh.exe -NoProfile -NonInteractive -EncodedCommand "$command"
