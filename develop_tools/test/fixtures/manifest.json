@@ -114,6 +114,42 @@
         ]
       ]
     },
+    "global_update_notice_en": {
+      "path": "global_update_notice_en.png",
+      "sha256": "0b6019bca191c215a444c0c480bf080d15a1bbc3872b87ff521c323421d76ad1",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服英文更新预告：计划维护时段",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_update_notice_reads_the_schedule_before_closing",
+        "develop_tools.test.test_main_page_popups.MainPagePopupTests.test_update_notice_closes_when_the_schedule_cannot_be_read"
+      ],
+      "source": {
+        "filename": "Scrcpy-20261124-222245-178.png",
+        "sha256": "20089f0539d47dc670953e03e268b95d8f50e52950db163ee0b041ea75823d80",
+        "registered_on": "2026-11-24",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [
+          1136,
+          0,
+          1280,
+          36
+        ],
+        [
+          1216,
+          36,
+          1280,
+          79
+        ]
+      ]
+    },
     "global_shop_last_row": {
       "path": "global_shop_last_row.png",
       "sha256": "10e70c9dea72aff6ad48884088fbd3b7c784b724d2cf20553fcb5cecc1a51c59",

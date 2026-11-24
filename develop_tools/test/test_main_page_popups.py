@@ -13,7 +13,7 @@ from core.Baas_thread import Baas_thread
 
 # isort: split
 from core import image, picture, position
-from core.exception import RequestHumanTakeOver
+from core.exception import OcrInternalError, RequestHumanTakeOver
 from develop_tools.test.offline_support import FrameReplay, ReplayClock, load_fixture
 from module import collect_daily_free_power as free_power
 
@@ -148,6 +148,38 @@ class MainPagePopupTests(unittest.TestCase):
     def login_clicks(self, kind):
         clicks = [call(572, 610, wait_over=True)] if kind == 'launch' else []
         return clicks + [call(886, 165, wait_over=True)]
+
+    def test_update_notice_reads_the_schedule_before_closing(self):
+        for identifier in IDENTIFIERS:
+            for ratio in (0.5, 1, 2):
+                with self.subTest(identifier=identifier, ratio=ratio):
+                    notice = load_fixture('global_update_notice_en')
+                    worker = self.worker([notice, notice, self.frame('home')], identifier, ratio)
+                    worker.ocr = Mock()
+
+                    def read_schedule(*args, **kwargs):
+                        worker.click.assert_not_called()
+                        return '11/10 (Tue) 2:00 AM - 6:00 AM (UTC)'
+
+                    worker.ocr.get_region_res.side_effect = read_schedule
+                    worker.to_main_page()
+                    worker.ocr.get_region_res.assert_called_once_with(
+                        worker, (317, 355, 763, 388), language='en-us', log_info='维护时段'
+                    )
+                    worker.click.assert_called_once_with(1173, 75, wait_over=True)
+                    worker.logger.info.assert_any_call('Stage ended with matched RGB feature: main_page')
+
+    def test_update_notice_closes_when_the_schedule_cannot_be_read(self):
+        notice = load_fixture('global_update_notice_en')
+        for error in (None, OcrInternalError('识别服务异常')):
+            with self.subTest(error=error):
+                worker = self.worker([notice, self.frame('home')])
+                worker.ocr = Mock()
+                worker.ocr.get_region_res.side_effect = error
+                worker.ocr.get_region_res.return_value = ''
+                worker.to_main_page()
+                worker.logger.warning.assert_called_once()
+                worker.click.assert_called_once_with(1173, 75, wait_over=True)
 
     def test_resource_download_prompts_confirm_at_all_resolutions(self):
         for name in ('global_download_essential', 'global_download_additional'):

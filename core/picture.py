@@ -4,9 +4,11 @@ import time
 import typing
 from typing import TYPE_CHECKING
 
+from requests.exceptions import RequestException
+
 from core import color, image
 from core.color import match_rgb_feature
-from core.exception import RequestHumanTakeOver, FunctionCallTimeout, PackageIncorrect
+from core.exception import FunctionCallTimeout, OcrInternalError, PackageIncorrect, RequestHumanTakeOver
 from module.main_story import set_acc_and_auto
 
 if TYPE_CHECKING:
@@ -187,12 +189,18 @@ def co_detect(
         raise RequestHumanTakeOver("Request Human Take Over.")
 
 
+_UPDATE_NOTICE_SCHEDULE = 'main_page_update-notice-schedule'
+_UPDATE_NOTICE_TIME_AREA = (317, 355, 763, 388)
+
+
 def handle_global_main_page_overlay(self, before_reaction=None):
     if self.server != 'Global':
         return False
+    if image.compare_image(self, _UPDATE_NOTICE_SCHEDULE):
+        feature, click = _UPDATE_NOTICE_SCHEDULE, (1173, 75)
     # Recognize startup promotions by the footer icon and click the fixed close
     # position. The close icon can vary with the banner artwork.
-    if (image.compare_image(self, 'main_page_startup-promo-dismiss')
+    elif (image.compare_image(self, 'main_page_startup-promo-dismiss')
             or image.compare_image(self, 'main_page_startup-promo-dismiss-2')
             or image.compare_image(self, 'main_page_startup-promo-dismiss-light')
             or image.compare_image(self, 'main_page_startup-promo-dismiss-dark')):
@@ -214,6 +222,15 @@ def handle_global_main_page_overlay(self, before_reaction=None):
         return True
     if before_reaction is not None:
         before_reaction(feature, click)
+    if feature == _UPDATE_NOTICE_SCHEDULE:
+        try:
+            schedule = self.ocr.get_region_res(
+                self, _UPDATE_NOTICE_TIME_AREA, language='en-us', log_info='维护时段'
+            )
+            if not schedule.strip():
+                self.logger.warning('更新预告的维护时段未识别到文字')
+        except (OcrInternalError, RequestException) as error:
+            self.logger.warning(f'更新预告的维护时段识别失败：{error}')
     self.logger.info(f'Found overlay: {feature} -> Click @ {click}')
     self.click(*click, wait_over=True)
     self.last_click_time = time.time()

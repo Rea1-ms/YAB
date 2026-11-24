@@ -10,6 +10,7 @@ x_y_range = {
     'news-webview': (50, 102, 90, 210),
     'news-webview-detail': (50, 102, 90, 210),
     'news-webview-close': (1194, 22, 1235, 64),
+    'update-notice-schedule': (472, 322, 603, 355),
     'startup-promo-close': (1148, 52, 1198, 99),
     'startup-promo-dismiss': (82, 626, 122, 666),
     'startup-promo-dismiss-2': (84, 636, 112, 664),
