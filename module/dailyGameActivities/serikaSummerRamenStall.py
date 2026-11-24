@@ -60,7 +60,6 @@ def chooseLoop(self):
         img = cv2.imread(imgDir + "/" + material + ".png", cv2.IMREAD_UNCHANGED)
         if img.shape[2] == 4:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(imgDir + "/" + material + ".png", img)
         imgDic[material] = img
     startTime = time.time()
     totalTime = 115
@@ -71,7 +70,8 @@ def chooseLoop(self):
         for i in range(0, 3):
             region = regions[i]
             croppedImg = self.latest_img_array[region[1]:region[3], region[0]:region[2]]
-            cv2.imwrite("croppedImg.png", croppedImg)
+            from core.paths import data_path
+            cv2.imwrite(str(data_path('croppedImg.png')), croppedImg)
             mostPossibleMaterial = None
             maxThreshold = 0.85
             for material in possibleMaterial:
