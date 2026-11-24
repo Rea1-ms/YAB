@@ -1,7 +1,10 @@
 """Access regressions without opening a browser or connecting a device."""
 
 import secrets
+import json
+import os
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from starlette.responses import JSONResponse
@@ -111,6 +114,39 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
         messages = await self.request(app, websocket=True, client='192.0.2.1',
                                       headers={'authorization': 'Bearer ' + token})
         self.assertEqual(messages[0]['type'], 'websocket.accept')
+
+
+class DesktopUpdateAccessTests(unittest.IsolatedAsyncioTestCase):
+    request = AccessTests.request
+    status = AccessTests.status
+
+    async def test_update_requires_private_token_as_well_as_web_access(self):
+        from server.app import create_app
+        with patch.dict(os.environ, {'YAB_DESKTOP_UPDATE_TOKEN': 'private-fixture-token'}):
+            app = create_app(serve_webapp=False, access_token='web-fixture-token')
+        url = '/api/desktop-update'
+        body = json.dumps({'action': 'prepare'}).encode()
+        headers = {'x-yab-desktop-token': 'private-fixture-token'}
+        self.assertEqual(self.status(await self.request(app, url, 'POST', headers, body=body)), 401)
+        headers = {'authorization': 'Bearer web-fixture-token'}
+        self.assertEqual(self.status(await self.request(app, url, 'POST', headers, body=body)), 403)
+        headers['x-yab-desktop-token'] = 'wrong'
+        self.assertEqual(self.status(await self.request(app, url, 'POST', headers, body=body)), 403)
+        headers['x-yab-desktop-token'] = 'private-fixture-token'
+        for action, pending, ready in (('prepare', True, True), ('status', True, True), ('cancel', False, False)):
+            messages = await self.request(app, url, 'POST', headers, body=json.dumps({'action': action}).encode())
+            self.assertEqual(self.status(messages), 200)
+            self.assertEqual(json.loads(messages[1]['body']), {'pending': pending, 'ready': ready, 'running': []})
+        for bad in (b'not-json', b'[]', b'{"action":"install"}'):
+            self.assertEqual(self.status(await self.request(app, url, 'POST', headers, body=bad)), 400)
+
+    async def test_source_server_has_no_update_control_without_private_token(self):
+        from server.app import create_app
+        with patch.dict(os.environ, {'YAB_DESKTOP_UPDATE_TOKEN': ''}):
+            app = create_app(serve_webapp=False, access_token='')
+        messages = await self.request(app, '/api/desktop-update', 'POST',
+                                      {'x-yab-desktop-token': 'invented'}, body=b'{"action":"prepare"}')
+        self.assertEqual(self.status(messages), 403)
 
 
 if __name__ == '__main__':

@@ -171,6 +171,128 @@ class WorkerTests(ScratchTest):
                 call()
         self.assertEqual(config_path('account'), self.scratch / 'config/account')
 
+    def test_desktop_update_waits_for_live_worker_and_blocks_new_tasks(self):
+        task = self.task()
+        self.service.start('account')
+        self.assertTrue(task.executing.wait(2))
+        status = self.service.desktop_update('prepare')
+        self.assertEqual(status, {'pending': True, 'running': ['account'], 'ready': False})
+        self.assertIn('stop', task.commands)
+        for launch in (self.service.start, lambda config: self.service.run_task(config, 'mail')):
+            with self.assertRaisesRegex(RuntimeError, '桌面更新'):
+                launch('account')
+        task.release.set()
+        self.service.workers['account'].join(2)
+        self.assertTrue(self.service.desktop_update('status')['ready'])
+        self.assertFalse(self.service.desktop_update('cancel')['pending'])
+        self.service.start('account')
+
+    def test_desktop_update_during_initialization_prevents_execution(self):
+        task = self.task(block_init=True)
+        self.service.start('account')
+        self.assertTrue(task.initializing.wait(2))
+        self.assertFalse(self.service.desktop_update('prepare')['ready'])
+        task.release.set()
+        self.service.workers['account'].join(2)
+        self.assertNotIn('start', task.commands)
+        self.assertTrue(self.service.desktop_update('status')['ready'])
+
+    def test_desktop_update_guards_all_mutating_rpc_handlers(self):
+        from server.app import register_topics
+        from server.hub import Hub
+        hub = Hub()
+        register_topics(hub, self.service)
+        self.service.desktop_update('prepare')
+        for topic, function in (('ConfigScan', 'add'), ('ConfigScan', 'delete'), ('ConfigScan', 'rename'),
+                                ('ConfigArg', 'set'), ('ConfigArg', 'set_sweep'), ('ConfigArg', 'push_test'),
+                                ('EventConfig', 'set_event'), ('EventConfig', 'enable_all'),
+                                ('EventConfig', 'refresh_all'), ('Meta', 'update_save'), ('Meta', 'webui_save')):
+            with self.subTest(topic=topic, function=function), self.assertRaisesRegex(RuntimeError, '桌面更新'):
+                hub.rpc_handlers[(topic, function)]('account', {})
+        handler = Mock()
+        guarded = self.service.guard_write(handler)
+        self.service.desktop_update('cancel')
+        guarded('account', {})
+        handler.assert_called_once_with('account', {})
+
+
+class UpdateSettingsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.values = {
+            'General.mirrorc_cdk': 'obsolete-fixture-cdk',
+            'URLs.REPO_URL_HTTP': 'https://github.com/pur1fying/blue_archive_auto_script.git',
+            'General.get_remote_sha_method': 'mirrorc',
+        }
+        self.config = Mock()
+        self.config.get.side_effect = self.values.get
+        self.config.set_and_save.side_effect = self.values.__setitem__
+
+    async def rpc(self, function, params=None):
+        from server.app import create_app
+        scope = {'type': 'websocket', 'path': '/api/ws', 'scheme': 'ws',
+                 'headers': [(b'host', b'127.0.0.1:22267'),
+                             (b'origin', b'http://127.0.0.1:22267')],
+                 'client': ('127.0.0.1', 1000), 'server': ('127.0.0.1', 22267),
+                 'query_string': b'', 'root_path': '', 'subprotocols': []}
+        incoming = iter([
+            {'type': 'websocket.connect'},
+            {'type': 'websocket.receive', 'text': json.dumps(
+                {'t': 'Meta', 'o': 'rpc', 'f': function, 'v': params or {}, 'i': 7})},
+            {'type': 'websocket.disconnect', 'code': 1000},
+        ])
+        outgoing = []
+
+        async def receive():
+            return next(incoming)
+
+        async def send(message):
+            outgoing.append(message)
+
+        with patch.object(BaasService, '_toml_config', return_value=self.config), \
+                patch('server.app.build_meta', return_value={}), \
+                patch('server.app.scan_configs', return_value=[]):
+            await create_app(serve_webapp=False, access_token='')(scope, receive, send)
+        self.assertEqual(outgoing[0]['type'], 'websocket.accept')
+        replies = [json.loads(message['text']) for message in outgoing if message['type'] == 'websocket.send']
+        return next(reply for reply in replies if reply.get('i') == 7)
+
+    async def test_update_get_omits_retired_credentials_and_normalizes_old_method(self):
+        for method in ('mirrorc', 'mirrorc_api'):
+            with self.subTest(method=method):
+                self.values['General.get_remote_sha_method'] = method
+                reply = await self.rpc('update_get')
+                self.assertIsNone(reply['e'])
+                self.assertNotIn('mirrorc_cdk', reply['r'])
+                self.assertNotIn('obsolete-fixture-cdk', json.dumps(reply))
+                self.assertEqual(reply['r']['get_remote_sha_method'], '')
+        self.config.set_and_save.assert_not_called()
+
+    async def test_update_save_rejects_retired_settings_before_any_write(self):
+        for obsolete in ({'mirrorc_cdk': 'unused-fixture-cdk'},
+                         {'get_remote_sha_method': 'mirrorc'},
+                         {'get_remote_sha_method': 'mirrorc_api'}):
+            with self.subTest(obsolete=obsolete):
+                reply = await self.rpc('update_save', {'patch': {
+                    'repo_url_http': 'https://gitee.com/pur1fy/blue_archive_auto_script.git',
+                    **obsolete,
+                }})
+                self.assertIsNotNone(reply['e'])
+                self.config.set_and_save.assert_not_called()
+
+    async def test_update_save_keeps_supported_git_methods(self):
+        for method in ('', 'github', 'gitee', 'gitcode', 'tencent_c_coding'):
+            with self.subTest(method=method):
+                reply = await self.rpc('update_save', {'patch': {'get_remote_sha_method': method}})
+                self.assertIsNone(reply['e'])
+                self.assertEqual(reply['r']['get_remote_sha_method'], method)
+                self.assertEqual(self.values['General.get_remote_sha_method'], method)
+
+    async def test_retired_cdk_test_is_not_registered(self):
+        reply = await self.rpc('cdk_test', {'cdk': 'unused-fixture-cdk'})
+        self.assertEqual(reply['e'], 'Unknown rpc: Meta.cdk_test')
+        self.config.get.assert_not_called()
+        self.config.set_and_save.assert_not_called()
+
 
 class ConfigNameTests(ScratchTest):
     def setUp(self):
