@@ -1,7 +1,7 @@
 """Build the x86 native installer control plugin with Visual Studio Build Tools.
 
 Release builds use the checked-in DLL; run this only after changing its source.
-Intermediate files are retained under develop_tools/out, never removed here.
+The compiler's temporary files are removed when it finishes.
 """
 
 import hashlib
@@ -19,9 +19,12 @@ def main():
         'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
     if not installation:
         raise SystemExit('请安装 Visual Studio 的 C++ 桌面构建工具')
-    output = desktop.parent / 'develop_tools/out'
-    output.mkdir(parents=True, exist_ok=True)
-    scratch = Path(tempfile.mkdtemp(prefix='installer-native-', dir=output))
+    with tempfile.TemporaryDirectory(prefix='yab-installer-native-') as scratch:
+        compile_plugin(desktop, Path(installation), Path(scratch))
+    print('已生成安装器控件库')
+
+
+def compile_plugin(desktop, installation, scratch):
     exports = scratch / 'exports.def'
     exports.write_text('LIBRARY YabInstallUI\nEXPORTS\n Initialize\n BrowseFolder\n Sidebar\n Apply\n Progress\n Stage\n Phase\n Complete\n', encoding='ascii')
     assets = desktop / 'assets/checkbox'
@@ -43,13 +46,12 @@ def main():
         '/DEF:"' + str(exports) + '"', '/OUT:"' + str(desktop / 'assets/YabInstallUI.dll') + '"',
         'user32.lib', 'gdi32.lib', 'gdiplus.lib', 'comctl32.lib', 'uxtheme.lib', 'shell32.lib', 'dwmapi.lib', 'shlwapi.lib', 'ole32.lib', 'uuid.lib']
     response.write_text(' '.join(arguments), encoding='utf-8')
-    setup = Path(installation) / 'VC/Auxiliary/Build/vcvarsall.bat'
+    setup = installation / 'VC/Auxiliary/Build/vcvarsall.bat'
     command = scratch / 'build.cmd'
     command.write_text(f'@echo off\ncall "{setup}" x86 >nul\nif errorlevel 1 exit /b %errorlevel%\n'
         f'rc /nologo /fo "{compiled_resources}" "{resources}"\nif errorlevel 1 exit /b %errorlevel%\n'
         f'cl @"{response}"\n', encoding='mbcs')
     subprocess.run([os.environ.get('COMSPEC', 'cmd.exe'), '/d', '/c', 'build.cmd'], cwd=scratch, check=True)
-    print('已生成安装器控件库；中间文件保留于', scratch)
 
 
 if __name__ == '__main__':

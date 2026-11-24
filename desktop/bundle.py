@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from email.parser import BytesParser
 from pathlib import Path
@@ -31,23 +32,29 @@ def copy_filter(directory, names):
             or name.endswith(('.pyc', '.pyo', '.log'))]
 
 
-def build_bundle(output, cache, uv, mode='offline', system_uv=False):
+def build_bundle(output, cache, uv, mode='offline', system_uv=False, application=None):
     output.mkdir(parents=True)
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault('UV_CACHE_DIR', str(cache / 'uv'))
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
-    version = json.loads((ROOT / 'desktop/package.json').read_text(encoding='utf-8'))['version']
+    source = ROOT if application is None else application
+    metadata = source / ('desktop/package.json' if application is None else 'distribution.json')
+    version = json.loads(metadata.read_text(encoding='utf-8'))['version']
     python_version = (ROOT / 'desktop/python-version').read_text().strip()
-    if not (ROOT / OCR / 'BAAS_ocr_server.exe').is_file():
+    if not (source / OCR / 'BAAS_ocr_server.exe').is_file():
         raise RuntimeError('请先按源码方式启动一次，准备识别程序和模型')
-    if not (ROOT / 'webapp/dist/index.html').is_file():
+    frontend = source / 'webapp/dist'
+    if not (frontend / 'index.html').is_file():
         raise RuntimeError('发行包缺少预构建网页')
 
     # Export dependencies before computing their key: changing only the application
     # version must not invalidate the complete wheelhouse.
     locked = output / 'requirements.txt'
-    run([uv, 'export', '--locked', '--no-dev', '--no-default-groups', '--no-emit-project',
-         '--no-header', '--no-annotate', '-o', locked], stdout=subprocess.DEVNULL)
+    export = [uv, 'export', '--locked', '--no-dev', '--no-default-groups', '--no-emit-project',
+              '--no-header', '--no-annotate', '-o', locked]
+    if application is not None:
+        export += ['--project', application, '--python', sys.executable]
+    run(export, stdout=subprocess.DEVNULL)
     toolkit = output / 'toolkit'
     toolkit.mkdir()
     if not system_uv:
@@ -59,10 +66,14 @@ def build_bundle(output, cache, uv, mode='offline', system_uv=False):
         (output / 'build-constraints.txt').write_text(
             'setuptools==69.5.1\nwheel==0.45.1\n', encoding='utf-8')
 
-    copy_application(output, version)
-    files = {file.relative_to(output).as_posix(): sha256(file)
-             for file in sorted(output.rglob('*')) if file.is_file()}
-    runtime_files = {name: digest for name, digest in files.items() if not name.startswith('app/')}
+    runtime_files = {file.relative_to(output).as_posix(): sha256(file)
+                     for file in sorted(output.rglob('*')) if file.is_file()}
+    if application is None:
+        application = output / 'app'
+        copy_application(application, version, frontend)
+    files = dict(runtime_files)
+    files.update({f'app/{file.relative_to(application).as_posix()}': sha256(file)
+                  for file in sorted(application.rglob('*')) if file.is_file()})
     if mode == 'online':
         # Tool location and mirror selection do not change the locked environment.
         runtime_files = {name: digest for name, digest in runtime_files.items() if not name.startswith('toolkit/')}
@@ -71,7 +82,7 @@ def build_bundle(output, cache, uv, mode='offline', system_uv=False):
     runtime_key = hashlib.sha256(json.dumps(runtime_files, sort_keys=True).encode()).hexdigest()
     bundle_id = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
     manifest = {'format': 2 if mode == 'offline' else 3, 'id': bundle_id, 'version': version,
-                'python': python_version, 'runtimeKey': runtime_key, 'files': files}
+                'python': python_version, 'runtimeKey': runtime_key, 'files': dict(sorted(files.items()))}
     if mode == 'online':
         manifest.update(mode='online', uv='system' if system_uv else 'bundled')
     (output / 'bundle.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -128,26 +139,34 @@ def prepare_offline_dependencies(output, cache, uv, python_version, locked, tool
     (output / 'requirements.txt').write_text('\n'.join(requirements) + '\n', encoding='utf-8')
 
 
-def copy_application(output, version):
-    app = output / 'app'
-    app.mkdir()
-    for directory in ('core', 'module', 'server', 'src', 'assets'):
-        def source_filter(current, names):
-            ignored = copy_filter(current, names)
-            if Path(current).resolve() == (ROOT / OCR).parent.resolve():
-                ignored.append('bin')
-            return ignored
-        shutil.copytree(ROOT / directory, app / directory, ignore=source_filter)
-    for filename in ('main.py', 'webui.py', 'pyproject.toml', 'uv.lock', 'LICENSE', 'README.md'):
-        shutil.copy2(ROOT / filename, app / filename)
-    shutil.copytree(ROOT / 'webapp/dist', app / 'webapp/dist', ignore=copy_filter)
-    ocr = app / OCR
-    ocr.mkdir(parents=True)
-    shutil.copytree(ROOT / OCR / 'resource', ocr / 'resource', ignore=copy_filter)
+def application_filter(directory, names):
+    ignored = copy_filter(directory, names)
+    if Path(directory).resolve() == (ROOT / OCR).parent.resolve():
+        ignored.append('bin')
+    return ignored
+
+
+def application_sources(frontend):
+    for name in ('core', 'module', 'server', 'src', 'assets'):
+        yield ROOT / name, Path(name), application_filter
+    for name in ('main.py', 'webui.py', 'pyproject.toml', 'uv.lock', 'LICENSE', 'README.md'):
+        yield ROOT / name, Path(name), None
+    yield frontend, Path('webapp/dist'), copy_filter
+    yield ROOT / OCR / 'resource', OCR / 'resource', copy_filter
     for file in (ROOT / OCR).iterdir():
         if file.is_file() and file.suffix.lower() in ('.exe', '.dll'):
-            shutil.copy2(file, ocr / file.name)
+            yield file, OCR / file.name, None
+
+
+def copy_application(app, version, frontend):
+    app.mkdir()
+    for source, relative, ignore in application_sources(frontend):
+        if ignore is None:
+            shutil.copy2(source, app / relative)
+        else:
+            shutil.copytree(source, app / relative, ignore=ignore)
     (app / 'distribution.json').write_text(json.dumps({'version': version, 'format': 1}), encoding='utf-8')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

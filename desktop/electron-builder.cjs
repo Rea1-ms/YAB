@@ -18,9 +18,10 @@ function packagedDirectories(root, relative = '') {
 }
 
 const backend = process.env.BAAS_BACKEND_DIR;
+const application = process.env.BAAS_APPLICATION_DIR;
 const release = process.env.BAAS_RELEASE_DIR;
 if (!backend || !fs.existsSync(path.join(backend, 'bundle.json'))
-    || !fs.existsSync(path.join(backend, 'app', 'server', '__main__.py'))) {
+    || !fs.existsSync(path.join(application || path.join(backend, 'app'), 'server', '__main__.py'))) {
   throw new Error('请通过 pnpm run dist 或 pnpm run pack 构建完整程序');
 }
 
@@ -40,6 +41,10 @@ module.exports = {
     const builderRequire = createRequire(createRequire(require.resolve('electron-builder')).resolve('app-builder-lib'));
     const asar = builderRequire('@electron/asar');
     const archive = path.join(context.appOutDir, 'resources', 'app.asar');
+    if (application && JSON.parse(asar.extractFile(archive, 'package.json')).version
+        !== JSON.parse(fs.readFileSync(path.join(backend, 'bundle.json'), 'utf8')).version) {
+      throw new Error('桌面与后端版本不一致，请重新构建');
+    }
     for (const filename of ['main.js', 'preload.js', 'updater.cjs', 'update-config.cjs']) {
       if (!asar.extractFile(archive, filename).equals(fs.readFileSync(path.join(__dirname, filename)))) {
         throw new Error(`构建期间源文件发生变化，请重新构建：${filename}`);
@@ -48,6 +53,7 @@ module.exports = {
     if (!asar.extractFile(archive, path.join('node_modules', 'electron-updater', 'out', 'main.js')).length) {
       throw new Error('发行包缺少桌面更新依赖');
     }
+    if (context.targets?.every(target => target.name === 'dir')) return;
     // Remove only files shipped by this build. The installation-local config
     // directory survives upgrades and is removed on uninstall only by choice.
     const entries = fs.readdirSync(context.appOutDir, { withFileTypes: true });
@@ -102,7 +108,8 @@ module.exports = {
     'startup.cjs', 'startup.html', 'startup.css', 'startup-page.js', 'backend-recovery.cjs',
     'window-mode.cjs', 'message-window.cjs', 'message-preload.cjs', 'message.html', 'message-page.js',
     'updater.cjs', 'update-config.cjs', 'assets/**', 'package.json'],
-  extraResources: [{ from: backend, to: 'backend' }],
+  extraResources: [{ from: backend, to: 'backend' },
+    ...(application ? [{ from: application, to: 'backend/app' }] : [])],
   artifactName: 'YAB-${version}-${arch}' + (process.env.YAB_BUILD_VARIANT?.startsWith('lite') ? '-' + process.env.YAB_BUILD_VARIANT : '') + '.${ext}',
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],

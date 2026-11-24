@@ -21,18 +21,23 @@ def _supports_node(version):
     return (major == 20 and minor >= 19) or (major == 22 and minor >= 12) or major >= 24
 
 
-def ensure_frontend(root=None, force=False):
-    root = Path(root) if root is not None else PROJECT_ROOT
-    webapp = root / 'webapp'
-    index = webapp / 'dist' / 'index.html'
-    if is_distribution(root):
-        if not index.is_file():
-            raise RuntimeError('发行包缺少网页资源，请重新下载完整发行包')
-        return
+def frontend_inputs(webapp):
     inputs = [webapp / name for name in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html',
                                          'vite.config.ts', 'svelte.config.js', 'tsconfig.json')]
     inputs.extend((webapp / 'src').rglob('*'))
     inputs.extend((webapp / 'public').rglob('*'))
+    return inputs
+
+
+def ensure_frontend(root=None, force=False, destination=None):
+    root = Path(root) if root is not None else PROJECT_ROOT
+    webapp = root / 'webapp'
+    index = (destination if destination is not None else webapp / 'dist') / 'index.html'
+    if is_distribution(root):
+        if not index.is_file():
+            raise RuntimeError('发行包缺少网页资源，请重新下载完整发行包')
+        return
+    inputs = frontend_inputs(webapp)
     if (not force and index.is_file()
             and all(path.stat().st_mtime <= index.stat().st_mtime for path in inputs if path.is_file())):
         return
@@ -48,7 +53,10 @@ def ensure_frontend(root=None, force=False):
     if not pnpm:
         raise RuntimeError('源码启动需要 pnpm（前端依赖管理工具），请安装后重新打开终端，版本可自行选择')
     print('正在使用本机环境准备网页界面，首次启动需要下载前端依赖……', flush=True)
-    for args in (['install', '--frozen-lockfile'], ['run', 'build', '--emptyOutDir', 'false']):
+    build_args = ['run', 'build', '--emptyOutDir', 'false']
+    if destination is not None:
+        build_args += ['--outDir', str(destination)]
+    for args in (['install', '--frozen-lockfile'], build_args):
         subprocess.run([pnpm] + args, cwd=webapp, check=True)
     if not index.is_file():
         raise RuntimeError('网页构建没有生成首页')
