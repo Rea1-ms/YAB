@@ -2,12 +2,12 @@
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from develop_tools.test_output import new_test_directory
 from core import distribution
 from server.app import register_topics
 from server.hub import Hub
@@ -16,10 +16,7 @@ from server.service import BaasService, get_version
 
 class VersionInfoTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        source = distribution.ROOT
-        output = source / 'develop_tools/out'
-        output.mkdir(parents=True, exist_ok=True)
-        scratch = Path(tempfile.mkdtemp(prefix='version-info-', dir=output))
+        scratch = new_test_directory(self, 'version-info-')
         self.package = scratch / 'app'
         self.package.mkdir()
         (self.package / 'pyproject.toml').write_text(

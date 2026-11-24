@@ -2,10 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 const { StartupProgress } = require('../startup.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories(['startup-*.png']);
 
 test('startup progress survives retries and failures without claiming success', () => {
   const progress = new StartupProgress();
@@ -42,9 +42,7 @@ test('startup log preserves chunked lines and bounds noisy subprocess output', (
 });
 
 test('real startup page streams logs, restricts access and fades into the loaded application', { timeout: 60000 }, async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'startup-ui-'));
+  const scratch = await newTestDirectory('startup-ui-');
   const env = { ...process.env, YAB_STARTUP_UI_TEST_DATA: scratch };
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await new Promise((resolve, reject) => {

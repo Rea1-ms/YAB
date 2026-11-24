@@ -7,7 +7,6 @@ import shutil
 import sys
 import time
 import unittest
-from datetime import datetime
 from functools import partial
 from pathlib import Path
 from uuid import uuid4
@@ -24,6 +23,7 @@ from develop_tools.test.offline_support import (
     recognition_diagnostics,
     validate_fixtures,
 )
+from develop_tools.test_output import RESULTS, local_directory, main as archive_test_results
 
 SUITES = {
     'popups': ('develop_tools.test.test_main_page_popups',),
@@ -149,17 +149,21 @@ def successful(result):
 
 
 def output_directory(value=None):
-    parent = ROOT / 'develop_tools/out/offline-tests'
-    path = Path(value).resolve() if value else parent / f'{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}'
+    if value:
+        path = Path(value).resolve()
+    else:
+        path = local_directory(RESULTS / 'offline-tests') / f'run-{uuid4().hex}'
     if not path.is_relative_to(ROOT):
         raise ValueError('报告目录必须位于当前仓库内')
     path.mkdir(parents=True, exist_ok=False)
     return path
 
 
-def write_report(destination, report):
+def write_report(destination, report, managed):
     with (destination / 'result.json').open('w', encoding='utf-8', newline='\n') as stream:
         stream.write(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    if managed:
+        (destination / '.complete').touch()
 
 
 def main(argv=None):
@@ -179,6 +183,8 @@ def main(argv=None):
                     print(test.id())
                 print(f'共 {len(cases)} 项；未运行测试')
                 return 0
+            if not args.out:
+                archive_test_results()
             destination = output_directory(args.out)
             registry = validate_fixtures()
             with (destination / 'output.log').open('w', encoding='utf-8', newline='\n') as logfile, \
@@ -192,14 +198,15 @@ def main(argv=None):
                       for status in ('passed', 'failed', 'error', 'skipped')}
             report = {'version': 1, 'suite': args.suite, 'case': args.case, 'python': sys.version.split()[0],
                       'fixture_count': len(registry), 'counts': counts, 'tests': result.records}
-            write_report(destination, report)
+            write_report(destination, report, managed=not args.out)
             print(f'离线结果：{counts}；报告：{destination}')
             return 0 if successful(result) and len(result.records) == len(cases) else 1
     except (OSError, ValueError, ImportError) as exc:
         message = f'离线测试准备失败：{exc}'
         if destination is not None:
             try:
-                write_report(destination, {'version': 1, 'status': 'preparation_error', 'error': str(exc)})
+                write_report(destination, {'version': 1, 'status': 'preparation_error', 'error': str(exc)},
+                             managed=not args.out)
             except OSError as report_error:
                 print(f'准备失败报告无法保存：{report_error}', file=sys.stderr)
         print(message, file=sys.stderr)

@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import socket
-import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -14,6 +13,7 @@ from unittest.mock import Mock, patch
 import uvicorn
 import websockets
 
+from develop_tools.test_output import new_test_directory
 from core.config.config_init import check_and_update_user_config
 from core.config.config_set import ConfigSet
 from core.config.default_config import DEFAULT_CONFIG, STATIC_DEFAULT_CONFIG
@@ -91,9 +91,7 @@ class TacticalShopMigrationTests(unittest.TestCase):
 
 class TacticalShopConfigTests(unittest.TestCase):
     def setUp(self):
-        output = Path(__file__).resolve().parents[2] / 'develop_tools/out'
-        output.mkdir(parents=True, exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='tactical-shop-regression-', dir=output))
+        self.scratch = new_test_directory(self, 'tactical-shop-regression-')
         previous = Path.cwd()
         os.chdir(self.scratch)
         self.addCleanup(os.chdir, previous)

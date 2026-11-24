@@ -7,6 +7,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { DesktopUpdater, attachDesktopUpdater, writeRecord, guardInstallerLaunch } = require('../updater.cjs');
 const { updateConfig, installerName, installedAt, createUpdateManifest, RELEASE_URL, VARIANTS } = require('../update-config.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories(['result.json']);
+const { prepareBuildInput } = require('../build-inputs.cjs');
 
 const digest = Buffer.alloc(64, 5).toString('base64');
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -108,7 +110,7 @@ test('startup and page checks share one pending network operation', async () => 
 });
 
 test('optional local-time schedule persists, re-arms daily and skips downloaded updates', async () => {
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/update-schedule-'));
+  const scratch = await newTestDirectory('update-schedule-');
   const settingsFile = path.join(scratch, 'config', 'desktop-update.json');
   let now = new Date(2026, 10, 15, 7).getTime();
   const timers = [];
@@ -231,7 +233,7 @@ test('only the current local main frame may invoke installation or receive state
 });
 
 test('startup confirmation records status without creating a configuration backup', async () => {
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/update-journal-'));
+  const scratch = await newTestDirectory('update-journal-');
   const journal = path.join(scratch, 'journal.json');
   await writeRecord(journal, { status: 'pending', currentVersion: '0.0.1', targetVersion: '0.0.2' });
   const f = fixture({ version: '0.0.2', journal });
@@ -244,7 +246,7 @@ test('startup confirmation records status without creating a configuration backu
 });
 
 test('manifests contain exact variant filenames, content digests and immutable release URLs', async () => {
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/update-manifest-'));
+  const scratch = await newTestDirectory('update-manifest-');
   for (const variant of VARIANTS) {
     const config = updateConfig(variant);
     const name = installerName('0.0.2', variant);
@@ -260,7 +262,7 @@ test('manifests contain exact variant filenames, content digests and immutable r
 });
 
 test('installation markers require a nonempty absolute location matching the running executable', async () => {
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/update-marker-'));
+  const scratch = await newTestDirectory('update-marker-');
   const executable = path.join(scratch, 'YAB.exe');
   const marker = path.join(scratch, 'yab-install-location');
   assert.equal(installedAt(executable, scratch), false);
@@ -273,12 +275,8 @@ test('installation markers require a nonempty absolute location matching the run
 });
 
 test('real updater validates HTTP downloads, retry, variant feeds and the sandboxed UI', { timeout: 65000 }, async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'desktop-update-ui-'));
-  const frontend = path.join(scratch, 'frontend');
-  const { build } = await import('../../webapp/node_modules/vite/dist/node/index.js');
-  await build({ root: path.resolve(__dirname, '../../webapp'), build: { outDir: frontend, emptyOutDir: false } });
+  const scratch = await newTestDirectory('desktop-update-ui-');
+  const frontend = await prepareBuildInput('frontend');
   await fs.writeFile(path.join(scratch, 'package.json'), JSON.stringify({ name: 'yab-updater-fixture', version: '0.0.1',
     main: path.resolve(__dirname, 'updater-render.cjs') }));
   const env = { ...process.env, YAB_UPDATE_TEST_DATA: scratch, YAB_UPDATE_TEST_FRONTEND: frontend };

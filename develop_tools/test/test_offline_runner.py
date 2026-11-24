@@ -3,12 +3,12 @@
 import hashlib
 import io
 import json
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import patch
-from uuid import uuid4
 
 from develop_tools.run_offline_tests import (
     OfflineResult,
@@ -29,6 +29,7 @@ from develop_tools.test.offline_support import (
     recognition_diagnostics,
     validate_fixtures,
 )
+from develop_tools.test_output import RETENTION_SECONDS, archive_test_results, new_test_directory
 
 
 class OfflineRunnerTests(unittest.TestCase):
@@ -125,8 +126,7 @@ class OfflineRunnerTests(unittest.TestCase):
                     operation()
 
     def test_failure_retains_screenshot_actions_and_expected_result(self):
-        destination = ROOT / 'develop_tools/out/offline-tests' / f'contract-{uuid4().hex[:8]}'
-        destination.mkdir(parents=True)
+        destination = new_test_directory(self, 'offline-contract-')
 
         class DeliberateFailure(unittest.TestCase):
             def runTest(self):
@@ -167,7 +167,7 @@ class OfflineRunnerTests(unittest.TestCase):
 
         result = unittest.TextTestRunner(
             stream=io.StringIO(), resultclass=partial(
-                OfflineResult, destination=output_directory(),
+                OfflineResult, destination=new_test_directory(self, 'offline-contract-'),
             ),
         ).run(unittest.TestSuite([ExpectedFailure()]))
         self.assertFalse(successful(result))
@@ -181,7 +181,9 @@ class OfflineRunnerTests(unittest.TestCase):
 
         with patch('develop_tools.run_offline_tests.shutil.copyfile', side_effect=OSError('controlled write error')):
             result = unittest.TextTestRunner(
-                stream=io.StringIO(), resultclass=partial(OfflineResult, destination=output_directory()),
+                stream=io.StringIO(), resultclass=partial(
+                    OfflineResult, destination=new_test_directory(self, 'offline-contract-'),
+                ),
             ).run(unittest.TestSuite([DeliberateFailure()]))
         details = '\n'.join(result.records[0]['details'])
         self.assertIn('original assertion', details)
@@ -189,8 +191,9 @@ class OfflineRunnerTests(unittest.TestCase):
         self.assertFalse(successful(result))
 
     def test_entry_reports_preparation_errors_without_skipping(self):
-        for error in (FileNotFoundError('missing sample'), ValueError('corrupted sample')):
-            destination = ROOT / 'develop_tools/out/offline-tests' / f'negative-{uuid4().hex[:8]}'
+        scratch = new_test_directory(self, 'offline-contract-')
+        for index, error in enumerate((FileNotFoundError('missing sample'), ValueError('corrupted sample'))):
+            destination = scratch / f'report-{index}'
             with self.subTest(error=str(error)), \
                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
                     patch('develop_tools.run_offline_tests.validate_fixtures', side_effect=error):
@@ -210,8 +213,9 @@ class OfflineRunnerTests(unittest.TestCase):
             def runTest(self):
                 self.skipTest('controlled skip')
 
+        scratch = new_test_directory(self, 'offline-contract-')
         for case, expected in ((DeliberateFailure(), 'failed'), (Skipped(), 'skipped')):
-            destination = ROOT / 'develop_tools/out/offline-tests' / f'negative-{uuid4().hex[:8]}'
+            destination = scratch / expected
             with self.subTest(status=expected), \
                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
                     patch('develop_tools.run_offline_tests.select_cases', return_value=[case]):
@@ -220,9 +224,35 @@ class OfflineRunnerTests(unittest.TestCase):
             self.assertEqual(report['counts'][expected], 1)
 
     def test_existing_report_directory_is_not_overwritten(self):
-        destination = output_directory()
+        scratch = new_test_directory(self, 'offline-contract-')
+        with patch('develop_tools.run_offline_tests.RESULTS', scratch):
+            destination = output_directory()
+        self.assertEqual(destination.parent, scratch / 'offline-tests')
         marker = destination / 'preserved.txt'
         marker.write_text('keep', encoding='utf-8')
         with self.assertRaises(FileExistsError):
             output_directory(destination)
         self.assertEqual(marker.read_text(encoding='utf-8'), 'keep')
+
+    def test_archive_only_moves_expired_completed_reports(self):
+        scratch = new_test_directory(self, 'offline-archive-')
+        results, archive = scratch / 'results', scratch / 'archive'
+        source, target = results / 'offline-tests', archive / 'offline-tests'
+        for name in ('run-expired', 'run-current', 'run-active', 'run-conflict'):
+            run = source / name
+            run.mkdir(parents=True)
+            (run / 'result.json').write_text(name, encoding='utf-8')
+            if name != 'run-active':
+                marker = run / '.complete'
+                marker.touch()
+                if name != 'run-current':
+                    old = marker.stat().st_mtime - RETENTION_SECONDS - 60
+                    os.utime(marker, (old, old))
+        conflict = target / 'run-conflict'
+        conflict.mkdir(parents=True)
+        with patch('develop_tools.test_output.RESULTS', results), patch('develop_tools.test_output.ARCHIVE', archive):
+            self.assertEqual(archive_test_results(), [target / 'run-expired'])
+            self.assertEqual(archive_test_results(), [])
+        self.assertEqual((target / 'run-expired/result.json').read_text(encoding='utf-8'), 'run-expired')
+        self.assertEqual({path.name for path in source.iterdir()}, {'run-current', 'run-active', 'run-conflict'})
+        self.assertEqual(list(conflict.iterdir()), [])

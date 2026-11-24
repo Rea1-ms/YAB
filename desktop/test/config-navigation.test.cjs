@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { prepareBuildInput } = require('../build-inputs.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -121,13 +122,10 @@ if (process.versions.electron) {
   checkNavigation().then(code => require('electron').app.exit(code));
 } else {
   const test = require('node:test');
+  const newTestDirectory = require('./output.cjs').testDirectories();
   test('global navigation retains the selected profile without rewriting its files', { timeout: 60000 }, async () => {
-    const output = path.join(root, 'develop_tools/out');
-    await fs.mkdir(output, { recursive: true });
-    const scratch = await fs.mkdtemp(path.join(output, 'config-navigation-'));
-    const frontend = path.join(scratch, 'frontend');
-    const { build } = await import('../../webapp/node_modules/vite/dist/node/index.js');
-    await build({ root: path.join(root, 'webapp'), build: { outDir: frontend, emptyOutDir: false } });
+    const scratch = await newTestDirectory('config-navigation-');
+    const frontend = await prepareBuildInput('frontend');
     const env = { ...process.env, YAB_NAV_TEST_DATA: scratch, YAB_RECOVERY_TEST_FRONTEND: frontend };
     for (const name of ['ELECTRON_RUN_AS_NODE', 'YAB_CONFIG_DIR', 'YAB_DATA_DIR', 'BAAS_WEBUI_TOKEN']) delete env[name];
     const result = await new Promise((resolve, reject) => {

@@ -4,23 +4,20 @@ import json
 import os
 from pathlib import Path
 import secrets
-import tempfile
 import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from develop_tools.test_output import new_test_directory
 from server import frontend
 from server.service import BaasService, config_path, scan_configs
 
 
 class ScratchTest(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[2]
-        output = root / 'develop_tools' / 'out'
-        output.mkdir(parents=True, exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='webui-regression-', dir=output))
+        self.scratch = new_test_directory(self, 'webui-regression-')
         previous = Path.cwd()
         os.chdir(self.scratch)
         self.addCleanup(os.chdir, previous)

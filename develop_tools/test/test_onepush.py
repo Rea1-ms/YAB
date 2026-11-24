@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -13,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
+from develop_tools.test_output import new_test_directory
 from core import notification
 from core.config.config_init import check_and_update_user_config
 from core.config.config_set import ConfigSet
@@ -186,9 +186,7 @@ class DeliveryTests(unittest.TestCase):
 
 class MigrationAndProtocolTests(unittest.TestCase):
     def setUp(self):
-        output = Path(__file__).resolve().parents[2] / 'develop_tools/out'
-        output.mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='onepush-regression-', dir=output))
+        self.scratch = new_test_directory(self, 'onepush-regression-')
         previous = Path.cwd()
         os.chdir(self.scratch)
         self.addCleanup(os.chdir, previous)

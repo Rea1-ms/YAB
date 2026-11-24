@@ -6,11 +6,11 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 const { readWindowMode, saveWindowMode } = require('../window-mode.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories(['result.json']);
+const { prepareBuildInput } = require('../build-inputs.cjs');
 
 test('close action defaults to asking and persists an explicit choice', async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'light-mode-settings-'));
+  const scratch = await newTestDirectory('light-mode-settings-');
   const filename = path.join(scratch, 'desktop-settings.json');
   assert.equal(readWindowMode(filename), '询问');
   saveWindowMode(filename, '开启轻量模式');
@@ -22,13 +22,8 @@ test('close action defaults to asking and persists an explicit choice', async ()
 });
 
 test('real windows release renderers and restore once while the service keeps running', { timeout: 90000 }, async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'light-mode-ui-'));
-  const { build } = await import('../../webapp/node_modules/vite/dist/node/index.js');
-  const frontend = path.join(scratch, 'frontend');
-  await build({ root: path.resolve(__dirname, '../../webapp'),
-    build: { outDir: frontend, emptyOutDir: false } });
+  const scratch = await newTestDirectory('light-mode-ui-');
+  const frontend = await prepareBuildInput('frontend');
   const env = { ...process.env, YAB_LIGHT_MODE_TEST_DATA: scratch, YAB_LIGHT_MODE_FRONTEND: frontend };
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await new Promise((resolve, reject) => {

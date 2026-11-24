@@ -1,19 +1,16 @@
 """Offline regressions for current and waiting task display snapshots."""
 
 import json
-from pathlib import Path
-import tempfile
 import unittest
 from unittest.mock import Mock
 
+from develop_tools.test_output import new_test_directory
 from core.scheduler import Scheduler
 
 
 class SchedulerDisplayTests(unittest.TestCase):
     def setUp(self):
-        output = Path(__file__).resolve().parents[2] / 'develop_tools' / 'out'
-        output.mkdir(parents=True, exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='scheduler-display-', dir=output))
+        self.scratch = new_test_directory(self, 'scheduler-display-')
         events = [
             {'func_name': func, 'event_name': name, 'enabled': True,
              'priority': priority, 'interval': 3600, 'next_tick': 0,

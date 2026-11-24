@@ -6,11 +6,10 @@ const fs = require('fs/promises');
 const path = require('path');
 const net = require('net');
 const { readWebSettings, probePort } = require('../webui.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories();
 
 test('desktop shares saved listener settings and validates environment overrides', async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const root = await fs.mkdtemp(path.join(output, 'desktop-listener-'));
+  const root = await newTestDirectory('desktop-listener-');
   const config = path.join(root, 'custom-config');
   await fs.mkdir(config);
   assert.deepEqual(readWebSettings(root, config, {}), { host: '127.0.0.1', port: 22267 });

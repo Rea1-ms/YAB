@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import secrets
 import socket
-import tempfile
 import threading
 import time
 import unittest
@@ -15,15 +14,14 @@ from urllib.request import Request, urlopen
 import uvicorn
 from websockets.sync.client import connect
 
+from develop_tools.test_output import new_test_directory
 from server.app import create_app
 from server.webui_settings import DEFAULTS, load_settings, save_settings, settings_path, validate_settings
 
 
 class WebSettingsTests(unittest.TestCase):
     def setUp(self):
-        output = Path(__file__).resolve().parents[2] / 'develop_tools/out'
-        output.mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='web-listener-', dir=output))
+        self.scratch = new_test_directory(self, 'web-listener-')
         env = patch.dict(os.environ, {'YAB_CONFIG_DIR': str(self.scratch), 'BAAS_WEBUI_TOKEN': '',
                                       'YAB_DESKTOP_PORT_OVERRIDE': ''})
         env.start()

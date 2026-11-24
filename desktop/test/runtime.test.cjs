@@ -7,14 +7,13 @@ const path = require('path');
 const { createHash } = require('crypto');
 const { desktopDataPath, prepareRuntime, recordRuntime, readRuntime } = require('../runtime.cjs');
 const { INDEXES, loadRuntimeSettings, saveRuntimeSettings, validateSettings, runtimeEnvironment } = require('../runtime-settings.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories();
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const ocr = 'core/ocr/baas_ocr_client/bin';
 
 async function fixture({ online = false, bundled = true } = {}) {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'desktop-runtime-'));
+  const scratch = await newTestDirectory('desktop-runtime-');
   const bundle = path.join(scratch, 'bundled');
   const data = path.join(scratch, 'user-data');
   const calls = [];

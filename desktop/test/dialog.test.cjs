@@ -4,11 +4,14 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
+const newTestDirectory = require('./output.cjs').testDirectories([
+  'dark/*.png', 'light/*.png', '*/result.json', '*/pixels.json', '*/readiness-failure.json',
+]);
 
 test('desktop messages render both themes, preserve results and theme system file browsing', {
   skip: process.platform !== 'win32',
 }, async t => {
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/shell-dialog-'));
+  const scratch = await newTestDirectory('shell-dialog-');
   for (const theme of ['dark', 'light']) {
     const data = path.join(scratch, theme);
     await fs.mkdir(data);
@@ -60,5 +63,4 @@ test('desktop messages render both themes, preserve results and theme system fil
       assert.ok(channels.every(value => results.systemDark ? value < 100 : value > 150), JSON.stringify(sample));
     }
   }
-  t.diagnostic(`Desktop message and file dialog previews: ${scratch}`);
 });

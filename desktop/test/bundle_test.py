@@ -3,10 +3,11 @@
 import importlib.util
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from develop_tools.test_output import new_test_directory
 
 SPEC = importlib.util.spec_from_file_location('desktop_bundle', Path(__file__).parents[1] / 'bundle.py')
 BUNDLE = importlib.util.module_from_spec(SPEC)
@@ -15,9 +16,7 @@ SPEC.loader.exec_module(BUNDLE)
 
 class LightweightBundleTest(unittest.TestCase):
     def setUp(self):
-        output = Path(__file__).parents[2] / 'develop_tools/out'
-        output.mkdir(parents=True, exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix='bundle-test-', dir=output))
+        self.scratch = new_test_directory(self, 'bundle-test-')
         self.root = self.scratch / 'source'
         for directory in ('desktop', 'core', 'module', 'server', 'src', 'assets', 'webapp/dist',
                           'core/ocr/baas_ocr_client/bin/resource'):

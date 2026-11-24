@@ -6,6 +6,10 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { extractionWithProgress, prepareInstallerProgress, uninstallerWithTheme } = require('../installer-progress.cjs');
+const newTestDirectory = require('./output.cjs').testDirectories([
+  '*.bmp', '*-pixels.json', 'displays.json', 'folder-*.json', 'metrics.txt', 'path-result.txt',
+  'result.txt', 'result-*.txt', 'navigation.txt', 'finish.txt', 'extraction.txt', 'palette.txt',
+]);
 
 async function nsisCompiler() {
   const cache = path.resolve(__dirname, '../build/cache/electron-builder');
@@ -31,9 +35,7 @@ test('compiled uninstall policy preserves data by default and during upgrades', 
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'uninstall-policy-'));
+  const scratch = await newTestDirectory('uninstall-policy-');
   const installDir = path.join(scratch, 'test-install');
   for (const mode of [0, 1]) {
     const theme = mode === 0 ? 'dark' : 'light';
@@ -191,7 +193,7 @@ test('generated uninstall cleanup includes the icon and retries only packaged em
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/uninstall-files-'));
+  const scratch = await newTestDirectory('uninstall-files-');
   const backend = path.join(scratch, 'backend');
   const appOutDir = path.join(scratch, 'application');
   const release = path.join(scratch, 'release');
@@ -307,8 +309,7 @@ test('compiled installer previews use an explicit final path without repeated ap
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  const scratch = await fs.mkdtemp(path.join(output, 'installer-preview-'));
+  const scratch = await newTestDirectory('installer-preview-');
   const existing = path.join(scratch, 'existing-custom-folder');
   await fs.mkdir(existing);
   await fs.writeFile(path.join(existing, 'YAB.exe'), 'fixture, not an executable');
@@ -405,7 +406,7 @@ test('real MUI fonts and sidebar rendering work from 100% through 400%', {
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-dpi-'));
+  const scratch = await newTestDirectory('installer-dpi-');
   const executable = path.join(scratch, 'render-check.exe');
   const source = path.join(scratch, 'render-check.nsi');
   const sizes = [[164, 314], [246, 471], [328, 628], [492, 942], [656, 1256]];
@@ -509,7 +510,7 @@ test('native checkbox notifications paint the new glyph and retain click and key
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/checkbox-render-'));
+  const scratch = await newTestDirectory('checkbox-render-');
   for (const mode of [0, 1]) {
     const executable = path.join(scratch, `checkbox-${mode}.exe`);
     const source = path.join(scratch, `checkbox-${mode}.nsi`);
@@ -640,7 +641,7 @@ test('license paragraphs, branding and elevated resume use the real page callbac
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/license-layout-'));
+  const scratch = await newTestDirectory('license-layout-');
   const executable = path.join(scratch, 'license-check.exe');
   const source = path.join(scratch, 'license-check.nsi');
   await fs.writeFile(source, String.raw`
@@ -748,7 +749,7 @@ test('welcome and license pages survive Back navigation after elevated resume', 
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-navigation-'));
+  const scratch = await newTestDirectory('installer-navigation-');
   const executable = path.join(scratch, 'navigation-check.exe');
   const source = path.join(scratch, 'navigation-check.nsi');
   await fs.writeFile(source, String.raw`
@@ -838,7 +839,7 @@ test('installation status remains visible and updates when the builder suppresse
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-status-'));
+  const scratch = await newTestDirectory('installer-status-');
   const executable = path.join(scratch, 'status-check.exe');
   const source = path.join(scratch, 'status-check.nsi');
   await fs.writeFile(source, String.raw`
@@ -978,7 +979,7 @@ test('the expanded installation log uses the wizard palette', {
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-log-theme-'));
+  const scratch = await newTestDirectory('installer-log-theme-');
   const source = path.join(scratch, 'log-theme.nsi');
   const executable = path.join(scratch, 'log-theme.exe');
   for (const [theme, contrast] of [[0, 0], [1, 0], [0, 1]]) {
@@ -1082,7 +1083,7 @@ test('the packaged extraction template keeps builder retries and drives the real
   assert.throws(() => extractionWithProgress(original.replace('!insertmacro decompress', '!insertmacro new_decompress')),
     /安装器模板已变化/, 'A builder upgrade must not silently omit progress stages.');
 
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-extraction-'));
+  const scratch = await newTestDirectory('installer-extraction-');
   const includeDir = prepareInstallerProgress(scratch);
   const uninstallerSource = (await fs.readFile(path.join(builderRoot, 'templates/nsis/uninstaller.nsh'), 'utf8'))
     .replaceAll('\r\n', '\n');
@@ -1189,7 +1190,7 @@ test('uninstall pages keep localized version text and removal status after the s
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/uninstall-status-'));
+  const scratch = await newTestDirectory('uninstall-status-');
   const installer = path.join(scratch, 'create-uninstaller.exe');
   const uninstaller = path.join(scratch, 'status-uninstaller.exe');
   const source = path.join(scratch, 'status.nsi');
@@ -1296,7 +1297,7 @@ test('native cancel confirmation keeps its result and follows the wizard theme',
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/cancel-dialog-'));
+  const scratch = await newTestDirectory('cancel-dialog-');
   for (const theme of [0, 1]) {
     const source = path.join(scratch, `cancel-${theme}.nsi`);
     const executable = path.join(scratch, `cancel-${theme}.exe`);
@@ -1427,7 +1428,7 @@ test('native installer warnings follow dark, light and high-contrast palettes wi
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/warning-dialog-'));
+  const scratch = await newTestDirectory('warning-dialog-');
   for (const palette of [{ name: 'dark', theme: 0, contrast: 0 }, { name: 'light', theme: 1, contrast: 0 },
     { name: 'high-contrast', theme: 0, contrast: 1 }]) {
     const source = path.join(scratch, `${palette.name}.nsi`);
@@ -1594,7 +1595,7 @@ test('initialization and real install/uninstall worker threads theme their nativ
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/worker-dialog-'));
+  const scratch = await newTestDirectory('worker-dialog-');
   for (const uninstall of [false, true]) for (const palette of [
     { name: 'dark', theme: 0, contrast: 0 }, { name: 'light', theme: 1, contrast: 0 },
     { name: 'high-contrast', theme: 0, contrast: 1 },
@@ -1733,7 +1734,7 @@ test('modern folder browsing follows the system palette and preserves selection 
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/folder-dialog-'));
+  const scratch = await newTestDirectory('folder-dialog-');
   for (const theme of ['system']) {
     const executable = path.join(scratch, `folder-${theme}.exe`);
     const source = path.join(scratch, `folder-${theme}.nsi`);
@@ -1811,7 +1812,7 @@ test('real install-mode navigation clears elevation shields and paints the icon 
   const modePage = path.join(builder, 'templates/nsis/multiUserUi.nsh');
   const messages = [...new Set([...((await fs.readFile(modePage, 'utf8')).matchAll(/\$\((\w+)\)/g))]
     .map(match => match[1]))];
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/shield-navigation-'));
+  const scratch = await newTestDirectory('shield-navigation-');
   const executable = path.join(scratch, 'shield-check.exe');
   const source = path.join(scratch, 'shield-check.nsi');
   await fs.writeFile(source, String.raw`
@@ -2024,7 +2025,7 @@ test('wizard captions use the packaged icon instead of a system error fallback',
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/installer-icons-'));
+  const scratch = await newTestDirectory('installer-icons-');
   for (const mode of [0, 1]) {
     const source = path.join(scratch, `icons-${mode}.nsi`);
     const executable = path.join(scratch, `icons-${mode}.exe`);
@@ -2081,9 +2082,7 @@ test('per-monitor wizard previews and installer manifests', {
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'per-monitor-'));
+  const scratch = await newTestDirectory('per-monitor-');
   const source = path.join(scratch, 'dpi-preview.nsi');
   const executable = path.join(scratch, 'dpi-preview.exe');
   await fs.writeFile(source, String.raw`
@@ -2245,7 +2244,7 @@ test('the real builder finish page defaults to opening YAB and honors unchecking
   const end = template.indexOf('\n!else', start);
   assert.ok(start >= 0 && end > start, 'Keep the actual builder finish-page block in this preview.');
   const finishPage = template.slice(start, end);
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/finish-launch-'));
+  const scratch = await newTestDirectory('finish-launch-');
   const executable = path.join(scratch, 'finish-preview.exe');
   const source = path.join(scratch, 'finish-preview.nsi');
   await fs.writeFile(source, String.raw`
@@ -2354,7 +2353,7 @@ test('license text keeps its palette and reading position after font and DPI ref
 }, async t => {
   const compiler = await nsisCompiler();
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
-  const scratch = await fs.mkdtemp(path.resolve(__dirname, '../../develop_tools/out/license-palette-'));
+  const scratch = await newTestDirectory('license-palette-');
   const executable = path.join(scratch, 'license-palette.exe');
   const source = path.join(scratch, 'license-palette.nsi');
   await fs.writeFile(source, String.raw`

@@ -2,18 +2,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const newTestDirectory = require('./output.cjs').testDirectories(['result.json']);
+const { prepareBuildInput } = require('../build-inputs.cjs');
 
 test('notification form migrates, saves, tests and removes channels over real WebSocket', { timeout: 60000 }, async () => {
-  const output = path.resolve(__dirname, '../../develop_tools/out');
-  await fs.mkdir(output, { recursive: true });
-  const scratch = await fs.mkdtemp(path.join(output, 'onepush-ui-'));
-  const { build } = await import('../../webapp/node_modules/vite/dist/node/index.js');
-  const frontend = path.join(scratch, 'frontend');
-  await build({ root: path.resolve(__dirname, '../../webapp'),
-    build: { outDir: frontend, emptyOutDir: false } });
+  const scratch = await newTestDirectory('onepush-ui-');
+  const frontend = await prepareBuildInput('frontend');
   const env = { ...process.env, YAB_PUSH_TEST_DATA: scratch, YAB_PUSH_TEST_FRONTEND: frontend };
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await new Promise((resolve, reject) => {
