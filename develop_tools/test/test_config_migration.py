@@ -5,6 +5,7 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
+from core.Baas_thread import Baas_thread
 from core.config.config_init import check_config
 from core.config.config_io import PROFILE_SCHEMA_VERSION, ConfigFileError
 from core.config.config_set import ConfigSet
@@ -28,6 +29,45 @@ class ConfigMigrationTests(unittest.TestCase):
         self.main = self.folder / 'config.json'
         self.events = self.folder / 'event.json'
         self.backups = self.folder / 'backups'
+
+    def test_new_web_profile_can_initialize_and_save_manufacturing_priorities(self):
+        service = BaasService(Mock())
+        service.config_add('new_account')
+        config = ConfigSet('new_account')
+        defaults = config.static_config.create_default_priority[config.server_mode]
+        worker = Baas_thread.__new__(Baas_thread)
+        worker.config_set = config
+        worker.static_config = config.static_config
+        worker.logger = Mock()
+
+        self.assertTrue(worker.init_config(), worker.logger.error.call_args_list)
+        saved = service.provide_config_arg('new_account')
+        for phase, priority in defaults.items():
+            self.assertEqual(saved[f'createPriority_{phase}'], priority)
+
+    def test_manufacturing_priority_migration_preserves_lists_and_normalizes_strings(self):
+        for version in (0, PROFILE_SCHEMA_VERSION):
+            with self.subTest(version=version):
+                name = f'account_{version}'
+                folder = self.folder.with_name(name)
+                folder.mkdir()
+                main = folder / 'config.json'
+                data = {'createPriority_phase1': ['second', 'first'],
+                        'createPriority_phase2': '', 'createPriority_phase3': 'one item'}
+                if version:
+                    data['schemaVersion'] = version
+                raw = json.dumps(data).encode('utf-8')
+                main.write_bytes(raw)
+
+                check_config(name)
+
+                saved = json.loads(main.read_bytes())
+                self.assertEqual(saved['schemaVersion'], PROFILE_SCHEMA_VERSION)
+                self.assertEqual(saved['createPriority_phase1'], ['second', 'first'])
+                self.assertEqual(saved['createPriority_phase2'], [])
+                self.assertEqual(saved['createPriority_phase3'], ['one item'])
+                backups = (folder / 'backups').glob(f'config.v{version}.*.bak.json')
+                self.assertEqual([file.read_bytes() for file in backups], [raw])
 
     def test_migration_backs_up_both_originals_only_when_changed(self):
         main_bytes = b'{"name":"legacy","unrecognized":{"value":4}}\n'

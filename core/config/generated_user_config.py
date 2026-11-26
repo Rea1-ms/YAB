@@ -17,9 +17,9 @@ class Config:
     ArenaComponentNumber: int
     ArenaStopFightWhenRank1: bool
     maxArenaRefreshTimes: int
-    createPriority_phase1: str
-    createPriority_phase2: str
-    createPriority_phase3: str
+    createPriority_phase1: list
+    createPriority_phase2: list
+    createPriority_phase3: list
     create_phase_1_select_item_rule: str
     create_phase_2_select_item_rule: str
     create_phase_3_select_item_rule: str

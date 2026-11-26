@@ -25,6 +25,7 @@ from core.paths import profiles_dir
 
 CONFIG_FIELDS = {field.name for field in fields(Config)}
 CONFIG_DEFAULTS = json.loads(DEFAULT_CONFIG)
+CREATE_PRIORITY_FIELDS = ('createPriority_phase1', 'createPriority_phase2', 'createPriority_phase3')
 
 
 def fill_defaults(data, defaults):
@@ -51,6 +52,11 @@ def prepare_config(path, original, prices):
     for migrate in MIGRATIONS[version:PROFILE_SCHEMA_VERSION]:
         data = migrate(data)
 
+    # Older templates used strings while the task and web editor saved lists.
+    for key in CREATE_PRIORITY_FIELDS:
+        value = data.get(key)
+        if isinstance(value, str):
+            data[key] = [value] if value else []
     fill_defaults(data, CONFIG_DEFAULTS)
     for key, default in CONFIG_DEFAULTS.items():
         value = data[key]
