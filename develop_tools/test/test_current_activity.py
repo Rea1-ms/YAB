@@ -8,7 +8,7 @@ from unittest.mock import Mock, call, patch
 from core import image
 from core.config.default_config import STATIC_DEFAULT_CONFIG
 from develop_tools.test import test_main_page_popups as popup_tests
-from develop_tools.test.offline_support import load_fixture
+from develop_tools.test.offline_support import ROOT, load_fixture
 from module import (
     explore_activity_challenge,
     explore_activity_mission,
@@ -18,6 +18,9 @@ from module import (
 from module.activities import activity_utils
 
 ACTIVITY = 'SetSailPandemoniumShip'
+PANCAKE_RERUN = 'PandemicHazardAMiraclePancake'
+PANCAKE_BATTLE_RESULT = 'global_pancake_rerun_story_battle_result'
+PANCAKE_REWARD = 'global_pancake_rerun_story_reward'
 HOME = 'global_makoto_activity_home'
 STORY = 'global_makoto_activity_story'
 QUEST = 'global_makoto_activity_quest'
@@ -38,6 +41,39 @@ class CurrentActivityTests(unittest.TestCase):
         frame = load_fixture(HOME)
         frame[:6, :6] = (3, 2, 1)
         return frame
+
+    def test_pancake_rerun_story_confirms_battle_and_reward(self):
+        # The results are from Pancake. The surrounding tabs use earlier activity captures.
+        story, quest = load_fixture(STORY), load_fixture(QUEST)
+        battle, reward = load_fixture(PANCAKE_BATTLE_RESULT), load_fixture(PANCAKE_REWARD)
+        frames = [story] + [battle] * 6 + [reward] * 6 + [story, quest, story]
+        for ratio in RATIOS:
+            with (self.subTest(ratio=ratio), self.worker(frames, ratio, activity=PANCAKE_RERUN) as worker,
+                  patch.object(activity_utils, 'to_story_task_info', return_value='main_story_episode-info'),
+                  patch.object(activity_utils, 'check_sweep_availability', side_effect=['no-pass'] + ['sss'] * 8)):
+                worker.to_main_page = Mock()
+                worker.project_dir = str(ROOT)
+                self.assertTrue(worker.init_rgb())
+
+                self.assertTrue(activity_utils.explore_activity_story(worker))
+
+                clicks = [(1168, 659)] * 2 + [(640, 663)] * 2 + [(1200, 91), (936, 89)]
+                self.assertEqual(worker.control.click.call_args_list,
+                                 [call(int(x * ratio), int(y * ratio)) for x, y in clicks])
+                self.assertEqual(worker.replay.index, len(frames) - 1)
+                self.assertTrue(image.compare_image(worker, 'activity_story-chosen-1'))
+
+    def test_pancake_rerun_story_waits_when_reward_does_not_close(self):
+        frames = [load_fixture(PANCAKE_REWARD)] * 3
+        with self.worker(frames, activity=PANCAKE_RERUN) as worker:
+            worker.project_dir = str(ROOT)
+            self.assertTrue(worker.init_rgb())
+
+            activity_utils.start_story(worker)
+            worker.control.click.assert_not_called()
+            with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+                activity_utils.to_activity(worker, 'mission', skip_first_screenshot=True)
+            worker.control.click.assert_called_once_with(640, 663)
 
     def test_default_activity_and_stage_data_match_current_event(self):
         self.assertEqual(json.loads(STATIC_DEFAULT_CONFIG)['current_game_activity']['Global'], ACTIVITY)

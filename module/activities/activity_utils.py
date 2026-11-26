@@ -355,7 +355,6 @@ def start_story(self):
         "plot_skip-plot-button": (1213, 116),
         "plot_skip-plot-notice": (766, 520),
         "main_story_episode-info": (629, 518),
-        "story-fight-success-confirm": (1117, 639, 1219, 687)
     }
     rgb_ends = [
         "formation_edit1",
@@ -365,16 +364,14 @@ def start_story(self):
         "activity_unit-formation",
         "activity_formation",
         "activity_self-formation",
+        # The next to_activity call confirms these results from the same screenshot.
+        "normal_task_fight-confirm",
+        "activity_fight-success-confirm",
     ]
     res = picture.co_detect(self, rgb_ends, rgb_possibles, img_ends, img_possibles, skip_first_screenshot=True)
     if res in ["formation_edit1", "activity_unit-formation", "activity_formation", "activity_self-formation"]:
         start_fight(self, 1)
         main_story.auto_fight(self)
-    elif res == "reward_acquired":
-        pass
-    if res == "reward_acquired":
-        return
-    return
 
 
 def start_fight(self, i):
