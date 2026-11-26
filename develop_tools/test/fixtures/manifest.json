@@ -648,6 +648,31 @@
         [996, 668, 1127, 710]
       ]
     },
+    "global_pancake_rerun_play_guide": {
+      "path": "global_pancake_rerun_play_guide.png",
+      "sha256": "2523dec945b4982fc83ab01186b413cedfab064faaa952cdbfb52220de3fd1de",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服奇迹松饼复刻：跳过前置剧情后弹出的玩法指南，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_cannot_finish_while_play_guide_is_visible",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_retries_play_guide_and_waits_for_story"
+      ],
+      "source": {
+        "filename": "Scrcpy-20261126-160408-490.png",
+        "sha256": "67267d7b536c637b2df327e464679f956383c97a279023f492f0e97d152fd5d9",
+        "registered_on": "2026-11-26",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [478, 0, 1118, 64]
+      ]
+    },
     "global_pancake_rerun_story_battle_result": {
       "path": "global_pancake_rerun_story_battle_result.png",
       "sha256": "43bf1254fb019dc75acd58d75c9fc764f5e04c5933c75da307e5fe92243130c5",
@@ -706,6 +731,7 @@
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_retries_without_accepting_stale_story_page",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_to_story_uses_the_two_tab_layout",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_quest_switch_without_observed_selection_cannot_finish",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_retries_play_guide_and_waits_for_story",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_story_confirms_battle_and_reward",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",

@@ -33,6 +33,7 @@ def to_activity(self, region=None, skip_first_screenshot=False):
         "activity_task-info": (1128, 141),
         "normal_task_task-info": (1126, 115),
         "activity_play-guide": (1184, 152),
+        "activity_play-guide-short-title": (1184, 152),
         'main_story_fight-confirm': (1168, 659),
         "main_story_episode-info": (917, 161),
         'normal_task_prize-confirm': (776, 655),
