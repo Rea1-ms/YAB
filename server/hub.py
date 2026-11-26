@@ -4,6 +4,8 @@ import threading
 import time
 from collections import deque
 
+from core.config.config_io import ConfigFileError
+
 
 class Hub:
     """
@@ -116,7 +118,11 @@ class Hub:
             if provider is None:
                 await ws.send_text(json.dumps({'t': topic, 'e': f'Unknown topic: {prefix}'}))
                 return
-            full = await asyncio.to_thread(provider, arg or None)
+            try:
+                full = await asyncio.to_thread(provider, arg or None)
+            except ConfigFileError as error:
+                await ws.send_text(json.dumps({'t': topic, 'e': str(error)}, ensure_ascii=False))
+                return
         self.subs.setdefault(ws, set()).add(topic)
         self.topics.setdefault(topic, set()).add(ws)
         await ws.send_text(json.dumps({'t': topic, 'o': 'full', 'v': full}, ensure_ascii=False, default=str))

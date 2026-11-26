@@ -32,6 +32,7 @@ export interface PushChannel {
 export interface ConfigEntry {
   dir: string;
   name: string;
+  error?: string;
 }
 
 /** 日志级别：1 信息 2 警告 3 错误 4 严重 */

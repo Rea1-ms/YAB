@@ -909,7 +909,7 @@ class Baas_thread:
             self.init_image_resource,
             self.init_rgb
         ]
-        self.scheduler = Scheduler(self.update_signal, self.config_path)
+        self.scheduler = Scheduler(self.update_signal, self.config_path, supported_tasks=func_dict)
         for (func) in init_funcs:
             if not func():
                 self.logger.critical("Initialization Failed")

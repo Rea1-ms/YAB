@@ -6,8 +6,18 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from server.hub import Hub
+from core.config.config_io import (
+    EVENT_SETTINGS,
+    KNOWN_EVENTS,
+    ConfigFileError,
+    config_lock,
+    read_events,
+    read_main_config,
+    update_events,
+    validate_event_settings,
+)
 from core.paths import profiles_dir
+from server.hub import Hub
 
 
 def config_path(name, require_exists=True):
@@ -77,7 +87,25 @@ class BaasService:
         self._control_lock = threading.RLock()
         self._stop_events = {}
         self._desktop_update_pending = False
+        self.config_errors = {}
         self.listener = None
+
+    def report_config_error(self, config, error):
+        self.config_errors[config] = error
+        self.hub.log(config, 3, error)
+
+    def provide_config_scan(self):
+        configs = scan_configs()
+        for item in configs:
+            if error := self.config_errors.get(item['dir']):
+                item['error'] = error
+        return configs
+
+    def _usable_profile(self, config):
+        path = config_path(config)
+        if error := self.config_errors.get(config):
+            raise ConfigFileError(error)
+        return path
 
     def guard_write(self, handler):
         def guarded(*args):
@@ -156,6 +184,7 @@ class BaasService:
         for item in scan_configs():
             try:
                 from core.config.config_set import ConfigSet
+                self._usable_profile(item['dir'])
                 if ConfigSet(item['dir']).get('autostart'):
                     self.start(item['dir'])
             except Exception as e:
@@ -203,7 +232,7 @@ class BaasService:
         return self._launch(config)
 
     def _launch(self, config, task=None):
-        config_path(config)
+        self._usable_profile(config)
         if not self.ocr_ready:
             raise RuntimeError('OCR 尚未初始化完成，请稍候')
         with self._control_lock:
@@ -276,7 +305,7 @@ class BaasService:
     def push_test(self, config, params):
         from core.push_config import validate_channels
         from core.push_onepush import send_channel
-        config_path(config)
+        self._usable_profile(config)
         channel = params.get('channel')
         validate_channels([channel], require_complete=True)
         return send_channel(channel, 'YAB 通知测试', '收到这条消息，说明推送渠道配置成功。')
@@ -285,7 +314,7 @@ class BaasService:
         from core.config.config_set import ConfigSet
         if params['key'] == 'name':
             return self.config_rename(config, params['value'])
-        config_path(config)
+        self._usable_profile(config)
         ConfigSet(config).set(params['key'], params['value'])
         self.hub.push_full(f'ConfigArg:{config}')
         if params['key'] == 'server':
@@ -302,7 +331,7 @@ class BaasService:
         self.hub.push_full('ConfigScan')
 
     def config_delete(self, name):
-        path = config_path(name)
+        path = self._usable_profile(name)
         with self._control_lock:
             if name.casefold() == 'default_config':
                 raise ValueError('default_config 不允许删除')
@@ -313,7 +342,7 @@ class BaasService:
 
     def config_rename(self, config, new_name):
         from core.config.config_set import ConfigSet
-        config_path(config)
+        self._usable_profile(config)
         if not isinstance(new_name, str) or not new_name.strip():
             raise ValueError('名称不能为空')
         ConfigSet(config).set('name', new_name.strip())
@@ -326,7 +355,7 @@ class BaasService:
 
     def provide_assets(self, config):
         from core.config.config_set import ConfigSet
-        config_path(config)
+        self._usable_profile(config)
         cs = ConfigSet(config)
         res = {key: cs.get(key) for key in self.ASSET_KEYS}
         holding = cs.get('create_item_holding_quantity') or {}
@@ -339,7 +368,7 @@ class BaasService:
         unfinished task lists, replicating the old GUI panel logic."""
         from core.config.config_set import ConfigSet
         from module.explore_tasks.sweep_task import read_task
-        config_path(config)
+        self._usable_profile(config)
         key = params.get('key')
         if key not in ('mainlinePriority', 'hardPriority'):
             raise ValueError('invalid sweep key')
@@ -348,62 +377,63 @@ class BaasService:
         content = raw.replace(' ', '').replace('，', ',')
         cs = ConfigSet(config)
         companion = 'unfinished_normal_tasks' if is_normal else 'unfinished_hard_tasks'
-        if content == '':
-            cs.set(key, '')
-            cs.set(companion, [])
-        else:
-            tasks = [list(read_task(item, is_normal)) for item in content.split(',')]
-            cs.set(key, content)
-            cs.set(companion, tasks)
+        tasks = [list(read_task(item, is_normal)) for item in content.split(',')] if content else []
+        cs.set_fields({key: content, companion: tasks})
         self.hub.push_full(f'ConfigArg:{config}')
         return content
 
     def provide_config_arg(self, config):
         from core.config.config_set import ConfigSet
-        config_path(config)
+        self._usable_profile(config)
         return asdict(ConfigSet(config).config)
 
     def provide_event_config(self, config):
-        from core.config.config_set import ConfigSet
-        config_path(config)
-        path = os.path.join(ConfigSet(config).config_dir, 'event.json')
-        with open(path, encoding='utf-8') as f:
-            return json.load(f)
-
-    def save_event_config(self, config, events):
-        from core.config.config_set import ConfigSet
-        config_path(config)
-        path = os.path.join(ConfigSet(config).config_dir, 'event.json')
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(events, f, ensure_ascii=False, indent=2)
+        folder = self._usable_profile(config)
+        with config_lock:
+            read_main_config(folder / 'config.json')
+            events, _ = read_events(folder / 'event.json')
+        return [event for event in events if event['func_name'] in KNOWN_EVENTS]
 
     # ---------- event rpcs ----------
 
     def event_set(self, config, params):
         func_name = params['func_name']
         patch = params.get('patch', {})
-        events = self.provide_event_config(config)
-        for event in events:
-            if event['func_name'] == func_name:
-                event.update(patch)
-                break
-        self.save_event_config(config, events)
+        if (not isinstance(func_name, str) or func_name not in KNOWN_EVENTS
+                or not isinstance(patch, dict) or patch.keys() - EVENT_SETTINGS):
+            raise ValueError('调度任务或设置字段不合法')
+        path = self._usable_profile(config) / 'event.json'
+
+        def edit(events):
+            for event in events:
+                if event['func_name'] == func_name:
+                    updated = {**event, **patch}
+                    validate_event_settings(path, updated)
+                    event.update(patch)
+                    return True
+            raise ValueError('调度任务不存在')
+
+        update_events(path, edit)
         self.hub.push_full(f'EventConfig:{config}')
 
     def event_enable_all(self, config, params):
-        enabled = bool(params.get('enabled', True))
-        events = self.provide_event_config(config)
-        for event in events:
-            event['enabled'] = enabled
-        self.save_event_config(config, events)
-        self.hub.push_full(f'EventConfig:{config}')
+        self._set_all_events(config, 'enabled', bool(params.get('enabled', True)))
 
     def event_refresh_all(self, config, _params):
-        events = self.provide_event_config(config)
-        now = int(time.time())
-        for event in events:
-            event['next_tick'] = now
-        self.save_event_config(config, events)
+        self._set_all_events(config, 'next_tick', int(time.time()))
+
+    def _set_all_events(self, config, key, value):
+        path = self._usable_profile(config) / 'event.json'
+
+        def edit(events):
+            changed = False
+            for event in events:
+                if event['func_name'] in KNOWN_EVENTS and event[key] != value:
+                    event[key] = value
+                    changed = True
+            return changed
+
+        update_events(path, edit)
         self.hub.push_full(f'EventConfig:{config}')
 
     # ---------- panels / assets ----------
@@ -411,7 +441,7 @@ class BaasService:
     def provide_panels(self, config):
         from server.panels import resolve_schema, switch_cards
         from core.config.config_set import ConfigSet
-        config_path(config)
+        self._usable_profile(config)
         cs = ConfigSet(config)
         return {'panels': resolve_schema(cs), 'cards': switch_cards()}
 

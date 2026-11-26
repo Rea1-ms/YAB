@@ -47,7 +47,7 @@ def implement(self):
                 confirm_select_node(self, 1)
                 need_acc_collect = True
                 self.config.alreadyCreateTime += 1
-                self.config_set.save()
+                self.config_set.set('alreadyCreateTime', self.config.alreadyCreateTime)
                 self.logger.info("Today Total Create Times : [ " + str(self.config.alreadyCreateTime) + " ].")
                 to_manufacture_store(self)
                 if self.config.alreadyCreateTime >= self.config.createTime:
@@ -882,16 +882,16 @@ def item_recognize(self, check_state):
                     log_name_list.append("UNKNOWN")
                     continue
             items[temp + j]["holding_quantity"] = holding_quantity
-            self.config.create_item_holding_quantity[name] = holding_quantity
             log_name_list.append(name)
             log_quantity_list.append(holding_quantity)
             item_invisible = check_state.pop_checked_item(items[temp + j])
-            self.config_set.save()
-            if len(item_invisible) > 0:  # game will hide item you don't have
+            quantities = {name: holding_quantity}
+            if item_invisible:  # game will hide items you don't have
                 self.logger.info("Item : [ " + str(item_invisible) + " ] invisible.")
                 self.logger.info("Set holding quantity to 0.")
-                for invisible_item_name in item_invisible:
-                    self.config.create_item_holding_quantity[invisible_item_name] = 0
+                quantities.update(dict.fromkeys(item_invisible, 0))
+            self.config.create_item_holding_quantity.update(quantities)
+            self.config_set.set('create_item_holding_quantity', quantities)
         check_state.last_check_y = y
         temp += item_lines_y[i][1]
     if len(log_name_list) > 0:

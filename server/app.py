@@ -71,13 +71,12 @@ class WebsocketServer:
 
 
 def bootstrap_configs(service: BaasService):
-    """Same startup migration as the old Qt window: rewrite static.json /
-    switch.json defaults, merge config.json / event.json with new keys."""
+    """Migrate each profile independently so an incompatible file leaves other profiles usable."""
     from core.config.config_init import check_config
     dirs = [item['dir'] for item in scan_configs()]
     if not dirs:
         dirs = ['default_config']
-    check_config(dirs)
+    check_config(dirs, on_error=service.report_config_error)
     return dirs
 
 
@@ -102,7 +101,7 @@ def register_topics(hub: Hub, service: BaasService):
         hub.register_rpc(topic, function, service.guard_write(handler))
 
     hub.register_provider('Meta', lambda _config: build_meta(service))
-    hub.register_provider('ConfigScan', lambda _config: scan_configs())
+    hub.register_provider('ConfigScan', lambda _config: service.provide_config_scan())
     hub.register_provider('State', service.get_state)
     hub.register_provider('ConfigArg', service.provide_config_arg)
     hub.register_provider('EventConfig', service.provide_event_config)

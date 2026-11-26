@@ -1,150 +1,124 @@
 import json
-import os
-import shutil
-from datetime import datetime
+from copy import deepcopy
 
 from core.config import default_config
-from core.config.config_set import ConfigSet
-from core.config.shop_config import migrate_tactical_shop_list
-from core.paths import data_path, profiles_dir
-
-
-# =============================================================================
-# Config bootstrap & migration.
-# Moved from the old window.py (Qt GUI entry) so both headless mode and the
-# web server share the same initialization logic.
-# =============================================================================
-
-def delete_deprecated_config(file_name, config_name=None):
-    # delete useless config file
-    pre = str(profiles_dir()) + '/'
-    if config_name is not None:
-        pre += config_name + '/'
-    if type(file_name) is str:
-        path = pre + file_name
-        if os.path.exists(path):
-            os.remove(path)
-    elif type(file_name) is list:
-        for name in file_name:
-            path = pre + name
-            if os.path.exists(path):
-                os.remove(path)
-
-
-def update_config_reserve_old(config_old, config_new):  # 保留旧配置原有的键，添加新配置中没有的，删除新配置中没有的键
-    for key in config_new:
-        if key not in config_old:
-            config_old[key] = config_new[key]
-    key = "lesson_each_region_object_priority"
-    if len(config_old.get(key, [])) < len(config_new.get(key, [])):
-        config_old[key].extend(config_new[key][len(config_old[key]):])
-    dels = []
-    for key in config_old:
-        if key not in config_new:
-            dels.append(key)
-    for key in dels:
-        del config_old[key]
-    return config_old
+from core.config.config_io import (
+    ConfigFileError,
+    backup_migration,
+    config_lock,
+    read_events,
+    read_main_config,
+    replace_json,
+    validate_event_settings,
+)
+from core.config.config_set import ConfigSet, fill_defaults, prepare_config
+from core.paths import profiles_dir
 
 
 def check_static_config():
-    os.makedirs(profiles_dir(), exist_ok=True)
-    with open(profiles_dir() / 'static.json', 'w', encoding='utf-8') as f:
-        f.write(default_config.STATIC_DEFAULT_CONFIG)
+    path = profiles_dir() / 'static.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replace_json(path, json.loads(default_config.STATIC_DEFAULT_CONFIG), indent=2)
 
 
 def check_switch_config(dir_path='./default_config'):
     path = profiles_dir() / dir_path / 'switch.json'
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(default_config.SWITCH_DEFAULT_CONFIG)
+    replace_json(path, json.loads(default_config.SWITCH_DEFAULT_CONFIG), indent=2)
+
+
+def _prepare_user_config(path, static, *, add_create_entries=False):
+    try:
+        original, raw, version = read_main_config(path)
+    except FileNotFoundError:
+        original, raw, version = {}, None, 0
+    data = prepare_config(path, original, static['tactical_challenge_shop_price_list'])
+    if add_create_entries:
+        server = ConfigSet.get_server_mode(data['server'])
+        for group in static['create_item_order'][server]['basic'].values():
+            for item in group:
+                data['create_item_holding_quantity'].setdefault(item, -1)
+    return original, raw, version, data
 
 
 def check_and_update_user_config(dir_path='./default_config'):
     path = profiles_dir() / dir_path / 'config.json'
-    if not os.path.exists(path):
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(default_config.DEFAULT_CONFIG)
+    static = json.loads(default_config.STATIC_DEFAULT_CONFIG)
+    with config_lock:
+        original, raw, version, data = _prepare_user_config(path, static)
+        if data != original:
+            if raw is not None:
+                backup_migration(path, raw, version)
+            replace_json(path, data, indent=4)
+
+
+def _prepare_events(path, server, enable_state):
+    defaults = json.loads(default_config.EVENT_DEFAULT_CONFIG)
+    if server != 'CN':
+        for event in defaults:
+            for reset in event['daily_reset']:
+                reset[0] -= 1
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        from core.push_config import legacy_channels
-        if 'push_onepush' not in data:
-            data['push_onepush'] = legacy_channels(data)
-        data = update_config_reserve_old(data, json.loads(default_config.DEFAULT_CONFIG))
-        server = ConfigSet.get_server_mode(data['server'])
-        prices = json.loads(default_config.STATIC_DEFAULT_CONFIG)['tactical_challenge_shop_price_list']
-        if server in prices:
-            data['TacticalChallengeShopList'] = migrate_tactical_shop_list(
-                data['TacticalChallengeShopList'], server, prices[server]
-            )
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(json.dumps(data, ensure_ascii=False, indent=2))
-    except Exception:
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(default_config.DEFAULT_CONFIG)
+        original, raw = read_events(path)
+    except FileNotFoundError:
+        return None, None, defaults
 
-
-def check_single_event(new_event, old_event):
-    for key in new_event:
-        if key not in old_event:
-            old_event[key] = new_event[key]
-    return old_event
+    events = deepcopy(original)
+    by_name = {event['func_name']: event for event in events}
+    for index, entry in enumerate(defaults):
+        name = entry['func_name']
+        if name in by_name:
+            fill_defaults(by_name[name], entry)
+            validate_event_settings(path, by_name[name])
+        else:
+            if enable_state in ('on', 'off'):
+                entry['enabled'] = enable_state == 'on'
+            events.insert(index, entry)
+    return original, raw, events
 
 
 def check_event_config(dir_path='./default_config', user_config=None):
     path = profiles_dir() / dir_path / 'event.json'
-    default_event_config = json.loads(default_config.EVENT_DEFAULT_CONFIG)
-    server = user_config.server_mode
-    enable_state = user_config.config.new_event_enable_state
-    if server != "CN":
-        for i in range(0, len(default_event_config)):
-            for j in range(0, len(default_event_config[i]['daily_reset'])):
-                default_event_config[i]['daily_reset'][j][0] = default_event_config[i]['daily_reset'][j][0] - 1
-    if not os.path.exists(path):
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(json.dumps(default_event_config, ensure_ascii=False, indent=2))
-        return
-    try:
-        with open(path, 'r', encoding='utf-8') as f:  # 检查是否有新的配置项
-            data = json.load(f)
-        for i in range(0, len(default_event_config)):
-            exist = False
-            for j in range(0, len(data)):
-                if data[j]['func_name'] == default_event_config[i]['func_name']:
-                    for k in range(0, len(data[j]['daily_reset'])):
-                        if len(data[j]['daily_reset'][k]) != 3:
-                            data[j]['daily_reset'][k] = [0, 0, 0]
-                    data[j] = check_single_event(default_event_config[i], data[j])
-                    exist = True
-                    break
-            if not exist:
-                temp = default_event_config[i]
-                if enable_state == "on":
-                    temp['enabled'] = True
-                elif enable_state == "off":
-                    temp['enabled'] = False
-                data.insert(i, temp)
-
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(json.dumps(data, ensure_ascii=False, indent=2))
-    except Exception as e:
-        with open(data_path('error.log'), 'w+', encoding='utf-8') as f:
-            f.write(str(e) + '\n' + dir_path + '\n' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '\n')
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(json.dumps(default_event_config, ensure_ascii=False, indent=2))
-        return
+    with config_lock:
+        _, _, version = read_main_config(path.with_name('config.json'))
+        previous, raw, data = _prepare_events(path, user_config.server_mode, user_config.config.new_event_enable_state)
+        if data != previous:
+            if raw is not None:
+                backup_migration(path, raw, version)
+            replace_json(path, data, indent=2)
 
 
-def check_config(dir_path):
-    if type(dir_path) is not list:
-        dir_path = [dir_path]
-    os.makedirs(profiles_dir(), exist_ok=True)
-    check_static_config()
-    for path in dir_path:
-        delete_deprecated_config("display.json", path)
-        os.makedirs(profiles_dir() / path, exist_ok=True)
-        check_and_update_user_config(path)
-        config = ConfigSet(config_dir=path)
-        config.update_create_quantity_entry()
-        check_event_config(path, config)
-        check_switch_config(path)
+def _check_profile(name, static):
+    folder = profiles_dir() / name
+    folder.mkdir(parents=True, exist_ok=True)
+    main = folder / 'config.json'
+    schedule = folder / 'event.json'
+
+    original, config_bytes, version, config = _prepare_user_config(main, static, add_create_entries=True)
+    server = ConfigSet.get_server_mode(config['server'])
+    old_events, event_bytes, events = _prepare_events(schedule, server, config['new_event_enable_state'])
+
+    # Validate both files and finish the backups before replacing either file.
+    if config != original and config_bytes is not None:
+        backup_migration(main, config_bytes, version)
+    if events != old_events and event_bytes is not None:
+        backup_migration(schedule, event_bytes, version)
+    # Publish the profile version after the schedule has been saved.
+    if events != old_events:
+        replace_json(schedule, events, indent=2)
+    if config != original:
+        replace_json(main, config, indent=4)
+    check_switch_config(name)
+
+
+def check_config(dir_path, *, on_error=None):
+    names = [dir_path] if isinstance(dir_path, str) else dir_path
+    static = json.loads(default_config.STATIC_DEFAULT_CONFIG)
+    with config_lock:
+        check_static_config()
+        for name in names:
+            try:
+                _check_profile(name, static)
+            except (ConfigFileError, OSError) as error:
+                if on_error is None:
+                    raise
+                on_error(name, str(error))

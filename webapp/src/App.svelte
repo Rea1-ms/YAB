@@ -33,7 +33,9 @@
     ?? (scan.some((c) => c.dir === lastDir) ? lastDir : (scan[0]?.dir ?? '')));
   const page = $derived(current?.page ?? 'home');
   const globalPage = $derived(current?.global ?? null);
-  const currentName = $derived(scan.find((c) => c.dir === dir)?.name ?? dir);
+  const selected = $derived(scan.find((c) => c.dir === dir));
+  const currentName = $derived(selected?.name ?? dir);
+  const configError = $derived(selected?.error);
 
   $effect(() => {
     if (!routeDir || scan.length === 0 || routeDir === lastDir) return;
@@ -60,7 +62,7 @@
 
   // 切换激活配置：订阅/退订对应 topic；进入全局页时退订全部
   $effect(() => {
-    setActiveDir(routeDir ?? null);
+    setActiveDir(configError ? null : (routeDir ?? null));
   });
 
   // —— 新建 / 重命名 / 删除 ——
@@ -130,7 +132,7 @@
         <button
           class="mini"
           type="button"
-          disabled={!dir}
+          disabled={!dir || !!configError}
           onclick={() => {
             renameValue = currentName;
             showRename = true;
@@ -141,7 +143,7 @@
         <button
           class="mini"
           type="button"
-          disabled={!dir || dir === 'default_config'}
+          disabled={!dir || !!configError || dir === 'default_config'}
           title={$t('default_config 不允许删除')}
           onclick={() => (showDelete = true)}
         >
@@ -187,6 +189,8 @@
       <UpdatePage />
     {:else if !routeDir}
       <div class="placeholder">{scan.length === 0 ? $t('等待后端连接…') : $t('暂无配置')}</div>
+    {:else if configError}
+      <div class="placeholder config-error" role="alert">{configError}</div>
     {:else}
       {#key dir}
         {#if page === 'home'}
@@ -336,6 +340,9 @@
     min-width: 0;
     display: flex;
     overflow: hidden;
+  }
+  .config-error {
+    overflow-wrap: anywhere;
   }
   .placeholder {
     margin: auto;

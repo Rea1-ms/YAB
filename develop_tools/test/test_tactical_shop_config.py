@@ -114,7 +114,7 @@ class TacticalShopConfigTests(unittest.TestCase):
     def test_bootstrap_persists_migration_without_changing_other_settings(self):
         old = self.write_config()
         check_and_update_user_config('account')
-        expected = {**old, 'TacticalChallengeShopList': [1, 1] + [0] * 15}
+        expected = {**old, 'TacticalChallengeShopList': [1, 1] + [0] * 15, 'schemaVersion': 1}
         self.assertEqual(self.read_config(), expected)
         check_and_update_user_config('account')
         self.assertEqual(self.read_config(), expected)
@@ -122,7 +122,7 @@ class TacticalShopConfigTests(unittest.TestCase):
     def test_bootstrap_preserves_unknown_nonempty_list_and_other_settings(self):
         old = self.write_config(flags=[1] + [0] * 13)
         check_and_update_user_config('account')
-        self.assertEqual(self.read_config(), old)
+        self.assertEqual(self.read_config(), {**old, 'schemaVersion': 1})
 
     def test_reading_old_config_also_returns_migrated_selection(self):
         self.write_config()

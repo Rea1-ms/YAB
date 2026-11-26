@@ -1,18 +1,24 @@
-import json
-import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-lock = threading.Lock()
+from core.config.config_io import (
+    config_lock,
+    read_events,
+    read_main_config,
+    update_events,
+    validate_event_settings,
+)
 
 
 class Scheduler:
 
-    def __init__(self, update_signal, path):
+    def __init__(self, update_signal, path, supported_tasks=None):
         super().__init__()
         self.event_map = {}
         self.first_waiting = None
-        self.event_config_path = path + "/event.json"
+        self.event_config_path = Path(path) / 'event.json'
+        self.supported_tasks = supported_tasks
         self.update_signal = update_signal
         self._event_config = []
         self._current_task = None
@@ -29,17 +35,31 @@ class Scheduler:
         return 0
 
     def _read_config(self):
-        with lock:
-            with open(self.event_config_path, 'r', encoding='utf-8') as f:
-                self._event_config = json.load(f)
-                if self.event_map == {}:
-                    for item in self._event_config:
-                        self.funcs.append(item['func_name'])
-                        self.event_map[item['func_name']] = item['event_name']
+        with config_lock:
+            main = self.event_config_path.with_name('config.json')
+            if main.exists():
+                read_main_config(main)
+            events, _ = read_events(self.event_config_path)
+        self._event_config = [item for item in events if self.supported_tasks is None
+                              or item['func_name'] in self.supported_tasks]
+        for event in self._event_config:
+            validate_event_settings(self.event_config_path, event)
+        self.event_map = {item['func_name']: item['event_name'] for item in self._event_config}
+        self.funcs = list(self.event_map)
 
-    def _commit_change(self):
-        with open(self.event_config_path, 'w', encoding='utf-8') as f:
-            json.dump(self._event_config, f, ensure_ascii=False, indent=2)
+    def _commit_change(self, task_name, previous_tick, next_tick):
+        def edit(events):
+            for event in events:
+                if event['func_name'] == task_name:
+                    # Keep an execution time explicitly changed while the task was running.
+                    if event['next_tick'] == previous_tick and previous_tick != next_tick:
+                        event['next_tick'] = next_tick
+                        return True
+                    break
+            return False
+
+        events = update_events(self.event_config_path, edit)
+        return next((event['next_tick'] for event in events if event['func_name'] == task_name), next_tick)
 
     @classmethod
     def get_next_time(cls, hour, minute, second):
@@ -55,6 +75,7 @@ class Scheduler:
         if force_task or task_name == self._current_task['current_task']:
             for event in self._event_config:
                 if event['func_name'] == task_name:
+                    previous_tick = event['next_tick']
                     if next_time > 0:
                         event['next_tick'] = time.time() + next_time
                     else:
@@ -76,8 +97,7 @@ class Scheduler:
                                 event['next_tick'] = time.time() + event['interval']
                             else:
                                 event['next_tick'] = time.time() + 86400
-                    event['next_tick'] = int(event['next_tick'])
-                    self._commit_change()
+                    event['next_tick'] = self._commit_change(task_name, previous_tick, int(event['next_tick']))
                     return datetime.fromtimestamp(event['next_tick'])
 
     def heartbeat(self):
