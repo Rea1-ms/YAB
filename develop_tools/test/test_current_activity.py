@@ -1,4 +1,4 @@
-"""真琴夏日活动的截图回放；不连接设备或执行真实战斗。"""
+"""国际服当期活动配置与入口、关卡的截图回放。"""
 
 import json
 import unittest
@@ -19,6 +19,7 @@ from module.activities import activity_utils
 
 ACTIVITY = 'SetSailPandemoniumShip'
 PANCAKE_RERUN = 'PandemicHazardAMiraclePancake'
+PANCAKE_HOME = 'global_pancake_rerun_home'
 PANCAKE_BATTLE_RESULT = 'global_pancake_rerun_story_battle_result'
 PANCAKE_REWARD = 'global_pancake_rerun_story_reward'
 HOME = 'global_makoto_activity_home'
@@ -41,6 +42,24 @@ class CurrentActivityTests(unittest.TestCase):
         frame = load_fixture(HOME)
         frame[:6, :6] = (3, 2, 1)
         return frame
+
+    def test_global_default_activity_selects_pancake_rerun(self):
+        activity = json.loads(STATIC_DEFAULT_CONFIG)['current_game_activity']['Global']
+        self.assertEqual(activity, PANCAKE_RERUN)
+        data = activity_utils.get_stage_data(SimpleNamespace(current_game_activity=activity))
+        self.assertEqual(data['total_story'], 8)
+        self.assertEqual(len(data['mission']), 12)
+
+    def test_pancake_rerun_clicks_lobby_entry_only_when_visible(self):
+        frames = [load_fixture(HOME), load_fixture(PANCAKE_HOME), load_fixture(PANCAKE_HOME)]
+        for identifier in popup_tests.IDENTIFIERS:
+            for ratio in RATIOS:
+                with (self.subTest(identifier=identifier, ratio=ratio),
+                      self.worker(frames, ratio, identifier, activity=PANCAKE_RERUN) as worker):
+                    with self.assertRaisesRegex(AssertionError, '回放帧已用完'):
+                        activity_utils.to_activity(worker, 'mission')
+                    worker.control.click.assert_called_once_with(int(1196 * ratio), int(195 * ratio))
+                    self.assertEqual(worker.replay.actions[0]['frame'], 1)
 
     def test_pancake_rerun_story_confirms_battle_and_reward(self):
         # The results are from Pancake. The surrounding tabs use earlier activity captures.
@@ -75,8 +94,7 @@ class CurrentActivityTests(unittest.TestCase):
                 activity_utils.to_activity(worker, 'mission', skip_first_screenshot=True)
             worker.control.click.assert_called_once_with(640, 663)
 
-    def test_default_activity_and_stage_data_match_current_event(self):
-        self.assertEqual(json.loads(STATIC_DEFAULT_CONFIG)['current_game_activity']['Global'], ACTIVITY)
+    def test_makoto_stage_data_matches_replay(self):
         data = activity_utils.get_stage_data(SimpleNamespace(current_game_activity=ACTIVITY))
         self.assertEqual(data['total_story'], 9)
         self.assertEqual(data['mission'], ['burst'] * 12)

@@ -597,7 +597,8 @@
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_missing_entry_artwork_never_clicks_the_activity_position",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_sweep_uses_current_stage_data_after_real_navigation",
         "develop_tools.test.test_current_activity.CurrentActivityTests.test_story_exploration_stops_at_ninth_cleared_story",
-        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story"
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_mission_exploration_uses_burst_and_returns_through_story",
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_clicks_lobby_entry_only_when_visible"
       ],
       "source": {
         "filename": "ba-activity-1.png",
@@ -619,6 +620,32 @@
           1035,
           56
         ]
+      ]
+    },
+    "global_pancake_rerun_home": {
+      "path": "global_pancake_rerun_home.png",
+      "sha256": "eb154ad3a53a7a0d99ea1c22e6e9c7228e38629478060f4b7b6c42ba52798869",
+      "size": [
+        1280,
+        720
+      ],
+      "scene": "国际服奇迹松饼复刻：主页右上角入口，完整脱敏截图",
+      "server": "Global",
+      "kind": "redacted_capture",
+      "used_by": [
+        "develop_tools.test.test_current_activity.CurrentActivityTests.test_pancake_rerun_clicks_lobby_entry_only_when_visible"
+      ],
+      "source": {
+        "filename": "Scrcpy-20261126-154702-828.png",
+        "sha256": "95517972bece48f710f900b8093ba1406fcbc4022541a9e65099fdcca13bef83",
+        "registered_on": "2026-11-26",
+        "captured_on": null,
+        "language": "en-us"
+      },
+      "redactions": [
+        [0, 0, 282, 85],
+        [500, 0, 1040, 64],
+        [996, 668, 1127, 710]
       ]
     },
     "global_pancake_rerun_story_battle_result": {
