@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const { execFile, spawn, spawnSync } = require('child_process');
-const { extractionWithProgress, prepareInstallerProgress, uninstallerWithTheme } = require('../installer-progress.cjs');
+const { extractionWithProgress, installerTemplateRoot, prepareInstallerProgress, uninstallerWithTheme } = require('../installer-progress.cjs');
+const { desktopLocations } = require('../runtime.cjs');
 const newTestDirectory = require('./output.cjs').testDirectories([
   '*.bmp', '*-pixels.json', 'displays.json', 'folder-*.json', 'metrics.txt', 'path-result.txt',
   'result.txt', 'result-*.txt', 'navigation.txt', 'finish.txt', 'extraction.txt', 'palette.txt',
@@ -30,6 +31,102 @@ function execute(command, args, options = {}) {
   return result.stdout;
 }
 
+function currentAccountSid() {
+  return execute('whoami.exe', ['/user', '/fo', 'csv', '/nh']).trim().split('"').at(-2);
+}
+
+function denyDirectoryWrites(directory, sid) {
+  // Deny new files and folders on this directory only. Inherited data grants
+  // and files in the rest of the workspace are unaffected.
+  execute('icacls.exe', [directory, '/deny', `*${sid}:(WD,AD)`, '/Q']);
+}
+
+test('fresh installs check directory permissions and machine installs keep data writable for their owner', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await newTestDirectory('install-data-permissions-');
+  const source = path.join(scratch, 'permissions.nsi');
+  const installer = path.join(scratch, 'permissions.exe');
+  const installRoot = path.join(scratch, 'installation');
+  const sid = currentAccountSid();
+  const env = { ...process.env, YAB_TEST_ORIGINAL_SID: sid, YAB_TEST_INNER_INSTALLER: '1' };
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include LogicLib.nsh
+!define UAC_IsInnerInstance '$inner == "1"'
+!define UAC_SYNCREGISTERS 1
+!macro UAC_AsUser_Call TYPE NAME FLAGS
+  ReadEnvStr $0 "YAB_TEST_ORIGINAL_SID"
+!macroend
+!include "${path.resolve(__dirname, '../installer-pages.nsh')}"
+!include "${path.resolve(__dirname, '../installer-data.nsh')}"
+Name "YAB isolated data permissions"
+OutFile "${installer}"
+InstallDir "${installRoot}"
+RequestExecutionLevel user
+Var inner
+Var installMode
+LangString yabDirectoryNotWritable 1033 "Cannot write to $INSTDIR"
+Function yabInitTheme
+FunctionEnd
+Section
+  ReadEnvStr $inner "YAB_TEST_INNER_INSTALLER"
+  ReadEnvStr $installMode "YAB_TEST_MODE"
+  ReadEnvStr $0 "YAB_TEST_INSTALL_DIR"
+  StrCmp $0 "" +2
+    StrCpy $INSTDIR $0
+  !insertmacro yabRequireWritableInstallDirectory
+  !insertmacro yabPrepareInstallData
+SectionEnd
+`);
+  const owner = path.join(installRoot, '.yab-data-owner');
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+  const personal = path.join(scratch, '自定义目录', 'YAB');
+  execute(installer, ['/S'], { env: { ...env, YAB_TEST_MODE: 'CurrentUser', YAB_TEST_INSTALL_DIR: personal } });
+  assert.ok((await fs.stat(personal)).isDirectory());
+  await assert.rejects(fs.access(path.join(personal, '.yab-data-owner')), { code: 'ENOENT' });
+  const protectedParent = path.join(scratch, 'protected parent');
+  await fs.mkdir(protectedParent);
+  denyDirectoryWrites(protectedParent, sid);
+  for (const destination of [protectedParent, path.join(protectedParent, 'YAB')]) {
+    assert.throws(() => execute(installer, ['/S'], { env: { ...env, YAB_TEST_MODE: 'CurrentUser', YAB_TEST_INSTALL_DIR: destination } }),
+      { actual: 2, expected: 0 }, destination);
+  }
+  assert.deepEqual(await fs.readdir(protectedParent), []);
+  const machineEnv = { ...env, YAB_TEST_MODE: 'all' };
+  execute(installer, ['/S'], { env: machineEnv });
+  assert.equal(await fs.readFile(owner, 'utf16le'), sid);
+  for (const name of ['config', 'data']) {
+    const target = path.join(installRoot, name);
+    const access = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
+      '$acl = [System.IO.Directory]::GetAccessControl($env:YAB_TEST_ACL_TARGET)',
+      '$acl.AreAccessRulesProtected',
+      '$acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { "$($_.IdentityReference.Value) $($_.FileSystemRights)" }',
+    ].join('\n')], { env: { ...env, YAB_TEST_ACL_TARGET: target } });
+    assert.match(access, /^True\r?$/m);
+    assert.ok(access.split(/\r?\n/).some(rule => rule.startsWith(sid + ' ') && rule.includes('Modify')), access);
+    await fs.writeFile(path.join(target, 'retained.txt'), 'keep');
+  }
+  const otherSid = 'S-1-5-21-1-2-3-1234';
+  execute(installer, ['/S'], { env: { ...machineEnv, YAB_TEST_ORIGINAL_SID: otherSid } });
+  assert.equal(await fs.readFile(owner, 'utf16le'), sid);
+  assert.equal(await fs.readFile(path.join(installRoot, 'data/retained.txt'), 'utf8'), 'keep');
+  denyDirectoryWrites(installRoot, sid);
+  await assert.rejects(fs.writeFile(path.join(installRoot, 'program.txt'), 'denied'),
+    error => ['EACCES', 'EPERM'].includes(error.code));
+  const local = path.join(scratch, 'Local');
+  const locations = { installRoot, appData: path.join(scratch, 'Roaming'), localAppData: local,
+    bundled: true, installed: true, env: {} };
+  const ownerPaths = desktopLocations({ ...locations, readSid: () => sid });
+  const otherPaths = desktopLocations({ ...locations, readSid: () => otherSid });
+  assert.equal(ownerPaths.configRoot, path.join(installRoot, 'config'));
+  assert.equal(ownerPaths.userData, path.join(installRoot, 'data'));
+  assert.equal(otherPaths.configRoot, path.join(local, 'YAB/all-users/config'));
+  assert.equal(otherPaths.userData, path.join(local, 'YAB/all-users/data'));
+});
+
 test('compiled uninstall policy preserves data by default and during upgrades', {
   skip: process.platform !== 'win32',
 }, async t => {
@@ -37,6 +134,15 @@ test('compiled uninstall policy preserves data by default and during upgrades', 
   if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
   const scratch = await newTestDirectory('uninstall-policy-');
   const installDir = path.join(scratch, 'test-install');
+  const machineDir = path.join(scratch, 'test-machine');
+  const otherDir = path.join(scratch, 'test-other-account');
+  const sid = currentAccountSid();
+  for (const [folder, owner] of [[machineDir, sid], [otherDir, 'S-1-5-21-1-2-3-1234']]) {
+    await fs.mkdir(path.join(folder, 'config'), { recursive: true });
+    await fs.writeFile(path.join(folder, '.yab-data-owner'), owner, 'utf16le');
+    await fs.writeFile(path.join(folder, 'config/retained.txt'), 'keep');
+    denyDirectoryWrites(folder, sid);
+  }
   for (const mode of [0, 1]) {
     const theme = mode === 0 ? 'dark' : 'light';
     const installer = path.join(scratch, `create-test-uninstaller-${theme}.exe`);
@@ -63,6 +169,16 @@ Var testUpdated
 Var testLog
 Var testEmptyBusy
 Var testEmptyAttempts
+Var testInner
+!define UAC_IsInnerInstance '$testInner == 1'
+!define UAC_SYNCREGISTERS 1
+!macro UAC_AsUser_GetGlobalVar OUTPUT
+  StrCpy @{OUTPUT} 0
+!macroend
+!macro UAC_AsUser_Call TYPE NAME FLAGS
+  FileWrite $testLog "as-launching-account$\r$\n"
+  Call @{NAME}
+!macroend
 !macro _isUpdated _a _b _t _f
   StrCmp $testUpdated "1" "@{_t}" "@{_f}"
 !macroend
@@ -110,7 +226,8 @@ UninstPage custom un.testMultiUserTheme
 !insertmacro customHeader
 Function un.onInit
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
-  StrCpy $installMode "current"
+  ReadEnvStr $installMode "YAB_PREVIEW_MODE"
+  ReadEnvStr $testInner "YAB_PREVIEW_INNER"
   StrCpy $testUpdated "0"
   StrCpy $testEmptyAttempts 0
   ReadEnvStr $testEmptyBusy "YAB_PREVIEW_EMPTY_BUSY"
@@ -150,16 +267,25 @@ SectionEnd
       { name: 'upgrade after uncheck', args: ['--updated', '--uncheck'], state: 0, remove: false },
       { name: 'nonempty or busy folder', args: [], state: 1, remove: false, busy: true },
       { name: 'child directory released on retry', args: [], state: 1, remove: false, transient: true },
+      { name: 'machine keeps data by default', args: [], state: 1, folder: machineDir },
+      { name: 'machine owner clears their data', args: ['--uncheck'], state: 0, remove: true, folder: machineDir },
+      { name: 'other machine user clears only their own data', args: ['--uncheck'], state: 0, remove: true, folder: otherDir },
+      { name: 'machine update keeps data', args: ['--updated', '--uncheck'], state: 0, folder: machineDir },
     ];
     for (const scenario of cases) {
-      execute(uninstaller, ['/S', ...scenario.args, `_?=${installDir}`], {
-        env: { ...process.env, YAB_PREVIEW_EMPTY_BUSY: scenario.busy ? '1' : scenario.transient ? 'once' : '0' },
+      const directory = scenario.folder || installDir;
+      execute(uninstaller, ['/S', ...scenario.args, `_?=${directory}`], {
+        env: { ...process.env, YAB_PREVIEW_EMPTY_BUSY: scenario.busy ? '1' : scenario.transient ? 'once' : '0',
+          YAB_PREVIEW_MODE: scenario.folder ? 'all' : 'current', YAB_PREVIEW_INNER: scenario.folder ? '1' : '0' },
       });
       const lines = (await fs.readFile(path.join(scratch, 'result.txt'), 'utf8')).trim().split(/\r?\n/);
       assert.equal(lines[0], `state=${scenario.state}`, scenario.name);
-      const appData = process.env.APPDATA;
-      assert.deepEqual(lines.slice(1), scenario.remove ? [path.join(installDir, 'config'),
-        path.join(appData, 'yab-desktop')] : [], scenario.name);
+      assert.deepEqual(lines.slice(1), scenario.remove ? [
+        ...(scenario.folder ? ['as-launching-account'] : []),
+        ...(directory === otherDir ? [] : ['config', 'data'].map(name => path.join(directory, name))),
+        path.join(process.env.LOCALAPPDATA, 'YAB', scenario.folder ? 'all-users' : 'current-user'),
+        path.join(process.env.APPDATA, 'yab-desktop'),
+      ] : [], scenario.name);
       const cleanup = (await fs.readFile(path.join(scratch, 'empty-cleanup.txt'), 'utf8')).trim();
       const children = (await fs.readFile(path.join(scratch, 'child-cleanup.txt'), 'utf8')).trim();
       if (scenario.args.includes('--updated')) {
@@ -168,10 +294,10 @@ SectionEnd
       } else {
         const attempts = cleanup.split(/\r?\n/);
         assert.equal(attempts.length, scenario.busy ? 3 : scenario.transient ? 2 : 1, 'Empty-directory cleanup has bounded retries.');
-        assert.ok(attempts.every(line => line.toLowerCase() === `${installDir}|${process.env.TEMP}`.toLowerCase()),
+        assert.ok(attempts.every(line => line.toLowerCase() === `${directory}|${process.env.TEMP}`.toLowerCase()),
           'Final cleanup runs outside the installation directory.');
         assert.deepEqual(children.split(/\r?\n/).map(line => line.toLowerCase()),
-          attempts.map(() => `${path.join(installDir, 'resources/backend/app')}|${process.env.TEMP}`.toLowerCase()),
+          attempts.map(() => `${path.join(directory, 'resources/backend/app')}|${process.env.TEMP}`.toLowerCase()),
           'Each final retry includes child directories, not just the installation root.');
       }
     }
@@ -185,6 +311,9 @@ SectionEnd
       assert.equal(await fs.readFile(path.join(scratch, 'result.txt'), 'utf8'), before,
         'Rejected uninstall must not run cleanup callbacks.');
     }
+  }
+  for (const folder of [machineDir, otherDir]) {
+    assert.equal(await fs.readFile(path.join(folder, 'config/retained.txt'), 'utf8'), 'keep');
   }
   t.diagnostic(`Uninstaller previews (no deletion): ${scratch}`);
 });
@@ -1132,7 +1261,9 @@ test('the packaged extraction template keeps builder retries and drives the real
       const originalCalls = /^(  !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n  !insertmacro handleUninstallResult HKEY_CURRENT_USER)$/m;
       const protectedCalls = /^\$\{andIfNot\} \$\{isUpdated\}\r?\n  !insertmacro yabCheckPersonalMigration\r?\n  \$\{if\} \$yabMigratePersonal == 1\r?\n    !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n    !insertmacro handleUninstallResult HKEY_CURRENT_USER\r?\n  \$\{endIf\}$/m;
       assert.match(patched, protectedCalls);
-      assert.equal(patched.replace(protectedCalls, original.match(originalCalls)[0]), original);
+      assert.match(patched, /!insertmacro yabRequireWritableInstallDirectory\r?\n!insertmacro uninstallOldVersion SHELL_CONTEXT/);
+      assert.equal(patched.replace(protectedCalls, original.match(originalCalls)[0])
+        .replace(/!insertmacro yabRequireWritableInstallDirectory\r?\n/, ''), original);
     } else if (entry.isFile() && entry.name !== 'uninstaller.nsh') {
       assert.deepEqual(await fs.readFile(path.join(includeDir, entry.name)),
         await fs.readFile(path.join(path.dirname(templateDir), entry.name)),
@@ -1247,6 +1378,9 @@ test('silent updates select only the originating registered installation', {
   const section = await fs.readFile(path.join(template, 'installSection.nsh'), 'utf8');
   const migration = section.match(/^\$\{if\} \$installMode == "all"\r?\n[^]*?uninstallOldVersion HKEY_CURRENT_USER[^]*?^\$\{endIf\}/m);
   assert.ok(migration, 'Exercise the generated cross-scope migration condition.');
+  const upstream = await fs.readFile(path.join(installerTemplateRoot(), 'installer.nsi'), 'utf8');
+  const elevate = upstream.match(/^\s*\$\{if\} \$hasPerMachineInstallation ==[^]*?(?=\s*!endif\s*!endif\s*!include "installSection.nsh")/m);
+  assert.ok(elevate, 'Exercise the real silent elevation branch.');
   const source = path.join(scratch, 'scope.nsi');
   const executable = path.join(scratch, 'scope.exe');
   await fs.writeFile(source, String.raw`
@@ -1260,10 +1394,12 @@ Unicode true
 !include "${path.join(template, 'multiUser.nsh')}"
 Var updated
 Var inner
+Var admin
 Var differentAccount
 Var report
 !define isUpdated '$updated == 1'
 !define UAC_IsInnerInstance '$inner == 1'
+!define UAC_IsAdmin '$admin == 1'
 !define UAC_SYNCREGISTERS 1
 !macro UAC_AsUser_Call type name flags
   @{if} $differentAccount == 1
@@ -1274,6 +1410,15 @@ Var report
 !macroend
 !include "${path.resolve(__dirname, '../installer-pages.nsh')}"
 !include "${path.resolve(__dirname, '../installer-update-scope.nsh')}"
+!include "${path.resolve(__dirname, '../installer-data.nsh')}"
+!macro UAC_RunElevated
+  SetErrorLevel 5
+  Quit
+!macroend
+!macroundef setInstallModePerAllUsers
+!macro setInstallModePerAllUsers
+  StrCpy $INSTDIR $perMachineInstallationFolder
+!macroend
 !macro uninstallOldVersion ROOT
   FileWriteUTF16LE $report "|@{ROOT}"
 !macroend
@@ -1283,10 +1428,14 @@ Name "YAB update scope test"
 OutFile "${executable}"
 RequestExecutionLevel user
 SilentInstall silent
+LangString yabDirectoryNotWritable 1033 "Cannot write to $INSTDIR"
+Function yabInitTheme
+FunctionEnd
 Function .onInit
   ReadEnvStr $perUserInstallationFolder YAB_TEST_USER_DIR
   ReadEnvStr $perMachineInstallationFolder YAB_TEST_MACHINE_DIR
   ReadEnvStr $inner YAB_TEST_INNER
+  ReadEnvStr $admin YAB_TEST_ADMIN
   ReadEnvStr $updated YAB_TEST_UPDATED
   ReadEnvStr $differentAccount YAB_TEST_DIFFERENT_ACCOUNT
   ; Two registrations normally leave the machine flag enabled.
@@ -1296,6 +1445,10 @@ Function .onInit
   !insertmacro yabSelectUpdateScope
 FunctionEnd
 Section
+  @{if} $updated == 1
+    ${elevate[0]}
+    !insertmacro yabRequireWritableInstallDirectory
+  @{endif}
   ReadEnvStr $0 YAB_TEST_SCOPE_REPORT
   FileOpen $report $0 w
   FileWriteUTF16LE $report "$installMode|$hasPerMachineInstallation|$INSTDIR"
@@ -1307,13 +1460,20 @@ SectionEnd
 
   const personal = path.join(scratch, 'Personal Copy');
   const machine = path.join(scratch, 'Machine Copy');
-  for (const [name, userDir, machineDir, target, inner, updated, expected, differentAccount = 0] of [
+  const protectedDir = path.join(scratch, 'Protected Copy');
+  await Promise.all([personal, machine, protectedDir].map(folder => fs.mkdir(folder)));
+  await fs.writeFile(path.join(protectedDir, 'YAB.exe'), 'previous version');
+  denyDirectoryWrites(protectedDir, currentAccountSid());
+  for (const [name, userDir, machineDir, target, inner, updated, expected, differentAccount = 0, admin = 0] of [
     ['personal', personal, machine, personal, 0, 1, `CurrentUser|0|${personal}`],
-    ['machine', personal, machine, machine, 0, 1, `all|1|${machine}`],
-    ['machine-inner', personal, machine, machine, 1, 1, `all|1|${machine}`],
+    ['personal-protected', protectedDir, machine, protectedDir, 0, 1, 2],
+    ['machine', personal, machine, machine, 0, 1, 5],
+    ['machine-protected', personal, protectedDir, protectedDir, 0, 1, 5],
+    ['machine-inner', personal, machine, machine, 1, 1, `all|1|${machine}`, 0, 1],
+    ['machine-inner-denied', personal, protectedDir, protectedDir, 1, 1, 2, 0, 1],
     ['personal-inner', personal, machine, personal, 1, 1, null],
     ['old-personal', personal, '', '', 0, 1, `CurrentUser|0|${personal}`],
-    ['old-machine', '', machine, '', 0, 1, `all|1|${machine}`],
+    ['old-machine', '', machine, '', 0, 1, `all|1|${machine}`, 0, 1],
     ['missing-target', personal, machine, '', 0, 1, null],
     ['unknown-target', personal, machine, scratch, 0, 1, null],
     ['same-target', personal, personal, personal, 0, 1, null],
@@ -1329,14 +1489,15 @@ SectionEnd
       windowsHide: true, timeout: 10000, env: {
         ...process.env, YAB_TEST_USER_DIR: userDir, YAB_TEST_MACHINE_DIR: machineDir,
         YAB_TEST_INNER: String(inner), YAB_TEST_UPDATED: String(updated), YAB_TEST_SCOPE_REPORT: report,
-        YAB_TEST_DIFFERENT_ACCOUNT: String(differentAccount),
+        YAB_TEST_DIFFERENT_ACCOUNT: String(differentAccount), YAB_TEST_ADMIN: String(admin),
       },
     });
     assert.ifError(result.error);
-    assert.equal(result.status, expected === null ? 2 : 0, name);
-    if (expected === null) await assert.rejects(fs.access(report), { code: 'ENOENT' });
+    assert.equal(result.status, typeof expected === 'string' ? 0 : expected ?? 2, name);
+    if (typeof expected !== 'string') await assert.rejects(fs.access(report), { code: 'ENOENT' });
     else assert.equal(await fs.readFile(report, 'utf16le'), expected, name);
   }
+  assert.equal(await fs.readFile(path.join(protectedDir, 'YAB.exe'), 'utf8'), 'previous version');
 });
 
 test('uninstall pages keep localized version text and removal status after the shared running check', {

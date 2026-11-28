@@ -43,7 +43,7 @@ const http = require('http');
 const { randomBytes } = require('crypto');
 const { readWebSettings, probePort } = require('./webui.cjs');
 const { spawn } = require('child_process');
-const { desktopDataPath, prepareRuntime, recordRuntime } = require('./runtime.cjs');
+const { desktopLocations, migrateDesktopData, copyExistingFile, prepareRuntime, recordRuntime } = require('./runtime.cjs');
 const { loadRuntimeSettings } = require('./runtime-settings.cjs');
 const { openRuntimeWindow } = require('./runtime-window.cjs');
 const { StartupProgress, createStartupScreen } = require('./startup.cjs');
@@ -53,9 +53,18 @@ const { BackendRecovery, attachBackendRecovery } = require('./backend-recovery.c
 const { updateConfig, installedAt } = require('./update-config.cjs');
 const { DesktopUpdater, attachDesktopUpdater, writeRecord, createNsisUpdater } = require('./updater.cjs');
 
-const dataPath = desktopDataPath(app.getPath('appData'), process.env.BAAS_DESKTOP_DATA);
+const executable = app.getPath('exe');
+const installRoot = path.dirname(executable);
+const backendBundle = path.join(process.resourcesPath, 'backend');
+const hasBundle = app.isPackaged && !process.env.BAAS_ROOT?.trim() && fs.existsSync(path.join(backendBundle, 'bundle.json'));
+const installation = app.isPackaged && installedAt(executable, process.resourcesPath);
+const desktopStorage = desktopLocations({ installRoot, appData: app.getPath('appData'),
+  localAppData: process.env.LOCALAPPDATA, bundled: hasBundle, installed: installation });
+const { userData: dataPath, configRoot: desktopConfigRoot } = desktopStorage;
+let desktopMigration;
 fs.mkdirSync(dataPath, { recursive: true });
 app.setPath('userData', dataPath);
+app.setPath('sessionData', dataPath);
 
 const SMOKE_MODE = process.argv.includes('--smoke');
 let serverHost = '127.0.0.1';
@@ -161,10 +170,10 @@ async function resolveRepoRoot() {
     return path.resolve(fromEnv.trim());
   }
   if (app.isPackaged) {
-    const bundle = path.join(process.resourcesPath, 'backend');
-    if (fs.existsSync(path.join(bundle, 'bundle.json'))) {
+    const bundle = backendBundle;
+    if (hasBundle) {
       const userData = app.getPath('userData');
-      const configRoot = path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config'));
+      const configRoot = desktopConfigRoot;
       let online = false;
       let windowOptions;
       for (;;) try {
@@ -180,7 +189,7 @@ async function resolveRepoRoot() {
           }
         }
         packagedRuntime = await prepareRuntime(bundle, userData, {
-          configRoot, signal: preparation.signal, progress: showPreparation, output: pushBackendLog,
+          ...desktopMigration, configRoot, signal: preparation.signal, progress: showPreparation, output: pushBackendLog,
         });
         break;
       } catch (error) {
@@ -471,15 +480,16 @@ async function configureDesktopUpdates() {
   catch { config = updateConfig(); disabledReason = '发行包的更新配置不合法'; }
   if (!app.isPackaged) disabledReason = '源码运行不使用桌面安装更新';
   else if (!isWindows()) disabledReason = '当前仅支持视窗系统安装版更新';
-  else if (!installedAt(app.getPath('exe'), process.resourcesPath)) disabledReason = '解压版请下载新版安装包，或解压到新目录使用';
-  // Keep the small update journal beside the installed program. Update-specific
-  // code does not create another copy of the installer or configuration under
-  // the user's data directory.
-  const journal = path.join(path.dirname(app.getPath('exe')), 'desktop-update.json');
+  else if (!installation) disabledReason = '解压版请下载新版安装包，或解压到新目录使用';
+  const journal = path.join(desktopConfigRoot, 'desktop-update-result.json');
+  if (!disabledReason && desktopStorage.adjacentAllowed) {
+    copyExistingFile(path.join(installRoot, 'desktop-update.json'), journal);
+  }
   const nativeUpdater = disabledReason ? null : createNsisUpdater(config);
-  if (nativeUpdater) nativeUpdater.installDirectory = path.dirname(app.getPath('exe'));
-  desktopUpdater = new DesktopUpdater({ version: app.getVersion(), config, disabledReason, journal,
-    settingsFile: path.join(path.dirname(app.getPath('exe')), 'config', 'desktop-update.json'),
+  if (nativeUpdater) nativeUpdater.installDirectory = installRoot;
+  desktopUpdater = new DesktopUpdater({ version: app.getVersion(), config, disabledReason,
+    journal: disabledReason ? undefined : journal,
+    settingsFile: path.join(desktopConfigRoot, 'desktop-update.json'),
     updater: nativeUpdater,
     prepare: async targetVersion => {
       if (quitting || !backend?.healthy || backendRecovery.snapshot().recovering) throw new Error('后端尚未就绪，请稍后重试');
@@ -662,7 +672,7 @@ function createTray() {
             return;
           }
           await openRuntimeWindow({ parent: mainWindow, bundle, bundled: manifest.uv === 'bundled',
-            configRoot: packagedRuntime?.configRoot || path.resolve(process.env.YAB_CONFIG_DIR || path.join(path.dirname(app.getPath('exe')), 'config')),
+            configRoot: packagedRuntime?.configRoot || desktopConfigRoot,
             userData: app.getPath('userData') });
         } catch (error) {
           await showMessage(mainWindow, { type: 'error', title: '无法打开运行环境设置',
@@ -679,8 +689,9 @@ function createTray() {
 // ------------------------------ 模式入口 ------------------------------
 
 async function runGui() {
-  await app.whenReady();
   try {
+    desktopMigration = migrateDesktopData(desktopStorage, backendBundle);
+    await app.whenReady();
     windowMode.closeAction = readWindowMode(windowModeFile);
     createTray();
     await createMainWindow();
@@ -699,14 +710,16 @@ async function runGui() {
       .catch(error => log(`无法保存更新结果：${error.message}`));
     void desktopUpdater.startAutoChecks().catch(() => log('启动更新检查未能完成'));
   } catch (err) {
+    await app.whenReady();
     await fatalExit('YAB 启动失败', String((err && err.message) || err));
   }
 }
 
 async function runSmoke() {
   app.disableHardwareAcceleration();
-  await app.whenReady();
   try {
+    desktopMigration = migrateDesktopData(desktopStorage, backendBundle);
+    await app.whenReady();
     repoRoot = await resolveRepoRoot();
     serverPort = await acquirePort();
     console.log(`[smoke] repoRoot=${repoRoot}`);

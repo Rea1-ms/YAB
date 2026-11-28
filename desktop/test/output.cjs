@@ -58,7 +58,8 @@ function testDirectories(reportPatterns = []) {
   const directories = [];
   after(() => Promise.all(directories.map(async directory => {
     if (reportPatterns.length) await saveReports(directory, reportPatterns);
-    await removeScratch(directory);
+    if (process.env.YAB_KEEP_TEST_SCRATCH === '1') console.log('保留桌面回归临时目录：' + directory);
+    else await removeScratch(directory);
   })));
   return async prefix => {
     const directory = await fs.mkdtemp(path.join(await outputDirectory('tmp'), prefix));

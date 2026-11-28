@@ -1,9 +1,11 @@
 'use strict';
 
 const fs = require('fs/promises');
+const { constants, closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync,
+  readFileSync, renameSync, unlinkSync } = require('node:fs');
 const path = require('path');
 const { createHash, randomUUID } = require('crypto');
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const { setTimeout: delay } = require('timers/promises');
 const { INDEXES, loadRuntimeSettings, resolveUv, runtimeEnvironment } = require('./runtime-settings.cjs');
 
@@ -33,9 +35,9 @@ function settingsDirectories(userData, configRoot) {
   ];
 }
 
-async function prepareSettings(userData, configRoot, previousConfigRoot) {
+async function prepareSettings(userData, configRoot, previousConfigRoot, legacyData = userData) {
   const directories = settingsDirectories(userData, configRoot);
-  const previous = settingsDirectories(userData, previousConfigRoot);
+  const previous = settingsDirectories(legacyData, previousConfigRoot);
   try {
     if (configRoot) await fs.mkdir(configRoot, { recursive: true });
     for (const { relative, shared } of directories) {
@@ -65,6 +67,110 @@ async function prepareSettings(userData, configRoot, previousConfigRoot) {
 function desktopDataPath(appData, override) {
   if (override) return path.resolve(override);
   return path.join(appData, 'yab-desktop');
+}
+
+function windowsAccountSid() {
+  if (process.platform !== 'win32') return '';
+  try {
+    const whoami = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'whoami.exe');
+    return execFileSync(whoami, ['/user', '/fo', 'csv', '/nh'], {
+      encoding: 'utf8', timeout: 3000, windowsHide: true,
+    }).match(/,"(S-1-(?:\d+-)*\d+)"\s*$/i)?.[1] || '';
+  } catch {
+    return '';
+  }
+}
+
+function writableDirectory(directory) {
+  try {
+    mkdirSync(directory, { recursive: true });
+    if (!lstatSync(directory).isDirectory()) return false;
+    // access(W_OK) on Windows does not check the directory ACL.
+    const probe = path.join(directory, '.yab-write-' + randomUUID());
+    closeSync(openSync(probe, 'wx'));
+    unlinkSync(probe);
+    return true;
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'EROFS', 'ENOTDIR', 'EEXIST'].includes(error.code)) return false;
+    throw error;
+  }
+}
+
+function desktopLocations({ installRoot, appData, localAppData, bundled, installed, env = process.env,
+  readSid = windowsAccountSid }) {
+  const legacyData = desktopDataPath(appData, env.BAAS_DESKTOP_DATA);
+  const adjacentConfig = path.join(installRoot, 'config');
+  const configOverride = env.YAB_CONFIG_DIR ? path.resolve(env.YAB_CONFIG_DIR) : '';
+  if (!bundled) return { userData: legacyData, configRoot: configOverride || adjacentConfig };
+
+  let owner = null;
+  if (installed) {
+    try { owner = readFileSync(path.join(installRoot, '.yab-data-owner'), 'utf16le').replace(/^\uFEFF/, '').trim(); }
+    catch (error) { if (error.code !== 'ENOENT') owner = ''; }
+  }
+  const adjacentAllowed = owner === null || (/^S-1-(?:\d+-)*\d+$/i.test(owner) && owner === readSid());
+  let scope = owner !== null ? 'all-users' : 'current-user';
+  if (!installed) scope = 'portable-' + createHash('sha256').update(installRoot.toLowerCase()).digest('hex').slice(0, 12);
+  const accountData = path.join(localAppData || appData, 'YAB', scope);
+  const adjacentData = path.join(installRoot, 'data');
+  const chooseDirectory = (adjacent, name, initializedFile) => {
+    const fallback = path.join(accountData, name);
+    // Keep using a previously initialized fallback so a permission change
+    // does not silently switch the user back to stale settings or runtime data.
+    return adjacentAllowed && !existsSync(path.join(fallback, initializedFile)) && writableDirectory(adjacent)
+      ? adjacent : fallback;
+  };
+  const userData = env.BAAS_DESKTOP_DATA ? legacyData : chooseDirectory(adjacentData, 'data', 'desktop-runtime.json');
+  const configRoot = configOverride || chooseDirectory(adjacentConfig, 'config', '.desktop-layout.json');
+  return { userData, configRoot, adjacentAllowed, adjacentConfig, legacyData };
+}
+
+function copyExistingFile(source, destination) {
+  if (source === destination || existsSync(destination)) return;
+  try {
+    if (lstatSync(source).isFile()) copyFileSync(source, destination, constants.COPYFILE_EXCL);
+  } catch (error) {
+    if (!['ENOENT', 'EEXIST'].includes(error.code)) throw error;
+  }
+}
+
+function migrateDesktopData(locations, bundle) {
+  const { userData, configRoot, adjacentAllowed, adjacentConfig, legacyData } = locations;
+  if (!legacyData) return {};
+  let previous;
+  try { previous = JSON.parse(readFileSync(path.join(legacyData, 'desktop-runtime.json'), 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
+  const matchesInstall = typeof previous?.root === 'string'
+    && previous.root.toLowerCase() === path.join(bundle, 'app').toLowerCase();
+  if (userData !== legacyData && matchesInstall) {
+    for (const name of ['desktop-settings.json', 'Preferences']) {
+      copyExistingFile(path.join(legacyData, name), path.join(userData, name));
+    }
+    const storage = path.join(legacyData, 'Local Storage');
+    const destination = path.join(userData, 'Local Storage');
+    if (lstatSync(storage, { throwIfNoEntry: false })?.isDirectory() && !existsSync(destination)) {
+      const pending = path.join(userData, '.local-storage-' + randomUUID());
+      cpSync(storage, pending, { recursive: true, errorOnExist: true, force: false,
+        filter: entry => !lstatSync(entry).isSymbolicLink() && path.basename(entry) !== 'LOCK' });
+      renameSync(pending, destination);
+    }
+  }
+  // Only the original account can import installation-local settings.
+  let previousConfigRoot = null;
+  if (adjacentAllowed && !existsSync(path.join(configRoot, '.desktop-layout.json'))) {
+    if (configRoot !== adjacentConfig && lstatSync(adjacentConfig, { throwIfNoEntry: false })?.isDirectory()) {
+      previousConfigRoot = adjacentConfig;
+    } else if (matchesInstall && typeof previous.configRoot === 'string') {
+      previousConfigRoot = previous.configRoot;
+    }
+  }
+  if (previousConfigRoot && previousConfigRoot !== configRoot) {
+    mkdirSync(configRoot, { recursive: true });
+    for (const name of ['runtime-settings.json', 'webui.json', 'desktop-update.json']) {
+      copyExistingFile(path.join(previousConfigRoot, name), path.join(configRoot, name));
+    }
+  }
+  return { previousConfigRoot, legacyData: adjacentAllowed && (!previous || matchesInstall) ? legacyData : userData };
 }
 
 async function readJson(file) {
@@ -200,7 +306,7 @@ async function prepareRuntime(bundle, userData, options = {}) {
     signal?.throwIfAborted();
     const active = await readRuntime(userData);
     progress('正在检查已有运行环境…', 20);
-    await prepareSettings(userData, configRoot, active?.configRoot);
+    await prepareSettings(userData, configRoot, active?.configRoot || options.previousConfigRoot, options.legacyData);
 
     const runtimes = path.join(userData, 'runtimes');
     // Keep native DLL paths below Windows' legacy length limit. Full digests
@@ -275,4 +381,5 @@ async function prepareRuntime(bundle, userData, options = {}) {
   }
 }
 
-module.exports = { desktopDataPath, prepareRuntime, recordRuntime, readRuntime, verifyBundle };
+module.exports = { desktopDataPath, desktopLocations, migrateDesktopData, copyExistingFile,
+  prepareRuntime, recordRuntime, readRuntime, verifyBundle };

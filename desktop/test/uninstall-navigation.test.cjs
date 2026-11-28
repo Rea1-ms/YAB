@@ -32,12 +32,14 @@ Unicode true
 !define APP_FILENAME "YAB"
 !define isUpdated '0 = 1'
 !define UAC_IsInnerInstance '$inner = 1'
-!define UAC_IsAdmin '1 = 1'
+!define UAC_IsAdmin '$admin = 1'
+!define UAC_SYNCREGISTERS 1
 !define isForAllUsers '$forced == "machine"'
 !define isForCurrentUser '$forced == "user"'
 !define MULTIUSER_INSTALLMODE_ALLOW_ELEVATION
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "${path.resolve(__dirname, '../assets/installer-sidebar.bmp')}"
 Var inner
+Var admin
 Var seen
 Var scenario
 Var forced
@@ -57,6 +59,8 @@ Var report
   Call @{name}
 !macroend
 !macro UAC_RunElevated
+  FileWriteUTF16LE $report "elevation-requested$\r$\n"
+  FileClose $report
   SetErrorLevel 5
   Quit
 !macroend
@@ -104,6 +108,7 @@ Function un.onInit
   ReadEnvStr $scenario "YAB_PREVIEW_SCOPE"
   ReadEnvStr $forced "YAB_PREVIEW_FORCED_SCOPE"
   ReadEnvStr $inner "YAB_PREVIEW_INNER"
+  ReadEnvStr $admin "YAB_PREVIEW_ADMIN"
   ReadEnvStr $seen "YAB_PREVIEW_SEEN"
   ReadEnvStr $LANGUAGE "YAB_PREVIEW_LANGUAGE"
   StrCpy $dataVisits 0
@@ -188,6 +193,12 @@ SectionEnd
     assert.equal((await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf16le')).trim(),
       '在请求的范围内找不到 YAB 的安装记录，无法确定要卸载的目录。');
   }
+  assert.throws(() => execute(uninstaller, [`_?=${scratch}`], {
+    ...process.env, YAB_PREVIEW_SCOPE: 'machine', YAB_PREVIEW_FORCED_SCOPE: '',
+    YAB_PREVIEW_INNER: '0', YAB_PREVIEW_ADMIN: '0', YAB_PREVIEW_LANGUAGE: '2052',
+  }), error => error.status === 5);
+  assert.deepEqual((await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf16le')).trim().split(/\r?\n/),
+    ['welcome', 'elevation-requested']);
   for (const [scope, inner, seen, language, scopePage, welcome] of [
     ['user', '0', '0', '2052', false, true],
     ['machine', '1', '0', '1028', false, true],
@@ -195,7 +206,7 @@ SectionEnd
     ['both', '1', '1', '2052', false, false],
   ]) {
     execute(uninstaller, [`_?=${scratch}`], { ...process.env, YAB_PREVIEW_SCOPE: scope, YAB_PREVIEW_FORCED_SCOPE: '', YAB_PREVIEW_INNER: inner,
-      YAB_PREVIEW_SEEN: seen, YAB_PREVIEW_LANGUAGE: language });
+      YAB_PREVIEW_SEEN: seen, YAB_PREVIEW_LANGUAGE: language, YAB_PREVIEW_ADMIN: scope === 'user' ? '0' : '1' });
     const events = (await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf16le')).trim().split(/\r?\n/);
     const contents = events.filter(line => line.startsWith('data='));
     assert.equal(contents.length, 2);
@@ -205,8 +216,9 @@ SectionEnd
     assert.deepEqual(events, [
       ...(welcome ? ['welcome'] : []), ...(scopePage ? ['scope-all=0', 'welcome', 'scope-all=1'] : []), contents[0],
       scopePage ? 'scope-all=1' : 'welcome', contents[1], 'progress-back=0',
-      'remove=' + path.join(scratch, scope === 'user' ? 'personal' : 'machine', 'config'),
-      ...(inner === '1' ? ['launching-user=un.yabRemoveAccountData,sync=0'] : []),
+      ...(inner === '1' ? ['launching-user=un.yabRemoveAccountData,sync=1'] : []),
+      ...['config', 'data'].map(name => 'remove=' + path.join(scratch, scope === 'user' ? 'personal' : 'machine', name)),
+      'remove=' + path.join(process.env.LOCALAPPDATA, 'YAB', scope === 'user' ? 'current-user' : 'all-users'),
       'remove=' + path.join(process.env.APPDATA, 'yab-desktop'), 'finish',
     ]);
   }

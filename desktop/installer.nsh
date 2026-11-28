@@ -1,4 +1,5 @@
 !include "${__FILEDIR__}\installer-ui.nsh"
+!include "${__FILEDIR__}\installer-data.nsh"
 !ifndef BUILD_UNINSTALLER
   !ifdef YAB_INSTALL_COPY_DEBUG
     !include "${__FILEDIR__}\installer-copy-debug.nsh"
@@ -31,6 +32,9 @@
 !macroend
 
 !macro customInstall
+  !ifmacrodef UAC_AsUser_Call
+    !insertmacro yabPrepareInstallData
+  !endif
   ; Only installed copies may launch automatic installer updates.
   Push $R9
   ClearErrors
@@ -114,25 +118,94 @@
       ${if} $yabKeepAppData != ${BST_UNCHECKED}
         Return
       ${endif}
-      !insertmacro yabRemoveDataDirectory "$INSTDIR\config"
+      StrCpy $0 $INSTDIR
+      StrCpy $1 $installMode
       !ifmacrodef UAC_AsUser_Call
         ${if} ${UAC_IsInnerInstance}
-          ; Resolve AppData and remove it in the original user's own process.
-          ; Neither paths nor registers cross the privilege boundary.
-          !insertmacro UAC_AsUser_Call Function un.yabRemoveAccountData 0
-          Return
+          ; Send the selected installation to the unelevated process. Only
+          ; that process walks directories writable by the initiating user.
+          !insertmacro UAC_AsUser_Call Function un.yabRemoveAccountData ${UAC_SYNCREGISTERS}
+        ${else}
+          Call un.yabRemoveAccountData
         ${endif}
+      !else
+        Call un.yabRemoveAccountData
       !endif
-      Call un.yabRemoveAccountData
+      IfFileExists "$INSTDIR\config" +4 0
+      IfFileExists "$INSTDIR\data" +3 0
+      Delete "$INSTDIR\.yab-data-owner"
+      Delete "$INSTDIR\desktop-update.json"
+      ClearErrors
     FunctionEnd
 
     Function un.yabRemoveAccountData
+      Push $R0
+      Push $R1
+      Push $R2
+      Push $R3
+      StrCpy $R0 $0
+      StrCpy $R1 "current-user"
+      ${if} $1 == "all"
+        StrCpy $R1 "all-users"
+      ${endif}
+      !insertmacro yabReadDataOwner $R0 $R2 $R3
+      !insertmacro yabReadProcessSid
+      ${if} $R2 == ""
+      ${orIf} $R2 == $0
+        !insertmacro yabRemoveDataDirectory "$R0\config"
+        !insertmacro yabRemoveDataDirectory "$R0\data"
+      ${endif}
       SetShellVarContext current
+      !insertmacro yabRemoveDataDirectory "$LOCALAPPDATA\YAB\$R1"
       !insertmacro yabRemoveDataDirectory "$APPDATA\yab-desktop"
       ${if} $installMode == "all"
         SetShellVarContext all
       ${endif}
+      Pop $R3
+      Pop $R2
+      Pop $R1
+      Pop $R0
     FunctionEnd
+
+    !ifdef YAB_SAFE_DATA_REMOVAL
+      Function un.yabRemoveOwnedTree
+        Exch $0
+        Push $1
+        Push $2
+        Push $3
+        System::Call 'kernel32::GetFileAttributesW(w r0) i.r1'
+        ${if} $1 != -1
+          IntOp $2 $1 & 16
+          ${if} $2 == 0
+            Delete "$0"
+          ${else}
+            IntOp $2 $1 & 0x400
+            ${if} $2 == 0
+              ClearErrors
+              FindFirst $2 $3 "$0\*"
+              ${ifNot} ${Errors}
+                ${do}
+                  ${if} $3 != "."
+                  ${andIf} $3 != ".."
+                    Push "$0\$3"
+                    Call un.yabRemoveOwnedTree
+                  ${endif}
+                  ClearErrors
+                  FindNext $2 $3
+                ${loopUntil} ${Errors}
+                FindClose $2
+              ${endif}
+            ${endif}
+            ; Remove a junction itself and never enumerate its target.
+            RMDir "$0"
+          ${endif}
+        ${endif}
+        Pop $3
+        Pop $2
+        Pop $1
+        Pop $0
+      FunctionEnd
+    !endif
 
     ; The builder removes shortcuts and registry entries after customRemoveFiles.
     ; Retry known program directories deepest first, then the installation root.
@@ -254,8 +327,10 @@
 
 ; Tests replace this operation with a log writer and never remove files.
 !ifmacrondef yabRemoveDataDirectory
+  !define YAB_SAFE_DATA_REMOVAL
   !macro yabRemoveDataDirectory DIRECTORY
-    RMDir /r "${DIRECTORY}"
+    Push "${DIRECTORY}"
+    Call un.yabRemoveOwnedTree
   !macroend
 !endif
 

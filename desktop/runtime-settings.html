@@ -48,7 +48,7 @@
   <input id="location" type="text" placeholder="选择本地文件，或填写完整位置" autocomplete="off" spellcheck="false" aria-describedby="tool-version status">
   <label for="index">依赖下载源</label>
   <select id="index"></select>
-  <p class="note">下载源仅影响依赖；解释器优先复用 uv（依赖管理工具）管理的相同版本，缺少时下载。依赖版本和文件摘要按发行包锁定。</p>
+  <p class="note">下载源仅影响依赖。解释器默认保存在运行数据目录，下次启动可复用。依赖版本和文件摘要按发行包锁定。</p>
   <footer><button id="save" type="button" disabled>保存并继续</button></footer>
 </body>
 </html>

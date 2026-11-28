@@ -86,9 +86,9 @@ function runtimeEnvironment(online, userData, inherited = process.env) {
     UV_CACHE_DIR: inherited.UV_CACHE_DIR || path.join(userData, 'uv-cache'),
     UV_PYTHON_DOWNLOADS: online ? 'automatic' : 'never',
     PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' });
-  // The normal uv directory reuses the exact pinned interpreter if present.
-  // Keep application dependencies isolated in the dedicated virtual environment.
-  if (!online) env.UV_OFFLINE = '1';
+  // Reuse the pinned interpreter within this data directory by default.
+  if (online) env.UV_PYTHON_INSTALL_DIR ||= path.join(userData, 'python');
+  else env.UV_OFFLINE = '1';
   for (const key of ['PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV']) delete env[key];
   return env;
 }

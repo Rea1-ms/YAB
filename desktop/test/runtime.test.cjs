@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const { createHash } = require('crypto');
-const { desktopDataPath, prepareRuntime, recordRuntime, readRuntime } = require('../runtime.cjs');
+const { desktopDataPath, desktopLocations, migrateDesktopData,
+  prepareRuntime, recordRuntime, readRuntime } = require('../runtime.cjs');
 const { INDEXES, loadRuntimeSettings, saveRuntimeSettings, validateSettings, runtimeEnvironment } = require('../runtime-settings.cjs');
 const newTestDirectory = require('./output.cjs').testDirectories();
 
@@ -97,6 +98,67 @@ test('desktop data uses the YAB directory and honors explicit overrides', async 
   assert.equal(await fs.readFile(path.join(legacy, 'Preferences'), 'utf8'), 'saved preferences');
   const custom = path.join(f.data, 'custom');
   assert.equal(desktopDataPath(f.data, custom), custom);
+});
+
+test('packaged data stays beside the program for its owner and separates other accounts', async () => {
+  const f = await fixture();
+  const base = path.dirname(f.data);
+  const installRoot = path.join(base, 'installation');
+  const options = { installRoot, appData: path.join(base, 'Roaming'), localAppData: path.join(base, 'Local'),
+    bundled: true, installed: true, env: {}, readSid: () => 'S-1-5-21-1001' };
+  const local = desktopLocations(options);
+  assert.equal(local.userData, path.join(installRoot, 'data'));
+  assert.equal(local.configRoot, path.join(installRoot, 'config'));
+  await fs.writeFile(path.join(installRoot, '.yab-data-owner'), 'S-1-5-21-1001', 'utf16le');
+  assert.equal(desktopLocations(options).userData, local.userData);
+  const other = desktopLocations({ ...options, readSid: () => 'S-1-5-21-1002' });
+  const account = path.join(base, 'Local/YAB/all-users');
+  assert.equal(other.userData, path.join(account, 'data'));
+  assert.equal(other.configRoot, path.join(account, 'config'));
+  assert.equal(migrateDesktopData(other, f.bundle).previousConfigRoot, null);
+  const overrides = desktopLocations({ ...options, env: { BAAS_DESKTOP_DATA: f.data, YAB_CONFIG_DIR: base } });
+  assert.equal(overrides.userData, f.data);
+  assert.equal(overrides.configRoot, base);
+  const blocked = path.join(base, 'blocked');
+  await fs.mkdir(blocked);
+  await fs.writeFile(path.join(blocked, 'data'), 'existing file');
+  const fallback = desktopLocations({ ...options, installRoot: blocked });
+  assert.equal(fallback.userData, path.join(base, 'Local/YAB/current-user/data'));
+  assert.equal(fallback.configRoot, path.join(blocked, 'config'));
+  await fs.mkdir(fallback.userData, { recursive: true });
+  await fs.writeFile(path.join(fallback.userData, 'desktop-runtime.json'), '{}');
+  await fs.rename(path.join(blocked, 'data'), path.join(blocked, 'old-data-file'));
+  assert.equal(desktopLocations({ ...options, installRoot: blocked }).userData, fallback.userData);
+});
+
+test('moving the desktop data preserves settings and profiles without moving the old environment', async () => {
+  const f = await fixture();
+  const base = path.dirname(f.data);
+  const installRoot = path.join(base, 'installation');
+  const account = desktopLocations({ installRoot, appData: path.join(base, 'Roaming'),
+    localAppData: path.join(base, 'Local'), bundled: true, installed: true, env: {} });
+  const oldConfig = path.join(base, 'old-config');
+  const files = [
+    [path.join(oldConfig, 'profiles/profile/config.json'), '{}'],
+    [path.join(oldConfig, 'webui.json'), '{"port":22268}'],
+    [path.join(account.legacyData, 'desktop-settings.json'), '{"closeAction":"light"}'],
+    [path.join(account.legacyData, 'Local Storage/leveldb/000001.log'), 'browser state'],
+    [path.join(account.legacyData, 'desktop-runtime.json'), JSON.stringify({
+      root: path.join(f.bundle, 'app'), configRoot: oldConfig,
+    })],
+  ];
+  for (const [file, value] of files) {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, value);
+  }
+  const migration = migrateDesktopData(account, f.bundle);
+  const runtime = await prepareRuntime(f.bundle, account.userData, { ...f, ...migration, configRoot: account.configRoot });
+  assert.equal(await fs.readFile(path.join(account.configRoot, 'profiles/profile/config.json'), 'utf8'), '{}');
+  assert.equal(await fs.readFile(path.join(account.configRoot, 'webui.json'), 'utf8'), '{"port":22268}');
+  assert.equal(await fs.readFile(path.join(account.userData, 'desktop-settings.json'), 'utf8'), '{"closeAction":"light"}');
+  assert.equal(await fs.readFile(path.join(account.userData, 'Local Storage/leveldb/000001.log'), 'utf8'), 'browser state');
+  assert.ok(runtime.python.startsWith(path.join(account.userData, 'runtimes')));
+  for (const [file, value] of files) assert.equal(await fs.readFile(file, 'utf8'), value);
 });
 
 test('legacy version folders are preserved but never selected or refreshed', async () => {
@@ -298,7 +360,7 @@ test('lightweight installation checks the shared pinned interpreter and installs
     const install = f.calls.find(call => call.args[0] === 'python');
     assert.equal(install.args.at(-1), '3.11.14');
     assert.ok(install.args.includes('--no-registry'));
-    assert.equal(install.options.env.UV_PYTHON_INSTALL_DIR, process.env.UV_PYTHON_INSTALL_DIR);
+    assert.equal(install.options.env.UV_PYTHON_INSTALL_DIR, process.env.UV_PYTHON_INSTALL_DIR || path.join(f.data, 'python'));
     assert.ok(!install.args.includes('--reinstall'));
     assert.ok(!install.args.includes('--force'));
     const sync = f.calls.find(call => call.args[1] === 'sync');
@@ -387,7 +449,7 @@ test('host uv options cannot override the selected source or make a complete pac
   const online = runtimeEnvironment(true, 'user-data', inherited);
   assert.equal(online.UV_CACHE_DIR, 'shared-cache');
   assert.equal(online.UV_PYTHON_INSTALL_DIR, 'managed-python');
-  assert.equal(runtimeEnvironment(true, 'user-data', {}).UV_PYTHON_INSTALL_DIR, undefined);
+  assert.equal(runtimeEnvironment(true, 'user-data', {}).UV_PYTHON_INSTALL_DIR, path.join('user-data', 'python'));
   assert.equal(online.PATH, 'preserved');
   for (const key of ['UV_OFFLINE', 'UV_NO_CACHE', 'UV_NO_VERIFY_HASHES', 'UV_INDEX', 'UV_PYTHON', 'PYTHONPATH', 'VIRTUAL_ENV']) assert.equal(online[key], undefined);
   const offline = runtimeEnvironment(false, 'user-data', inherited);

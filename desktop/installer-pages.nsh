@@ -182,6 +182,13 @@
   ; Return the current process token's user SID in $0. Run the same code
   ; in each process so split tokens of the same account compare equal.
   yabReadMigrationAccountSid:
+  !insertmacro yabReadProcessSid
+  Return
+  yabPersonalMigrationChecked:
+!macroend
+
+; Return the current process token's user SID in $0.
+!macro yabReadProcessSid
   Push $1
   Push $2
   Push $3
@@ -212,6 +219,4 @@
   Pop $3
   Pop $2
   Pop $1
-  Return
-  yabPersonalMigrationChecked:
 !macroend

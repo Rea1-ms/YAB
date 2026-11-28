@@ -74,6 +74,8 @@ function prepareInstallerProgress(release) {
   fs.writeFileSync(path.join(includeDir, 'multiUser.nsh'), multiUser.replace(readDirectory, trimQuotes));
   const section = fs.readFileSync(path.join(templateRoot, 'installSection.nsh'), 'utf8');
   const eol = section.includes('\r\n') ? '\r\n' : '\n';
+  const removePrevious = '!insertmacro uninstallOldVersion SHELL_CONTEXT';
+  if (section.split(removePrevious).length !== 2) throw new Error('安装器模板已变化，需要检查安装目录权限检查位置');
   const migration = [
     '${if} $installMode == "all"',
     '  !insertmacro uninstallOldVersion HKEY_CURRENT_USER',
@@ -91,7 +93,9 @@ function prepareInstallerProgress(release) {
     '  ${endIf}',
     '${endIf}',
   ].join(eol);
-  fs.writeFileSync(path.join(includeDir, 'installSection.nsh'), section.replace(migration, scopedMigration));
+  fs.writeFileSync(path.join(includeDir, 'installSection.nsh'), section
+    .replace(removePrevious, '!insertmacro yabRequireWritableInstallDirectory' + eol + removePrevious)
+    .replace(migration, scopedMigration));
   fs.writeFileSync(path.join(includeDir, 'extractAppPackage.nsh'), extractionWithProgress(source));
   const uninstaller = fs.readFileSync(path.join(templateRoot, 'uninstaller.nsh'), 'utf8');
   // The project hook handles both the checkbox and --delete-app-data in the

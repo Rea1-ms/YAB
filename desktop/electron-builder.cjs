@@ -58,7 +58,7 @@ module.exports = {
     // directory survives upgrades and is removed on uninstall only by choice.
     const entries = fs.readdirSync(context.appOutDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!/^[\w. -]+$/.test(entry.name) || entry.name.toLowerCase() === 'config') {
+      if (!/^[\w. -]+$/.test(entry.name) || ['config', 'data', '.yab-data-owner'].includes(entry.name.toLowerCase())) {
         throw new Error(`安装文件清单包含非预期路径：${entry.name}`);
       }
     }
@@ -94,6 +94,7 @@ module.exports = {
     lines.push('!macroend', '');
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-data.nsh'), path.join(release, 'installer-data.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-pages.nsh'), path.join(release, 'installer-pages.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-update-scope.nsh'), path.join(release, 'installer-update-scope.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-i18n.nsh'), path.join(release, 'installer-i18n.nsh'));
