@@ -72,6 +72,7 @@
     Var yabKeepAppData
     Var yabKeepAppDataCheckbox
     Var yabDataDialog
+    Var yabUninstallLocation
 
     Function un.yabDataPageCreate
       ${if} ${isUpdated}
@@ -83,17 +84,25 @@
       ${if} $yabDataDialog == error
         Abort
       ${endif}
-      ${NSD_CreateCheckbox} 0 12u 100% 16u "$(yabKeepData)"
+      ${NSD_CreateLabel} 0 0 100% 11u "$(yabUninstallLocationLabel)"
+      Pop $0
+      ${NSD_CreateText} 0 13u 100% 14u "$INSTDIR"
+      Pop $yabUninstallLocation
+      SendMessage $yabUninstallLocation ${EM_SETREADONLY} 1 0
+      ${NSD_CreateCheckbox} 0 36u 100% 16u "$(yabKeepData)"
       Pop $yabKeepAppDataCheckbox
-      ${NSD_CreateLabel} 0 40u 100% 90u "$(yabKeepDataText)"
+      ${NSD_CreateLabel} 0 56u 100% 76u "$(yabKeepDataText)"
       Pop $0
       ${NSD_SetState} $yabKeepAppDataCheckbox $yabKeepAppData
+      ; Back bypasses the leave callback. Remember changes as they happen.
+      ${NSD_OnClick} $yabKeepAppDataCheckbox un.yabDataChoiceChanged
       Call un.yabApplyTheme
       !insertmacro yabStyleCheckbox $yabKeepAppDataCheckbox "un."
       nsDialogs::Show
     FunctionEnd
 
-    Function un.yabDataPageLeave
+    Function un.yabDataChoiceChanged
+      Pop $0
       ${NSD_GetState} $yabKeepAppDataCheckbox $yabKeepAppData
     FunctionEnd
 
@@ -105,9 +114,20 @@
       ${if} $yabKeepAppData != ${BST_UNCHECKED}
         Return
       ${endif}
-      ; Use only known application paths, never environment-provided directories.
-      SetShellVarContext current
       !insertmacro yabRemoveDataDirectory "$INSTDIR\config"
+      !ifmacrodef UAC_AsUser_Call
+        ${if} ${UAC_IsInnerInstance}
+          ; Resolve AppData and remove it in the original user's own process.
+          ; Neither paths nor registers cross the privilege boundary.
+          !insertmacro UAC_AsUser_Call Function un.yabRemoveAccountData 0
+          Return
+        ${endif}
+      !endif
+      Call un.yabRemoveAccountData
+    FunctionEnd
+
+    Function un.yabRemoveAccountData
+      SetShellVarContext current
       !insertmacro yabRemoveDataDirectory "$APPDATA\yab-desktop"
       ${if} $installMode == "all"
         SetShellVarContext all
@@ -148,9 +168,59 @@
 !macroend
 
 !macro customUnWelcomePage
+  !ifdef UAC_IsInnerInstance
+    Var yabUnWelcomeSeen
+    Var yabUnWelcomeResumed
+    !define MUI_PAGE_CUSTOMFUNCTION_PRE un.yabWelcomePre
+    !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.yabWelcomeLeave
+  !endif
   !define MUI_WELCOMEPAGE_TITLE "$(yabUnWelcomeTitle)"
   !insertmacro MUI_UNPAGE_WELCOME
-  UninstPage custom un.yabDataPageCreate un.yabDataPageLeave
+  !ifdef UAC_IsInnerInstance
+    Function un.yabWelcomePre
+      ${if} ${UAC_IsInnerInstance}
+      ${andIf} $yabUnWelcomeResumed != "1"
+        StrCpy $yabUnWelcomeResumed "1"
+        !insertmacro UAC_AsUser_GetGlobalVar $yabUnWelcomeSeen
+        ${if} $yabUnWelcomeSeen == "1"
+          Abort
+        ${endif}
+      ${endif}
+    FunctionEnd
+    Function un.yabWelcomeLeave
+      StrCpy $yabUnWelcomeSeen "1"
+    FunctionEnd
+  !endif
+!macroend
+
+!macro yabUninstallDataPage
+  UninstPage custom un.yabDataPageCreate
+!macroend
+
+!ifmacrondef yabUnregisteredUninstallNotice
+  !macro yabUnregisteredUninstallNotice
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(yabUnregisteredUninstall)"
+  !macroend
+!endif
+
+; These are the two InstallLocation values read by the assisted installer.
+; Its silent old-version removal also supports legacy registrations without them.
+!macro yabRequireUninstallRegistration
+  ${ifNot} ${Silent}
+    StrCpy $R0 $perUserInstallationFolder
+    ${if} ${isForAllUsers}
+    ${orIf} ${UAC_IsInnerInstance}
+      StrCpy $R0 $perMachineInstallationFolder
+    ${elseIfNot} ${isForCurrentUser}
+    ${andIf} $R0 == ""
+      StrCpy $R0 $perMachineInstallationFolder
+    ${endif}
+    ${if} $R0 == ""
+      !insertmacro yabUnregisteredUninstallNotice
+      SetErrorLevel 2
+      Quit
+    ${endif}
+  ${endif}
 !macroend
 
 !macro customUnInit

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { execFile, spawn, spawnSync } = require('child_process');
 const { extractionWithProgress, prepareInstallerProgress, uninstallerWithTheme } = require('../installer-progress.cjs');
 const newTestDirectory = require('./output.cjs').testDirectories([
   '*.bmp', '*-pixels.json', 'displays.json', 'folder-*.json', 'metrics.txt', 'path-result.txt',
@@ -102,6 +102,7 @@ Function un.testMultiUserTheme
   !insertmacro MUI_PAGE_FUNCTION_CUSTOM SHOW
 FunctionEnd
 UninstPage custom un.testMultiUserTheme
+!insertmacro yabUninstallDataPage
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE English
 !insertmacro MUI_LANGUAGE SimpChinese
@@ -313,6 +314,17 @@ test('compiled installer previews use an explicit final path without repeated ap
   const existing = path.join(scratch, 'existing-custom-folder');
   await fs.mkdir(existing);
   await fs.writeFile(path.join(existing, 'YAB.exe'), 'fixture, not an executable');
+  const manualPaths = [
+    ['', null], ['folder', null], ['C:', null], ['C:folder', null],
+    ['\\folder', null], ['C:\\', null], ['1:\\folder', null], ['C:/folder', null],
+    ['C:\\foo*bar', null], ['\\\\server', null], ['\\\\server\\', null],
+    ['\\\\\\share', null], ['\\\\server\\\\folder', null],
+    ['C:\\测试 path', 'C:\\测试 path'], ['C:\\folder\\', 'C:\\folder'],
+    ['\\\\server\\share', '\\\\server\\share'], ['\\\\server\\share\\', '\\\\server\\share'],
+    ['\\\\server\\share\\folder', '\\\\server\\share\\folder'],
+    ['\\\\?\\C:\\folder', '\\\\?\\C:\\folder'],
+    ['\\\\?\\UNC\\server\\share\\folder', '\\\\?\\UNC\\server\\share\\folder'],
+  ];
   for (const mode of [0, 1]) {
     const executable = path.join(scratch, mode === 0 ? 'preview-dark.exe' : 'preview-light.exe');
     const source = path.join(scratch, `preview-${mode}.nsi`);
@@ -372,6 +384,17 @@ Function .onInit
 FunctionEnd
 Section
   ; Preview only: no installation, registry changes or removal.
+  ReadEnvStr $R1 "YAB_PREVIEW_CHECK_INPUT"
+  @{if} $R1 == 1
+    FileOpen $2 "$EXEDIR\input-results.txt" w
+    ${manualPaths.map(([input]) => String.raw`
+      StrCpy $INSTDIR "C:\original"
+      StrCpy $0 "${input}"
+      Call yabSetDirectoryFromInput
+      FileWriteUTF16LE $2 "$1|$INSTDIR$\r$\n"`).join('\n')}
+    FileClose $2
+    Return
+  @{endif}
   ; Silent runs exercise normalization; interactive runs preserve exactly the
   ; directory shown by the real page, including manually entered locations.
   @{if} @{Silent}
@@ -384,6 +407,10 @@ Section
 SectionEnd
 `.replaceAll('@{', '${'));
     execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', source]);
+    execute(executable, ['/S'], { env: { ...process.env, YAB_PREVIEW_CHECK_INPUT: '1' } });
+    const inputResults = await fs.readFile(path.join(scratch, 'input-results.txt'), 'utf16le');
+    assert.deepEqual(inputResults.split('\r\n').slice(0, -1),
+      manualPaths.map(([, target]) => target === null ? '0|C:\\original' : `1|${target}`));
     for (const [selected, expected] of [
       [path.join(scratch, 'parent'), path.join(scratch, 'parent/YAB')],
       [path.join(scratch, 'parent/YAB'), path.join(scratch, 'parent/YAB')],
@@ -1089,15 +1116,36 @@ test('the packaged extraction template keeps builder retries and drives the real
     .replaceAll('\r\n', '\n');
   const themedUninstaller = await fs.readFile(path.join(includeDir, 'uninstaller.nsh'), 'utf8');
   for (const entry of await fs.readdir(path.dirname(templateDir), { withFileTypes: true })) {
-    if (entry.isFile() && entry.name !== 'uninstaller.nsh') {
+    if (entry.name === 'assistedInstaller.nsh') {
+      const patched = await fs.readFile(path.join(includeDir, entry.name), 'utf8');
+      const original = await fs.readFile(path.join(path.dirname(templateDir), entry.name), 'utf8');
+      assert.equal(patched.replace('  !insertmacro yabUninstallDataPage\n', '')
+        .replace('    !ifdef BUILD_UNINSTALLER\n      !insertmacro yabRequireUninstallRegistration\n    !endif\n', ''), original);
+      assert.match(patched, /!insertmacro yabUninstallDataPage\n  !insertmacro MUI_UNPAGE_INSTFILES/);
+    } else if (entry.name === 'multiUser.nsh') {
+      const patched = await fs.readFile(path.join(includeDir, entry.name), 'utf8');
+      const original = await fs.readFile(path.join(path.dirname(templateDir), entry.name), 'utf8');
+      assert.equal(patched.replace(/\n {6}StrCpy \$R5 \$R9 1 -1\n[^]*?StrCpy \$R9 \$R9 "" 1\n {6}\$\{EndIf\}/, ''), original);
+    } else if (entry.name === 'installSection.nsh') {
+      const patched = await fs.readFile(path.join(includeDir, entry.name), 'utf8');
+      const original = await fs.readFile(path.join(path.dirname(templateDir), entry.name), 'utf8');
+      const originalCalls = /^(  !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n  !insertmacro handleUninstallResult HKEY_CURRENT_USER)$/m;
+      const protectedCalls = /^\$\{andIfNot\} \$\{isUpdated\}\r?\n  !insertmacro yabCheckPersonalMigration\r?\n  \$\{if\} \$yabMigratePersonal == 1\r?\n    !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n    !insertmacro handleUninstallResult HKEY_CURRENT_USER\r?\n  \$\{endIf\}$/m;
+      assert.match(patched, protectedCalls);
+      assert.equal(patched.replace(protectedCalls, original.match(originalCalls)[0]), original);
+    } else if (entry.isFile() && entry.name !== 'uninstaller.nsh') {
       assert.deepEqual(await fs.readFile(path.join(includeDir, entry.name)),
         await fs.readFile(path.join(path.dirname(templateDir), entry.name)),
         'Retain upstream root templates so their names take precedence over NSIS built-ins.');
     }
   }
-  assert.equal(themedUninstaller, uninstallerWithTheme(uninstallerSource));
-  assert.equal(themedUninstaller.replace('!define YAB_UNINSTALLER_EARLY_THEME\n  Call un.yabInitTheme\n', ''), uninstallerSource,
-    'Early theme initialization must preserve every upstream uninstall check.');
+  const sourceWithProjectDataPolicy = uninstallerSource.replace(/  Var \/GLOBAL isDeleteAppData[^]*?(?=  DeleteRegKey SHELL_CONTEXT)/, '');
+  assert.equal(themedUninstaller, uninstallerWithTheme(sourceWithProjectDataPolicy));
+  assert.equal(themedUninstaller.replace('!define YAB_UNINSTALLER_EARLY_THEME\n  Call un.yabInitTheme\n', ''), sourceWithProjectDataPolicy,
+    'Keep process checks, shortcut cleanup and uninstall registration around the project data policy.');
+  assert.match(themedUninstaller, /!insertmacro customUnInstall\s/);
+  assert.doesNotMatch(themedUninstaller, /RMDir \/r "\$APPDATA|--delete-app-data/,
+    'Only the project hook may remove data in the account that initiated the uninstall.');
   assert.throws(() => uninstallerWithTheme(uninstallerSource.replace('Function un.onInit', 'Function un.changed')),
     /卸载器模板已变化/);
   assert.throws(() => uninstallerWithTheme(uninstallerSource + '\nFunction un.onInit\n'), /卸载器模板已变化/);
@@ -1185,6 +1233,112 @@ SectionEnd
   assert.match(report, /Retry selected\. Attempting direct extraction\./);
 });
 
+test('silent updates select only the originating registered installation', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await newTestDirectory('installer-update-scope-');
+  const template = prepareInstallerProgress(scratch);
+  const resourceRoot = path.resolve(__dirname, '../build/cache/electron-builder/nsis-resources-3.4.1');
+  const resourceFolder = (await fs.readdir(resourceRoot, { withFileTypes: true }))
+    .find(entry => entry.isDirectory() && entry.name.startsWith('nsis-resources-3.4.1-')).name;
+  const plugins = path.join(resourceRoot, resourceFolder, 'plugins/x86-unicode');
+  const section = await fs.readFile(path.join(template, 'installSection.nsh'), 'utf8');
+  const migration = section.match(/^\$\{if\} \$installMode == "all"\r?\n[^]*?uninstallOldVersion HKEY_CURRENT_USER[^]*?^\$\{endIf\}/m);
+  assert.ok(migration, 'Exercise the generated cross-scope migration condition.');
+  const source = path.join(scratch, 'scope.nsi');
+  const executable = path.join(scratch, 'scope.exe');
+  await fs.writeFile(source, String.raw`
+Unicode true
+!include LogicLib.nsh
+!addincludedir "${path.join(template, 'include')}"
+!addplugindir "${plugins}"
+!include StdUtils.nsh
+!define INSTALL_MODE_PER_ALL_USERS_REQUIRED
+!define UAC_HDR__INC
+!include "${path.join(template, 'multiUser.nsh')}"
+Var updated
+Var inner
+Var differentAccount
+Var report
+!define isUpdated '$updated == 1'
+!define UAC_IsInnerInstance '$inner == 1'
+!define UAC_SYNCREGISTERS 1
+!macro UAC_AsUser_Call type name flags
+  @{if} $differentAccount == 1
+    StrCpy $0 "S-1-0-0"
+  @{else}
+    Call :@{name}
+  @{endif}
+!macroend
+!include "${path.resolve(__dirname, '../installer-pages.nsh')}"
+!include "${path.resolve(__dirname, '../installer-update-scope.nsh')}"
+!macro uninstallOldVersion ROOT
+  FileWriteUTF16LE $report "|@{ROOT}"
+!macroend
+!macro handleUninstallResult ROOT
+!macroend
+Name "YAB update scope test"
+OutFile "${executable}"
+RequestExecutionLevel user
+SilentInstall silent
+Function .onInit
+  ReadEnvStr $perUserInstallationFolder YAB_TEST_USER_DIR
+  ReadEnvStr $perMachineInstallationFolder YAB_TEST_MACHINE_DIR
+  ReadEnvStr $inner YAB_TEST_INNER
+  ReadEnvStr $updated YAB_TEST_UPDATED
+  ReadEnvStr $differentAccount YAB_TEST_DIFFERENT_ACCOUNT
+  ; Two registrations normally leave the machine flag enabled.
+  StrCpy $hasPerMachineInstallation 1
+  StrCpy $installMode all
+  StrCpy $INSTDIR $perMachineInstallationFolder
+  !insertmacro yabSelectUpdateScope
+FunctionEnd
+Section
+  ReadEnvStr $0 YAB_TEST_SCOPE_REPORT
+  FileOpen $report $0 w
+  FileWriteUTF16LE $report "$installMode|$hasPerMachineInstallation|$INSTDIR"
+  ${migration[0]}
+  FileClose $report
+SectionEnd
+`.replaceAll('@{', '${'));
+  execute(compiler, ['/V2', source]);
+
+  const personal = path.join(scratch, 'Personal Copy');
+  const machine = path.join(scratch, 'Machine Copy');
+  for (const [name, userDir, machineDir, target, inner, updated, expected, differentAccount = 0] of [
+    ['personal', personal, machine, personal, 0, 1, `CurrentUser|0|${personal}`],
+    ['machine', personal, machine, machine, 0, 1, `all|1|${machine}`],
+    ['machine-inner', personal, machine, machine, 1, 1, `all|1|${machine}`],
+    ['personal-inner', personal, machine, personal, 1, 1, null],
+    ['old-personal', personal, '', '', 0, 1, `CurrentUser|0|${personal}`],
+    ['old-machine', '', machine, '', 0, 1, `all|1|${machine}`],
+    ['missing-target', personal, machine, '', 0, 1, null],
+    ['unknown-target', personal, machine, scratch, 0, 1, null],
+    ['same-target', personal, personal, personal, 0, 1, null],
+    ['manual-machine-reinstall', personal, machine, '', 0, 0, `all|1|${machine}`],
+    ['manual-migrate', personal, '', '', 0, 0, 'all|1||HKEY_CURRENT_USER'],
+    ['manual-migrate-elevated', personal, '', '', 1, 0, 'all|1||HKEY_CURRENT_USER'],
+    ['manual-other-account', personal, '', '', 1, 0, 'all|1|', 1],
+  ]) {
+    const report = path.join(scratch, `result-${name}.txt`);
+    const args = updated ? ['--updated', '/S', '--force-run'] : ['/S'];
+    if (target) args.push(`/D=${target}`);
+    const result = spawnSync(executable, args, {
+      windowsHide: true, timeout: 10000, env: {
+        ...process.env, YAB_TEST_USER_DIR: userDir, YAB_TEST_MACHINE_DIR: machineDir,
+        YAB_TEST_INNER: String(inner), YAB_TEST_UPDATED: String(updated), YAB_TEST_SCOPE_REPORT: report,
+        YAB_TEST_DIFFERENT_ACCOUNT: String(differentAccount),
+      },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, expected === null ? 2 : 0, name);
+    if (expected === null) await assert.rejects(fs.access(report), { code: 'ENOENT' });
+    else assert.equal(await fs.readFile(report, 'utf16le'), expected, name);
+  }
+});
+
 test('uninstall pages keep localized version text and removal status after the shared running check', {
   skip: process.platform !== 'win32',
 }, async t => {
@@ -1217,6 +1371,7 @@ OutFile "${installer}"
 RequestExecutionLevel user
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.inspectWelcome
 !insertmacro customUnWelcomePage
+!insertmacro yabUninstallDataPage
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE English
 !insertmacro MUI_LANGUAGE SimpChinese
@@ -1874,7 +2029,7 @@ ${messages.map(name => `LangString ${name} @{LANG_SIMPCHINESE} "${name}"`).join(
 Function .onInit
   ReadEnvStr $testTheme "YAB_PREVIEW_THEME"
   StrCpy $LANGUAGE @{LANG_SIMPCHINESE}
-  StrCpy $installMode "all"
+  StrCpy $installMode "current"
   StrCpy $hasPerMachineInstallation "0"
   StrCpy $hasPerUserInstallation "0"
   StrCpy $perMachineInstallationFolder ""
@@ -1915,6 +2070,14 @@ Function inspectModeShield
   Call readShield
   FileWrite $report "mode=$1$\r$\n"
   @{if} $testStep == 2
+    ; The last selection must survive Back to the license page and welcome.
+    @{NSD_GetState} $MultiUser.InstallModePage.AllUsers $0
+    FileWrite $report "returned-all=$0$\r$\n"
+    GetDlgItem $0 $HWNDPARENT 1
+    @{NSD_GetText} $0 $1
+    @{if} $1 == "$(^NextBtn)"
+      FileWrite $report "returned-next$\r$\n"
+    @{endif}
     FileClose $report
     SetErrorLevel 0
     Quit
@@ -1974,8 +2137,8 @@ SectionEnd
     execute(executable, [], { env: { ...process.env, YAB_PREVIEW_THEME: String(theme) } });
     const lines = (await fs.readFile(path.join(scratch, 'navigation.txt'), 'utf8')).trim().split(/\r?\n/);
     assert.deepEqual(lines.filter(line => !/^(bitmap|dpi|layout|dpi-reset)=/.test(line)), [
-      'welcome=0', 'license=0', 'mode=1', 'current=0', 'all=1',
-      'license=0', 'welcome=0', 'license=0', 'mode=1',
+      'welcome=0', 'license=0', 'mode=0', 'current=0', 'all=1',
+      'license=0', 'welcome=0', 'license=0', 'mode=1', 'returned-all=1', 'returned-next',
     ], 'The real install-mode callback owns the shield only while its page is visible.');
     const layouts = lines.filter(line => line.startsWith('layout=')).map(line => line.slice(7).split(',').map(Number));
     assert.deepEqual(lines.filter(line => line.startsWith('dpi-reset=')), Array(3).fill('dpi-reset=0'),
@@ -2019,6 +2182,80 @@ SectionEnd
   }
 });
 
+
+test('manual reinstall follows the selected scope and fresh directories survive Back', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const compiler = await nsisCompiler();
+  if (!compiler) return t.skip('Build the desktop installer once to populate the NSIS cache.');
+  const scratch = await newTestDirectory('reinstall-routing-');
+  const modePage = path.join(prepareInstallerProgress(scratch), 'multiUserUi.nsh');
+  const messages = new Set(Array.from((await fs.readFile(modePage, 'utf8')).matchAll(/\$\((\w+)\)/g), match => match[1]));
+  await fs.writeFile(path.join(scratch, 'messages.nsh'), [...messages].filter(name => !name.startsWith('yab'))
+    .map(name => 'LangString ' + name + ' ${LANG_ENGLISH} "' + name + '"').join('\n'));
+  execute(compiler, ['/WX', '/V2', '/INPUTCHARSET', 'UTF8', '/DPREVIEW_DIR=' + scratch, '/DMODE_PAGE=' + modePage,
+    path.join(__dirname, 'install-mode-routing.nsi')]);
+
+  const machine = path.join(scratch, 'registered machine');
+  const personal = path.join(scratch, 'registered personal');
+  const freshMachine = path.join(scratch, 'new-machine/YAB');
+  const freshPersonal = path.join(scratch, 'new-personal/YAB');
+  const chosen = path.join(scratch, 'chosen');
+  const stale = path.join(scratch, 'missing-installation');
+  for (const directory of [machine, personal]) {
+    await fs.mkdir(directory);
+    await fs.writeFile(path.join(directory, 'YAB.exe'), 'installation record fixture');
+  }
+  const scope = (name, action, shield = 0) => `scope|${action}|${shield}|${name}`;
+  const directory = folder => `directory|Install|0|${folder}`;
+  const installed = (name, folder) => `install|${name}|${folder}`;
+  async function preview(name, state, actions, expected) {
+    const settings = { scenario: name, admin: 0, inner: 0, ...state };
+    const config = ['[state]', ...Object.entries(settings).map(([key, value]) => key + '=' + value),
+      '[actions]', ...actions.map((action, index) => (index + 1) + '=' + action)];
+    // GetPrivateProfileStringW requires a BOM to read non-ASCII workspace paths.
+    await fs.writeFile(path.join(scratch, 'routing.ini'), '\uFEFF' + config.join('\r\n'), 'utf16le');
+    execute(path.join(scratch, 'routing.exe'), []);
+    const lines = (await fs.readFile(path.join(scratch, 'result-' + name + '.txt'), 'utf16le')).trim().split(/\r?\n/);
+    // Compare the button text the user sees, without accelerator markers or the stock Next arrow.
+    const visible = lines.map(line => line.replace(/^((?:scope|directory)\|)([^|]+)/, (_, prefix, caption) =>
+      prefix + caption.replaceAll('&', '').replace(/\s*>$/, '')));
+    assert.deepEqual(visible, expected, name);
+  }
+
+  await preview('current', { personal }, ['all', 'current', 'next'], [
+    scope('current', 'Reinstall'), scope('all', 'Next', 1), 'personal-migration-notice',
+    scope('current', 'Reinstall'), installed('CurrentUser', personal),
+  ]);
+  await preview('fresh', { admin: 1 }, [
+    'next', 'clear', 'back', 'next', 'edit-relative', 'back', 'next', 'edit', 'back',
+    'all', 'next', 'back', 'current', 'next', 'next',
+  ], [
+    scope('current', 'Next'), directory(freshPersonal), directory(''), scope('current', 'Next'),
+    directory(''), directory('C:unfinished/'), scope('current', 'Next'), directory('C:unfinished/'),
+    directory(chosen), scope('current', 'Next'), scope('all', 'Next'), directory(freshMachine),
+    scope('all', 'Next'), scope('current', 'Next'), directory(chosen), installed('CurrentUser', chosen),
+  ]);
+  await preview('cancel-elevation', { machine }, ['next', 'current', 'next', 'next'], [
+    scope('all', 'Reinstall', 1), 'elevation-requested', scope('all', 'Reinstall', 1),
+    scope('current', 'Next'), directory(freshPersonal), installed('CurrentUser', freshPersonal),
+  ]);
+  await preview('both', { machine, personal, admin: 1 }, ['all', 'next'], [
+    scope('current', 'Reinstall'), scope('all', 'Reinstall'), installed('all', machine),
+  ]);
+  await preview('elevated', { machine, admin: 1, inner: 1, confirmedFolder: machine }, [], [
+    installed('all', machine),
+  ]);
+  await preview('elevated-record-changed', { machine, admin: 1, inner: 1, confirmedFolder: personal }, ['next'], [
+    directory(machine), installed('all', machine),
+  ]);
+  await preview('override', { machine, admin: 1, directoryOverride: freshMachine }, ['next', 'next'], [
+    scope('all', 'Next'), directory(freshMachine), installed('all', freshMachine),
+  ]);
+  await preview('stale', { machine: stale, admin: 1 }, ['next', 'next'], [
+    scope('all', 'Next'), directory(path.join(stale, 'YAB')), installed('all', path.join(stale, 'YAB')),
+  ]);
+});
 
 test('wizard captions use the packaged icon instead of a system error fallback', {
   skip: process.platform !== 'win32',
@@ -2137,14 +2374,13 @@ Function noLaunch
 FunctionEnd
 Section
   IfSilent generateUninstaller
-  ; Keep the real progress-page message loop active without installing files.
-  StrCpy $0 0
+  ; The probe advances this page after sampling all displays. Its parent
+  ; terminates this isolated preview if sampling stalls.
   waitForProbe:
     IfFileExists "$EXEDIR\progress-complete.txt" finished
     IfFileExists "$EXEDIR\complete.txt" finished
     Sleep 50
-    IntOp $0 $0 + 1
-    IntCmp $0 600 finished waitForProbe finished
+    Goto waitForProbe
   finished:
     SetErrorLevel 0
     Goto done
@@ -2165,6 +2401,27 @@ SectionEnd
   await t.test('native wizard preserves Chinese fonts, artwork and progress', t => checkDpiPreview(t, executable));
 });
 
+function sampleDpiPreview(args) {
+  return new Promise((resolve, reject) => {
+    let stage = 'starting PowerShell';
+    let stalled = false;
+    const child = execFile('pwsh', args, { windowsHide: true }, error => {
+      clearTimeout(idle);
+      if (stalled) return reject(new Error('DPI preview stalled for 30 seconds while ' + stage));
+      if (error) return reject(error);
+      resolve();
+    });
+    const idle = setTimeout(() => {
+      stalled = true;
+      child.kill();
+    }, 30000);
+    child.stdout.setEncoding('utf8').on('data', chunk => {
+      stage = chunk.trim().split(/\r?\n/).at(-1) || stage;
+      idle.refresh();
+    });
+  });
+}
+
 async function checkDpiPreview(t, executable) {
   const probe = ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'native-dpi-probe.ps1')];
   const { SkipReason } = JSON.parse(execute('pwsh', [...probe, '-CheckDesktop']));
@@ -2179,7 +2436,7 @@ async function checkDpiPreview(t, executable) {
   });
   try {
     const report = path.join(scratch, 'displays.json');
-    execute('pwsh', [...probe,
+    await sampleDpiPreview([...probe,
       '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', report]);
     assert.equal(await completed, 0);
     const samples = JSON.parse((await fs.readFile(report, 'utf8')).replace(/^\uFEFF/, ''));

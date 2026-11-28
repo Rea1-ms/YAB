@@ -55,10 +55,69 @@ function prepareInstallerProgress(release) {
   // share names with NSIS built-ins (notably multiUser.nsh), so adding an
   // include path alone can select a different implementation.
   fs.cpSync(templateRoot, includeDir, { recursive: true });
+  // Node quotes the entire /D argument when an installation path contains
+  // spaces. The builder's raw command-line parser otherwise keeps the last quote.
+  const multiUser = fs.readFileSync(path.join(templateRoot, 'multiUser.nsh'), 'utf8');
+  const readDirectory = '      StrCpy $R9 $R8 "" $R6';
+  if (multiUser.split(readDirectory).length !== 2) throw new Error('安装器模板已变化，需要检查目录参数解析');
+  const trimQuotes = [
+    readDirectory,
+    '      StrCpy $R5 $R9 1 -1',
+    '      ${If} $R5 == \'"\'',
+    '        StrCpy $R9 $R9 -1',
+    '      ${EndIf}',
+    '      StrCpy $R5 $R9 1',
+    '      ${If} $R5 == \'"\'',
+    '        StrCpy $R9 $R9 "" 1',
+    '      ${EndIf}',
+  ].join('\n');
+  fs.writeFileSync(path.join(includeDir, 'multiUser.nsh'), multiUser.replace(readDirectory, trimQuotes));
+  const section = fs.readFileSync(path.join(templateRoot, 'installSection.nsh'), 'utf8');
+  const eol = section.includes('\r\n') ? '\r\n' : '\n';
+  const migration = [
+    '${if} $installMode == "all"',
+    '  !insertmacro uninstallOldVersion HKEY_CURRENT_USER',
+    '  !insertmacro handleUninstallResult HKEY_CURRENT_USER',
+    '${endIf}',
+  ].join(eol);
+  if (section.split(migration).length !== 2) throw new Error('安装器模板已变化，需要检查跨范围迁移');
+  const scopedMigration = [
+    '${if} $installMode == "all"',
+    '${andIfNot} ${isUpdated}',
+    '  !insertmacro yabCheckPersonalMigration',
+    '  ${if} $yabMigratePersonal == 1',
+    '    !insertmacro uninstallOldVersion HKEY_CURRENT_USER',
+    '    !insertmacro handleUninstallResult HKEY_CURRENT_USER',
+    '  ${endIf}',
+    '${endIf}',
+  ].join(eol);
+  fs.writeFileSync(path.join(includeDir, 'installSection.nsh'), section.replace(migration, scopedMigration));
   fs.writeFileSync(path.join(includeDir, 'extractAppPackage.nsh'), extractionWithProgress(source));
   const uninstaller = fs.readFileSync(path.join(templateRoot, 'uninstaller.nsh'), 'utf8');
-  fs.writeFileSync(path.join(includeDir, 'uninstaller.nsh'), uninstallerWithTheme(uninstaller));
+  // The project hook handles both the checkbox and --delete-app-data in the
+  // initiating account. The builder would clean more paths as the elevated user.
+  const dataStart = '  Var /GLOBAL isDeleteAppData';
+  const registryStart = '  DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"';
+  if (uninstaller.split(dataStart).length !== 2 || uninstaller.split(registryStart).length !== 2
+      || uninstaller.indexOf(dataStart) >= uninstaller.indexOf(registryStart)) {
+    throw new Error('卸载器模板已变化，需要检查应用数据清理范围');
+  }
+  const projectDataPolicy = uninstaller.slice(0, uninstaller.indexOf(dataStart)) + uninstaller.slice(uninstaller.indexOf(registryStart));
+  fs.writeFileSync(path.join(includeDir, 'uninstaller.nsh'), uninstallerWithTheme(projectDataPolicy));
+  const assistedInstaller = fs.readFileSync(path.join(templateRoot, 'assistedInstaller.nsh'), 'utf8');
+  fs.writeFileSync(path.join(includeDir, 'assistedInstaller.nsh'), withUninstallNavigation(assistedInstaller));
   return includeDir;
+}
+
+function withUninstallNavigation(source) {
+  const anchor = '  !insertmacro MUI_UNPAGE_INSTFILES';
+  if (source.split(anchor).length !== 2) throw new Error('卸载器模板已变化，需要检查数据确认页');
+  // Test registration before command-line scope flags can manufacture a match,
+  // and before setInstallModePerAllUsers can prompt for elevation.
+  const parameters = '    ${GetParameters} $R0';
+  if (source.split(parameters).length !== 2) throw new Error('卸载器模板已变化，需要检查安装登记读取位置');
+  return source.replace(anchor, '  !insertmacro yabUninstallDataPage\n' + anchor)
+    .replace(parameters, '    !ifdef BUILD_UNINSTALLER\n      !insertmacro yabRequireUninstallRegistration\n    !endif\n' + parameters);
 }
 
 function uninstallerWithTheme(source) {

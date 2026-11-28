@@ -95,6 +95,7 @@ module.exports = {
     fs.mkdirSync(release, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-ui.nsh'), path.join(release, 'installer-ui.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-pages.nsh'), path.join(release, 'installer-pages.nsh'));
+    fs.copyFileSync(path.join(__dirname, 'installer-update-scope.nsh'), path.join(release, 'installer-update-scope.nsh'));
     fs.copyFileSync(path.join(__dirname, 'installer-i18n.nsh'), path.join(release, 'installer-i18n.nsh'));
     fs.cpSync(path.join(__dirname, 'installer-translations'), path.join(release, 'installer-translations'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'installer-controls.nsh'), path.join(release, 'installer-controls.nsh'));

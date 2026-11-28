@@ -7,6 +7,7 @@
 !include "${__FILEDIR__}\installer-i18n.nsh"
 !include "${__FILEDIR__}\installer-controls.nsh"
 !include "${__FILEDIR__}\installer-pages.nsh"
+!include "${__FILEDIR__}\installer-update-scope.nsh"
 Var yabSidebarBitmap
 
 ; Load the high-resolution sidebar at its original size, then downsample to
@@ -117,6 +118,19 @@ Var yabSidebarBitmap
 ; multi-user page has created its controls. Custom pages call it explicitly.
 !macroundef MUI_PAGE_FUNCTION_CUSTOM
 !macro MUI_PAGE_FUNCTION_CUSTOM TYPE
+  !if "${TYPE}" == "SHOW"
+    !searchreplace YAB_SCOPE_CALLBACK "${__FUNCTION__}" "MultiUser.InstallModePre_" ""
+    !if "${YAB_SCOPE_CALLBACK}" != "${__FUNCTION__}"
+      !ifdef __UNINSTALL__
+        !define YAB_UNINSTALL_SCOPE_PAGE
+        ${NSD_OnClick} $MultiUser.InstallModePage.CurrentUser un.yabScopeChanged
+        ${NSD_OnClick} $MultiUser.InstallModePage.AllUsers un.yabScopeChanged
+      !else
+        Call yabBindScopeAction
+      !endif
+    !endif
+    !undef YAB_SCOPE_CALLBACK
+  !endif
   !if "${TYPE}" == "PRE"
     ; The same Next button survives page changes. Clear both native and custom
     ; shield state before entering a page; the install-mode radio callback
@@ -267,16 +281,37 @@ Var yabSidebarBitmap
   FunctionEnd
 !macroend
 
+!macro yabCheckAbsoluteDirectory INPUT RESULT
+  Push "${INPUT}"
+  Call yabCheckAbsoluteDirectory
+  Pop ${RESULT}
+!macroend
+
 !macro yabUIHeader
   Var yabDarkMode
   Var yabHighContrast
   !ifdef BUILD_UNINSTALLER
     !insertmacro yabThemeFunctions "un."
     !insertmacro yabCheckboxFunctions "un."
+    !ifdef YAB_UNINSTALL_SCOPE_PAGE
+      Function un.yabScopeChanged
+        Call un.InstModeChange
+        ${NSD_GetState} $MultiUser.InstallModePage.AllUsers $0
+        ${if} $0 == ${BST_CHECKED}
+          StrCpy $installMode "all"
+        ${else}
+          StrCpy $installMode "CurrentUser"
+        ${endif}
+      FunctionEnd
+    !endif
   !else
     Var yabDirectoryDialog
     Var yabDirectoryInput
-    Var yabDirectoryVisited
+    Var yabUserDirectory
+    Var yabUserDirectoryEdited
+    !ifdef MULTIUSER_INSTALLMODEPAGE
+      !insertmacro yabInstallScopeFunctions
+    !endif
     !insertmacro yabThemeFunctions ""
 
   Function yabFinalizeDirectory
@@ -322,7 +357,15 @@ Var yabSidebarBitmap
 
   Function yabDirectoryChanged
     Pop $0
-    ${NSD_GetText} $yabDirectoryInput $INSTDIR
+    !ifdef MULTIUSER_INSTALLMODEPAGE
+      ${if} $installMode == "all"
+        ${NSD_GetText} $yabDirectoryInput $yabMachineDirectory
+        StrCpy $yabMachineDirectoryEdited 1
+        Return
+      ${endif}
+    !endif
+    ${NSD_GetText} $yabDirectoryInput $yabUserDirectory
+    StrCpy $yabUserDirectoryEdited 1
   FunctionEnd
 
   Function yabBrowseDirectory
@@ -339,9 +382,12 @@ Var yabSidebarBitmap
     ${orIf} $1 == ""
       Return
     ${endif}
+    Push $INSTDIR
     StrCpy $INSTDIR $1
     Call yabFinalizeDirectory
-    ${NSD_SetText} $yabDirectoryInput $INSTDIR
+    StrCpy $1 $INSTDIR
+    Pop $INSTDIR
+    ${NSD_SetText} $yabDirectoryInput $1
     SendMessage $yabDirectoryInput ${EM_SETSEL} -1 -1
     SendMessage $yabDirectoryInput ${EM_SCROLLCARET} 0 0
   FunctionEnd
@@ -350,10 +396,24 @@ Var yabSidebarBitmap
     ${if} ${isUpdated}
       Abort
     ${endif}
-    ${if} $yabDirectoryVisited != 1
-      Call yabFinalizeDirectory
-      StrCpy $yabDirectoryVisited 1
-    ${endif}
+    !ifdef MULTIUSER_INSTALLMODEPAGE
+      ${if} $installMode == "all"
+        ${if} ${UAC_IsInnerInstance}
+          ; Treat the outer path only as the user's confirmed selection. Take
+          ; the actual write destination from the elevated scope's record.
+          !insertmacro UAC_AsUser_GetGlobalVar $yabReinstallFolder
+        ${endif}
+        StrCpy $0 $perMachineInstallationFolder
+      ${else}
+        StrCpy $0 $perUserInstallationFolder
+      ${endif}
+      Call yabReinstallTarget
+      ${if} $0 != ""
+      ${andIf} $0 == $yabReinstallFolder
+        StrCpy $INSTDIR $0
+        Abort
+      ${endif}
+    !endif
     !insertmacro MUI_HEADER_TEXT "$(yabDirectoryTitle)" "$(yabDirectorySubtitle)"
     nsDialogs::Create 1018
     Pop $yabDirectoryDialog
@@ -364,7 +424,21 @@ Var yabSidebarBitmap
     Pop $0
     ${NSD_CreateGroupBox} 0 75u 100% 44u "$(yabDirectoryGroup)"
     Pop $0
-    ${NSD_CreateDirRequest} 3% 92u 72% 14u "$INSTDIR"
+    StrCpy $1 $yabUserDirectory
+    StrCpy $2 $yabUserDirectoryEdited
+    !ifdef MULTIUSER_INSTALLMODEPAGE
+      ${if} $installMode == "all"
+        StrCpy $1 $yabMachineDirectory
+        StrCpy $2 $yabMachineDirectoryEdited
+      ${endif}
+    !endif
+    ${if} $2 != 1
+      Push $INSTDIR
+      Call yabFinalizeDirectory
+      StrCpy $1 $INSTDIR
+      Pop $INSTDIR
+    ${endif}
+    ${NSD_CreateDirRequest} 3% 92u 72% 14u "$1"
     Pop $yabDirectoryInput
     ${NSD_OnChange} $yabDirectoryInput yabDirectoryChanged
     ${NSD_CreateBrowseButton} 77% 91u 20% 16u "$(^BrowseBtn)"
@@ -374,23 +448,85 @@ Var yabSidebarBitmap
     nsDialogs::Show
   FunctionEnd
 
+  ; Accept drive-qualified paths and complete UNC shares, including their
+  ; extended-length forms. A rooted path such as \folder still needs a drive.
+  Function yabCheckAbsoluteDirectory
+    Exch $0
+    Push $1
+    StrCpy $1 $0 8
+    ${if} $1 == "\\?\UNC\"
+      StrCpy $0 $0 "" 8
+      StrCpy $0 "\\$0"
+    ${else}
+      StrCpy $1 $0 4
+      ${if} $1 == "\\?\"
+        StrCpy $0 $0 "" 4
+      ${elseIf} $1 == "\\.\"
+        Goto yab_invalid_path
+      ${endif}
+    ${endif}
+    StrCpy $1 $0 2
+    ${if} $1 == "\\"
+      StrCpy $1 $0 1 2
+      StrCmp $1 "\" yab_invalid_path
+      ${GetRoot} "$0" $1
+      StrCmp $1 "" yab_invalid_path
+    ${else}
+      System::Call 'shlwapi::PathGetDriveNumberW(w r0) i.r1'
+      StrCmp $1 -1 yab_invalid_path
+      StrCpy $1 $0 2 1
+      StrCmp $1 ":\" 0 yab_invalid_path
+    ${endif}
+    StrCpy $0 1
+    Goto yab_path_checked
+    yab_invalid_path:
+    StrCpy $0 0
+    yab_path_checked:
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; $0 is the text shown to the user. NSIS filters some characters on
+  ; assignment to $INSTDIR, so also check the actual write destination.
+  Function yabSetDirectoryFromInput
+    Push $2
+    StrCpy $2 $INSTDIR
+    StrCpy $INSTDIR $0
+    ${if} $INSTDIR != $0
+    ${andIf} "$INSTDIR\" != $0
+      StrCpy $1 0
+    ${else}
+      !insertmacro yabCheckAbsoluteDirectory $INSTDIR $1
+    ${endif}
+    ${if} $1 == 0
+      StrCpy $INSTDIR $2
+    ${endif}
+    Pop $2
+  FunctionEnd
+
   Function yabDirectoryPageLeave
     ${NSD_GetText} $yabDirectoryInput $0
-    System::Call 'shlwapi::PathIsRelativeW(w r0) i.r1'
-    ${if} $0 == ""
-    ${orIf} $1 != 0
+    Call yabSetDirectoryFromInput
+    ${if} $1 == 0
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(yabDirectoryInvalid)"
       Abort
     ${endif}
-    StrCpy $INSTDIR $0
-    ; Do not add a folder here: installation uses the path already displayed.
   FunctionEnd
   !endif
 !macroend
 
 !macro customInit
   Call yabInitTheme
-  StrCpy $yabDirectoryVisited 0
+  !ifmacrodef GetDParameter
+    !insertmacro yabSelectUpdateScope
+  !endif
+  !ifdef MULTIUSER_INSTALLMODEPAGE
+    !ifmacrodef GetDParameter
+      !insertmacro GetDParameter $yabDirectoryOverride
+    !else
+      StrCpy $yabDirectoryOverride ""
+    !endif
+  !endif
 !macroend
 
 ; The builder invokes this before architecture and elevation checks.
