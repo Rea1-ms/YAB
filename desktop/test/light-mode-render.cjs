@@ -4,12 +4,16 @@ const assert = require('node:assert/strict');
 const fs = require('fs/promises');
 const path = require('path');
 const http = require('http');
+const { once } = require('node:events');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { WindowMemoryMode, attachWindowSettings, readWindowMode } = require('../window-mode.cjs');
 const { BackendRecovery, attachBackendRecovery } = require('../backend-recovery.cjs');
 const { showMessage } = require('../message-window.cjs');
 
 app.setPath('userData', process.env.YAB_LIGHT_MODE_TEST_DATA);
+// The interactive windows in this fixture stay hidden even while receiving
+// input. Give their renderers the scheduling priority of a visible window.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function waitForPage(window, condition) {
   const deadline = Date.now() + 5000;
@@ -201,20 +205,31 @@ async function main() {
       automatic: window.automaticToast.isConnected,
       remaining: window.hoveredToast.querySelector('.toast-timer').getBoundingClientRect().width,
     }))()`), { hovered: true, focused: true, automatic: false, remaining: 0 });
-    const beforeExit = await window.webContents.executeJavaScript('window.hoveredToast.getBoundingClientRect().height');
-    await pointer({ x: 5, y: 500 });
-    const exit = await window.webContents.executeJavaScript(`(async () => {
-      await new Promise(requestAnimationFrame);
-      const animation = window.hoveredToast.getAnimations()[0];
-      if (!animation) throw new Error('Notification exit animation did not start');
-      animation.pause();
-      animation.currentTime = animation.effect.getTiming().duration / 2;
-      const result = { opacity: Number(getComputedStyle(window.hoveredToast).opacity),
-        height: window.hoveredToast.getBoundingClientRect().height,
-        nextTop: window.focusedToast.getBoundingClientRect().top };
-      animation.play();
-      return result;
+    const beforeExit = await window.webContents.executeJavaScript(`(() => {
+      const toast = window.hoveredToast;
+      window.toastExitSample = new Promise(resolve => {
+        const timeout = setTimeout(() => resolve(null), 5000);
+        toast.addEventListener('outrostart', () => {
+          // Svelte creates the actual Web Animation immediately after emitting
+          // this event. Sample in the same task, before the next painted frame.
+          queueMicrotask(() => {
+            clearTimeout(timeout);
+            const animation = toast.getAnimations().find(item => item.effect.getTiming().duration > 0);
+            if (!animation) return resolve(null);
+            animation.pause();
+            animation.currentTime = animation.effect.getTiming().duration / 2;
+            resolve({ opacity: Number(getComputedStyle(toast).opacity),
+              height: toast.getBoundingClientRect().height,
+              nextTop: window.focusedToast.getBoundingClientRect().top });
+            animation.play();
+          });
+        }, { once: true });
+      });
+      return toast.getBoundingClientRect().height;
     })()`);
+    await pointer({ x: 5, y: 500 });
+    const exit = await window.webContents.executeJavaScript('window.toastExitSample');
+    assert.ok(exit, 'Notification exit animation did not start');
     assert.ok(exit.opacity > 0 && exit.opacity < 1, JSON.stringify(exit));
     assert.ok(exit.height > 0 && exit.height < beforeExit, JSON.stringify(exit));
     assert.ok(exit.nextTop > 16 && exit.nextTop < 16 + beforeExit + 8, JSON.stringify(exit));
@@ -308,12 +323,34 @@ async function main() {
       buttons: ['开启轻量模式', '仅关闭窗口', '取消'], defaultId: 0, cancelId: 2,
       checkboxLabel: '下次不再提示', checkboxChecked: true }, { show: false, hideParentOnResponse: true });
     const waitForDialog = async owner => {
-      for (let count = 0; count < 100; count++) {
-        const dialog = BrowserWindow.getAllWindows().find(item => item !== owner);
-        if (dialog && !dialog.webContents.isLoading() && await dialog.webContents.executeJavaScript('document.querySelectorAll("button").length === 3')) return dialog;
-        await sleep(20);
-      }
-      throw new Error('Close prompt did not load');
+      // showMessage constructs the modal child synchronously. Its buttons are
+      // added later, after the renderer receives the options from the main process.
+      const [dialog] = owner.getChildWindows();
+      assert.ok(dialog, 'Close prompt was not created');
+      const contents = dialog.webContents;
+      contents.setBackgroundThrottling(false);
+      const ready = async () => {
+        if (!contents.getURL().endsWith('/message.html') || contents.isLoadingMainFrame()) {
+          await once(contents, 'did-finish-load');
+        }
+        await contents.executeJavaScript(`new Promise(resolve => {
+          const buttons = document.getElementById('buttons');
+          const observer = new MutationObserver(check);
+          function check() {
+            if (buttons.querySelectorAll('button').length !== 3) return;
+            observer.disconnect();
+            resolve(true);
+          }
+          observer.observe(buttons, { childList: true });
+          check();
+        })`);
+      };
+      let watchdog;
+      await Promise.race([ready(), new Promise((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error('Close prompt did not become ready: ' +
+          (dialog.isDestroyed() ? 'closed' : contents.getURL() + ', loading=' + contents.isLoadingMainFrame()))), 10000);
+      })]).finally(() => clearTimeout(watchdog));
+      return dialog;
     };
     // Cancelling never saves a preference and leaves the main window intact.
     let closing = mode.requestClose(window);

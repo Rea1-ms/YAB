@@ -12,7 +12,8 @@ test('runtime settings render at both widths, locate tools, save choices and rej
   delete env.ELECTRON_RUN_AS_NODE;
   const result = spawnSync(require('electron'), [path.join(__dirname, 'runtime-window-render.cjs')],
     { env, encoding: 'utf8', windowsHide: true, timeout: 30000 });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const output = [result.error?.message, result.stdout, result.stderr].filter(Boolean).join('\n');
+  assert.ok(!result.error, output);
+  assert.equal(result.status, 0, output);
   assert.match(result.stdout, /RUNTIME_UI_OK/);
 });

@@ -18,8 +18,13 @@ test('desktop messages render both themes, preserve results and theme system fil
     const env = { ...process.env, YAB_DIALOG_TEST_DATA: data, YAB_DIALOG_TEST_THEME: theme };
     delete env.ELECTRON_RUN_AS_NODE;
     const executable = require('electron');
-    const preview = spawn(executable, [path.join(__dirname, 'dialog-render.cjs')], { env, windowsHide: true, timeout: 35000 });
-    t.after(() => { if (preview.exitCode === null && preview.signalCode === null) preview.kill(); });
+    const preview = spawn(executable, [path.join(__dirname, 'dialog-render.cjs')], { env, windowsHide: true });
+    const phaseTimeout = setTimeout(() => preview.kill(), 35000);
+    preview.once('close', () => clearTimeout(phaseTimeout));
+    t.after(() => {
+      clearTimeout(phaseTimeout);
+      if (preview.exitCode === null && preview.signalCode === null) preview.kill();
+    });
     let output = '';
     let openShell;
     const shellReady = new Promise(resolve => { openShell = resolve; });
@@ -38,6 +43,8 @@ test('desktop messages render both themes, preserve results and theme system fil
     await Promise.race([shellReady, finished.then(result => {
       throw new Error(`Message preview exited before the file dialog: ${JSON.stringify(result)}\n${output}\nPreview data: ${data}`);
     })]);
+    // Give the native picker its own time to open, respond and exit.
+    phaseTimeout.refresh();
     const pixels = path.join(data, 'pixels.json');
     const probe = spawn('pwsh.exe', ['-NoProfile', '-File', path.join(__dirname, 'native-dialog-probe.ps1'),
       '-PreviewProcessId', String(preview.pid), '-Executable', executable, '-ReportPath', pixels, '-Kind', 'shell'],

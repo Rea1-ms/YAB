@@ -145,6 +145,9 @@ public static class YabDialogProbe {
                 else PostMessage(button, 0xF5, IntPtr.Zero, IntPtr.Zero);
                 return true;
             }, IntPtr.Zero);
+            // The shell preview opens exactly one picker. Its caller checks
+            // the actual cancellation and process exit separately.
+            if (kind == "shell" && samples.Count == 1) return samples;
             Thread.Sleep(25);
         }
         throw new TimeoutException("The isolated preview did not complete its message boxes. Seen: " + string.Join(" | ", visible)

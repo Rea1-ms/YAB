@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 # Only move the isolated preview supplied by the test; never change display settings.
 if (-not $CheckDesktop) {
+    [Console]::WriteLine('loading the native DPI probe')
     $preview = Get-Process -Id $PreviewProcessId
     if ($preview.Path -ne $Executable) { throw 'The preview executable does not match its process.' }
 }
@@ -136,17 +137,26 @@ public static class YabDpiProbe {
     }
     static IntPtr Find(int process, string title) {
         var watch = Stopwatch.StartNew();
+        string observed = "";
+        using var preview = Process.GetProcessById(process);
         while (watch.ElapsedMilliseconds < 10000) {
+            if (preview.HasExited) throw new InvalidOperationException("DPI preview exited with code " + preview.ExitCode + " while waiting for " + title);
             IntPtr found = IntPtr.Zero;
+            var titles = new List<string>();
             EnumWindows((window, state) => {
                 uint owner; GetWindowThreadProcessId(window, out owner);
-                if (owner == process && Title(window) == title) found = window;
+                if (owner == process) {
+                    string caption = Title(window);
+                    titles.Add("[" + caption + "]");
+                    if (caption == title) found = window;
+                }
                 return true;
             }, IntPtr.Zero);
+            observed = titles.Count == 0 ? "no top-level windows" : String.Join(", ", titles);
             if (found != IntPtr.Zero) { Thread.Sleep(160); return found; }
             Thread.Sleep(25);
         }
-        throw new TimeoutException("The isolated DPI preview did not reach " + title);
+        throw new TimeoutException("The isolated DPI preview did not reach " + title + ". Observed: " + observed);
     }
     static int[] Bounds(IntPtr window, IntPtr parent) {
         if (window == IntPtr.Zero) return null;
@@ -226,11 +236,13 @@ public static class YabDpiProbe {
             if (monitors.Count == 0) throw new InvalidOperationException("No active monitors.");
             var samples = new List<YabDpiSample>();
             foreach (string page in new string[] { "sidebar", "progress", "finish" }) {
+                Console.WriteLine("waiting for the " + page + " page");
                 IntPtr window = Find(process, "YAB-DPI-PREVIEW:" + page);
                 Rect original; GetWindowRect(window, out original);
                 var initial = Read(window, page, -1);
                 for (int pass = 0; pass < 4; ++pass) {
                     for (int index = 0; index < monitors.Count; ++index) {
+                        Console.WriteLine("sampling " + page + ", pass " + (pass + 1) + "/4, display " + (index + 1) + "/" + monitors.Count);
                         Rect target = monitors[index];
                         if (!SetWindowPos(window, IntPtr.Zero, target.Left + 20, target.Top + 20, 0, 0, 0x15))
                             throw new InvalidOperationException("Cannot move isolated preview.");
@@ -258,6 +270,8 @@ if ($CheckDesktop) {
 }
 try {
     [YabDpiProbe]::Run($PreviewProcessId, (Split-Path $ReportPath)) | ConvertTo-Json -Depth 5 -AsArray | Set-Content -LiteralPath $ReportPath -Encoding utf8
+    [Console]::WriteLine('waiting for the preview to close')
+    if (-not $preview.WaitForExit(10000)) { throw 'The finish page did not close the isolated DPI preview.' }
 } finally {
     # This marker ends the preview's inert section; it never installs anything.
     Set-Content -LiteralPath (Join-Path (Split-Path $Executable) 'complete.txt') -Value 'complete' -Encoding utf8

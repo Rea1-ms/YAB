@@ -10,6 +10,16 @@ const { loadRuntimeSettings } = require('../runtime-settings.cjs');
 
 app.setPath('userData', process.env.YAB_RUNTIME_UI_TEST_DATA);
 app.disableHardwareAcceleration();
+// Exercise foreground settings behavior without bringing a window onto the CI desktop.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+const started = Date.now();
+const progress = message => console.log(`[${Date.now() - started} ms] ${message}`);
+app.on('web-contents-created', (_event, contents) => {
+  contents.setBackgroundThrottling(false);
+  contents.on('did-finish-load', () => progress(`窗口 ${contents.id} 已加载 ${contents.getURL()}`));
+  contents.on('console-message', event => progress(`窗口 ${contents.id}：${event.message}`));
+  contents.on('render-process-gone', (_event, details) => progress(`窗口 ${contents.id} 的渲染进程已退出：${details.reason}`));
+});
 app.on('window-all-closed', () => {});
 async function until(window, predicate) {
   for (let count = 0; count < 100; count++) {
@@ -18,13 +28,14 @@ async function until(window, predicate) {
   }
   throw new Error('设置界面等待超时：' + predicate);
 }
+progress('等待桌面运行环境就绪');
 app.whenReady().then(async () => {
   const scratch = app.getPath('userData');
   const options = { userData: scratch, configRoot: path.join(scratch, 'config'), bundle: path.join(scratch, 'bundle'),
     bundled: false, initial: true, show: false };
+  progress('首次打开设置，读取系统工具');
   const saved = openRuntimeWindow(options);
   const window = BrowserWindow.getAllWindows()[0];
-  window.webContents.on('console-message', event => console.log('renderer:', event.message));
   if (window.webContents.isLoading()) await new Promise(resolve => window.webContents.once('did-finish-load', resolve));
   await until(window, "document.getElementById('save')?.disabled === false");
   const initial = await window.webContents.executeJavaScript(`({
@@ -36,6 +47,7 @@ app.whenReady().then(async () => {
   assert.ok(initial.path.endsWith('uv.exe') && initial.readonly && initial.version.startsWith('版本：'));
   assert.equal(initial.status, '');
   for (const width of [720, 580]) {
+    progress(`检查 ${width} 像素布局`);
     window.setSize(width, 640);
     await window.webContents.executeJavaScript("document.getElementById('tool').value='custom'; document.getElementById('tool').dispatchEvent(new Event('change'))");
     await until(window, "!document.getElementById('save').disabled");
@@ -74,18 +86,22 @@ app.whenReady().then(async () => {
     assert.ok(state.body <= state.width && state.field.right < state.width);
     assert.ok(state.field.width > state.width - 80);
     if (process.env.YAB_RUNTIME_UI_CAPTURE) {
+      progress(`截取 ${width} 像素设置页`);
       await delay(200);
       await fs.writeFile(path.join(scratch, `settings-${width}.png`), (await window.webContents.capturePage()).toPNG());
     }
   }
+  progress('检查无效工具路径');
   await window.webContents.executeJavaScript("document.getElementById('save').click()");
   await until(window, "document.getElementById('status').classList.contains('error')");
   assert.equal((await loadRuntimeSettings(options.configRoot, scratch, false)).configured, false);
+  progress('检查其他窗口的设置请求');
   const other = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true,
     preload: path.resolve(__dirname, '../runtime-preload.cjs') } });
   await other.loadURL('data:text/html,<html><body>untrusted page</body></html>');
   assert.equal(await other.webContents.executeJavaScript("window.runtimeSettings.get().then(() => false, () => true)"), true);
   other.destroy();
+  progress('重新定位系统工具');
   await window.webContents.executeJavaScript("document.getElementById('detect').click()");
   await until(window, "!document.getElementById('save').disabled && document.getElementById('tool').value === 'system'");
   const detected = await window.webContents.executeJavaScript("({path: document.getElementById('location').value, readonly: document.getElementById('location').readOnly, version: document.getElementById('tool-version').textContent, status: document.getElementById('status').textContent})");
@@ -93,31 +109,39 @@ app.whenReady().then(async () => {
   assert.ok(detected.readonly && detected.version.startsWith('版本：'));
   assert.equal(detected.status, '');
   if (process.env.YAB_RUNTIME_UI_CAPTURE) {
+    progress('截取系统工具定位结果');
     await fs.writeFile(path.join(scratch, 'settings-detected.png'), (await window.webContents.capturePage()).toPNG());
   }
+  progress('保存设置');
   await window.webContents.executeJavaScript("document.getElementById('index').value = 'tsinghua'; document.getElementById('save').click()");
   assert.equal((await saved).index, 'tsinghua');
   assert.equal((await loadRuntimeSettings(options.configRoot, scratch)).settings.uvMode, 'system');
+  progress('准备内置工具');
   await fs.mkdir(path.join(options.bundle, 'toolkit'), { recursive: true });
   await fs.copyFile(detected.path, path.join(options.bundle, 'toolkit/uv.exe'));
+  progress('重新打开设置并验证工具切换');
   const editing = openRuntimeWindow({ ...options, bundled: true, initial: false });
   const editWindow = BrowserWindow.getAllWindows()[0];
   if (editWindow.webContents.isLoading()) await new Promise(resolve => editWindow.webContents.once('did-finish-load', resolve));
   await until(editWindow, "document.getElementById('save')?.disabled === false");
   assert.equal(await editWindow.webContents.executeJavaScript("document.getElementById('index').value"), 'tsinghua');
   assert.equal(await editWindow.webContents.executeJavaScript("document.getElementById('save').textContent"), '保存');
+  progress('检查内置工具');
   await editWindow.webContents.executeJavaScript("document.getElementById('tool').value='bundled'; document.getElementById('tool').dispatchEvent(new Event('change'))");
   await until(editWindow, "!document.getElementById('save').disabled");
   assert.equal(await editWindow.webContents.executeJavaScript("document.getElementById('location').value"), path.join(options.bundle, 'toolkit/uv.exe'));
+  progress('检查自定义工具初始路径');
   await editWindow.webContents.executeJavaScript("document.getElementById('tool').value='custom'; document.getElementById('tool').dispatchEvent(new Event('change'))");
   await until(editWindow, "!document.getElementById('save').disabled");
   assert.equal(await editWindow.webContents.executeJavaScript("document.getElementById('location').value"), '');
+  progress('从手填工具切到系统工具');
   await editWindow.webContents.executeJavaScript(`document.getElementById('location').value=${JSON.stringify(detected.path)}; document.getElementById('location').dispatchEvent(new Event('input')); document.getElementById('tool').value='system'; document.getElementById('tool').dispatchEvent(new Event('change'))`);
   await until(editWindow, "!document.getElementById('save').disabled");
   await editWindow.webContents.executeJavaScript("document.getElementById('tool').value='custom'; document.getElementById('tool').dispatchEvent(new Event('change'))");
   await until(editWindow, "!document.getElementById('save').disabled");
   assert.equal(await editWindow.webContents.executeJavaScript("({path: document.getElementById('location').value, readonly: document.getElementById('location').readOnly}).readonly"), false);
   assert.equal(await editWindow.webContents.executeJavaScript("document.getElementById('location').value"), detected.path);
+  progress('关闭设置页');
   editWindow.close();
   assert.equal(await editing, null);
   console.log('RUNTIME_UI_OK ' + scratch);

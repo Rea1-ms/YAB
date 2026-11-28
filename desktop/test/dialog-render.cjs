@@ -3,10 +3,14 @@ const { app, BrowserWindow, dialog, nativeTheme, session } = require('electron')
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
+const { once } = require('node:events');
 const { setTimeout: delay } = require('timers/promises');
 const { showMessage } = require('../message-window.cjs');
 app.setPath('userData', process.env.YAB_DIALOG_TEST_DATA);
 app.disableHardwareAcceleration();
+// The hidden preview should start its renderer at the same priority as a
+// visible message. Timer throttling alone does not control process priority.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.on('window-all-closed', () => {});
 const timeline = [];
 app.on('web-contents-created', (_event, contents) => {
@@ -23,9 +27,20 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('render-process-gone', (_event, details) => record('render-process-gone', details));
 });
 async function ready(window) {
+  const contents = window.webContents;
   const deadline = Date.now() + 10000;
+  // Wait for the local page before polling its buttons. Both stages share
+  // the original deadline, including a renderer that never answers a query.
+  if (contents.isLoading()) {
+    try {
+      await once(contents, 'did-stop-loading', { signal: AbortSignal.timeout(10000) });
+    } catch (error) {
+      if (error.name !== 'AbortError') throw error;
+    }
+  }
+  const waitingFor = contents.isLoading() ? 'navigation' : 'message buttons';
   let watchdog;
-  const initialized = await Promise.race([
+  const initialized = waitingFor === 'message buttons' && await Promise.race([
     (async () => {
       while (Date.now() < deadline) {
         if (window.isDestroyed()) throw new Error('Message preview closed before becoming ready');
@@ -34,11 +49,10 @@ async function ready(window) {
       }
       return false;
     })(),
-    new Promise(resolve => { watchdog = setTimeout(() => resolve(false), 10000); }),
+    new Promise(resolve => { watchdog = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())); }),
   ]).finally(() => clearTimeout(watchdog));
   if (initialized) return;
-  const contents = window.webContents;
-  const state = { url: contents.getURL(), loading: contents.isLoading(), mainFrameLoading: contents.isLoadingMainFrame() };
+  const state = { waitingFor, url: contents.getURL(), loading: contents.isLoading(), mainFrameLoading: contents.isLoadingMainFrame() };
   // A renderer stuck during navigation may not answer even a diagnostic query.
   // Preserve the main-process evidence before attempting a bounded page read.
   const report = path.join(app.getPath('userData'), 'readiness-failure.json');
@@ -49,8 +63,25 @@ async function ready(window) {
     delay(300).then(() => ({ error: 'Renderer did not answer the diagnostic query' })),
   ]);
   fs.writeFileSync(report, JSON.stringify({ state, timeline }, null, 2));
-  throw new Error('Message preview did not become ready within 10 seconds: ' + JSON.stringify({ state, timeline, report }));
+  throw new Error('Message preview timed out waiting for ' + waitingFor + ': ' + JSON.stringify({ state, timeline, report }));
 }
+
+async function captureMessage(window) {
+  const deadline = Date.now() + 2000;
+  while (true) {
+    try {
+      return await window.webContents.capturePage(undefined, { stayHidden: true });
+    } catch (error) {
+      // Chromium may not have submitted a compositor frame when the DOM is ready.
+      if (error.message !== 'UnknownVizError') throw error;
+      if (Date.now() >= deadline) {
+        throw new Error('Message preview did not produce a compositor frame within 2 seconds', { cause: error });
+      }
+      await delay(50);
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onErrorOccurred(details => {
     timeline.push({ at: Date.now(), id: details.webContentsId, event: 'resource-error', url: details.url, error: details.error });
@@ -76,9 +107,7 @@ app.whenReady().then(async () => {
     assert.equal(state.focus, '重试');
     assert.equal(state.overflow, false);
     assert.equal(state.role, 'alertdialog');
-    // A loaded DOM can precede the first compositor frame on a busy desktop.
-    await delay(250);
-    const image = await window.webContents.capturePage(undefined, { stayHidden: true });
+    const image = await captureMessage(window);
     fs.writeFileSync(path.join(app.getPath('userData'), `message-${theme}.png`), image.toPNG());
     const bitmap = image.toBitmap();
     const offset = (10 * image.getSize().width + 10) * 4;
